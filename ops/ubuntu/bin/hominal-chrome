@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+install -d -m 0750 -o zhyuzh -g zhyuzh /agent/state/profiles/chrome
+
+# A forced reboot can leave Chrome's singleton symlinks behind. Only remove
+# those exact stale locks when this user has no live Chrome process.
+if ! pgrep -u "$(id -u)" -x chrome >/dev/null 2>&1; then
+  rm -f -- \
+    /agent/state/profiles/chrome/SingletonCookie \
+    /agent/state/profiles/chrome/SingletonLock \
+    /agent/state/profiles/chrome/SingletonSocket
+fi
+
+exec /usr/bin/google-chrome \
+  --user-data-dir=/agent/state/profiles/chrome \
+  --remote-debugging-address=127.0.0.1 \
+  --remote-debugging-port=9222 \
+  --password-store=basic \
+  --hide-crash-restore-bubble \
+  --no-first-run \
+  --disable-default-apps \
+  "$@"

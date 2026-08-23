@@ -1,0 +1,7 @@
+[Unit]
+Description=Create a persistent Hominal agent generation backup
+RequiresMountsFor=/agent
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/hominal-agent-backup scheduled

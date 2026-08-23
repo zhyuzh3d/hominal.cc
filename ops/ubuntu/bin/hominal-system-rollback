@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+snapshot=/dev/ubuntu-vg/system-baseline
+recovery_root=/agent/recovery/system-baseline
+marker=/agent/recovery/recreate-system-baseline
+
+check_ready() {
+  lvs "$snapshot" >/dev/null
+  test -d "$recovery_root/boot"
+  test -d "$recovery_root/efi"
+  mountpoint -q /agent
+  mountpoint -q /boot
+  mountpoint -q /boot/efi
+}
+
+if [[ ${1:-} == --check ]]; then
+  check_ready
+  lvs -o lv_name,origin,lv_size,lv_attr,snap_percent "$snapshot"
+  printf 'System rollback prerequisites are ready.\n'
+  exit 0
+fi
+
+if [[ ${1:-} != --confirm ]]; then
+  printf 'Usage: %s --check | --confirm\n' "$0" >&2
+  exit 2
+fi
+
+check_ready
+/usr/local/sbin/hominal-agent-backup pre-system-rollback
+rsync -aHAX --numeric-ids --delete --exclude='/efi/' "$recovery_root/boot/" /boot/
+rsync -aHAX --numeric-ids --delete "$recovery_root/efi/" /boot/efi/
+touch "$marker"
+sync
+lvconvert --merge "$snapshot"
+systemctl reboot

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Hominal Agent Session Bootstrap
+Comment=Prepare the persistent GUI session and start the deployed agent when available
+Exec=/usr/local/bin/hominal-session-bootstrap
+OnlyShowIn=XFCE;
+X-GNOME-Autostart-enabled=true
+Terminal=false

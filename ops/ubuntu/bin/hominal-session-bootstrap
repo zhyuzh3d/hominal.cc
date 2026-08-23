@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -u
+
+state_root=/agent/state
+log_dir="$state_root/logs"
+agent_start=/agent/app/current/start
+
+mkdir -p "$log_dir"
+xrandr --output HDMI-1 --mode 1920x1080 --rate 60 >/dev/null 2>&1 || true
+xset s off >/dev/null 2>&1 || true
+xset -dpms >/dev/null 2>&1 || true
+xset s noblank >/dev/null 2>&1 || true
+
+if [[ -x "$agent_start" ]]; then
+  nohup "$agent_start" >>"$log_dir/agent-session.log" 2>&1 &
+else
+  printf '%s agent start file is not present: %s\n' "$(date --iso-8601=seconds)" "$agent_start" >>"$log_dir/agent-session.log"
+fi

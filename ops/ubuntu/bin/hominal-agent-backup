@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+reason=${1:-manual}
+safe_reason=$(printf '%s' "$reason" | tr -cs 'A-Za-z0-9._-' '_')
+generation_root=/agent/generations
+stamp=$(date -u +%Y%m%dT%H%M%SZ)
+generation_name="${stamp}-${safe_reason}"
+temporary="$generation_root/.${generation_name}.tmp"
+destination="$generation_root/$generation_name"
+latest="$generation_root/latest"
+
+install -d -m 0750 -o zhyuzh -g zhyuzh "$generation_root"
+rm -rf -- "$temporary"
+install -d -m 0750 -o zhyuzh -g zhyuzh "$temporary/app" "$temporary/state"
+
+app_link_options=()
+state_link_options=()
+if [[ -L "$latest" ]] && [[ -d "$latest" ]]; then
+  app_link_options=(--link-dest="$latest/app")
+  state_link_options=(--link-dest="$latest/state")
+fi
+
+rsync -aHAX --numeric-ids --delete "${app_link_options[@]}" /agent/app/ "$temporary/app/"
+rsync -aHAX --numeric-ids --delete \
+  --exclude='Cache/' --exclude='Code Cache/' --exclude='GPUCache/' --exclude='Crashpad/' \
+  "${state_link_options[@]}" /agent/state/ "$temporary/state/"
+
+{
+  printf 'generation=%s\n' "$generation_name"
+  printf 'created_at=%s\n' "$(date --iso-8601=seconds)"
+  printf 'reason=%s\n' "$reason"
+  printf 'host=%s\n' "$(hostname)"
+} >"$temporary/manifest.txt"
+
+chown -R zhyuzh:zhyuzh "$temporary"
+mv -- "$temporary" "$destination"
+ln -sfn "$generation_name" "$latest"
+printf '%s\n' "$destination"

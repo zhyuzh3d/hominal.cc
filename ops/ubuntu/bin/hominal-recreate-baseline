@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+snapshot=/dev/ubuntu-vg/system-baseline
+origin=/dev/ubuntu-vg/ubuntu-lv
+marker=/agent/recovery/recreate-system-baseline
+
+if lvs "$snapshot" >/dev/null 2>&1; then
+  snapshot_attr=$(lvs --noheadings -o lv_attr "$snapshot" | tr -d ' ')
+  if [[ ${snapshot_attr:0:1} == s ]]; then
+    rm -f -- "$marker"
+    exit 0
+  fi
+
+  if [[ ${snapshot_attr:0:1} == S ]]; then
+    if grep -qx 'finalize-merge-reboot' "$marker" 2>/dev/null; then
+      printf 'Snapshot merge is still pending after the finalize reboot: %s\n' "$snapshot" >&2
+      exit 1
+    fi
+
+    printf 'finalize-merge-reboot\n' >"$marker"
+    systemctl --no-block reboot
+    exit 0
+  fi
+fi
+
+if lvs "$snapshot" >/dev/null 2>&1; then
+  printf 'Snapshot merge did not finish within the expected time: %s\n' "$snapshot" >&2
+  exit 1
+fi
+
+sync
+lvcreate --snapshot --size 40G --name system-baseline "$origin"
+lvchange --monitor y "$snapshot" || true
+vgcfgbackup -f /agent/recovery/system-baseline/ubuntu-vg.vgcfg ubuntu-vg
+rm -f -- "$marker"

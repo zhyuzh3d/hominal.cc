@@ -1,0 +1,12 @@
+[Unit]
+Description=Recreate the Hominal root baseline snapshot after a rollback
+After=local-fs.target
+Before=display-manager.service
+ConditionPathExists=/agent/recovery/recreate-system-baseline
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/hominal-recreate-baseline
+
+[Install]
+WantedBy=multi-user.target

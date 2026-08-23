@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Hominal Ubuntu GUI Acceptance</title>
+    <style>
+      :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+      body { min-height: 100vh; margin: 0; display: grid; place-items: center; background: #10151d; color: #edf3ff; }
+      main { width: min(720px, 82vw); padding: 42px; border: 1px solid #344258; border-radius: 18px; background: #182130; box-shadow: 0 20px 70px #0008; }
+      h1 { margin-top: 0; color: #83b9ff; }
+      code { color: #9ee6b8; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Ubuntu GUI 运行环境已启动</h1>
+      <p>Chrome 正在真实 Xorg <code>:0</code> 桌面中渲染本地开发页面。</p>
+      <p id="status">JavaScript：等待检测</p>
+    </main>
+    <script>document.querySelector('#status').textContent = 'JavaScript：运行正常 · ' + new Date().toLocaleString();</script>
+  </body>
+</html>
