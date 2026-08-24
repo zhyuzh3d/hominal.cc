@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+desktop_uid=$(stat -c '%u' /agent/state/profiles/chrome)
+desktop_record=$(getent passwd "$desktop_uid")
+desktop_user=$(cut -d: -f1 <<<"$desktop_record")
+desktop_home=$(cut -d: -f6 <<<"$desktop_record")
+
+if [[ $(id -u) -eq 0 ]]; then
+  exec runuser -u "$desktop_user" -- "$0" "$@"
+fi
+
+if [[ $(id -u) -ne "$desktop_uid" ]]; then
+  printf 'hominal-playwright-mcp must run as desktop UID %s or root.\n' "$desktop_uid" >&2
+  exit 1
+fi
+
+workspace=${HOMINAL_WORKSPACE:-/agent/app/hominal.cc}
+cd "$workspace"
+
+export DISPLAY=:0
+export XAUTHORITY="$desktop_home/.Xauthority"
+export HOME="$desktop_home"
+
+install -d -m 0750 /agent/state/logs /agent/state/artifacts/playwright-mcp
+
+if ! curl -fsS http://127.0.0.1:9222/json/version >/dev/null 2>&1; then
+  nohup /usr/local/bin/hominal-chrome \
+    file:///agent/app/hominal.cc/ops/ubuntu/acceptance/index.html \
+    >>/agent/state/logs/chrome.log 2>&1 &
+
+  for _ in {1..50}; do
+    curl -fsS http://127.0.0.1:9222/json/version >/dev/null 2>&1 && break
+    sleep 0.2
+  done
+fi
+
+if ! curl -fsS http://127.0.0.1:9222/json/version >/dev/null 2>&1; then
+  printf 'Chrome CDP endpoint did not become ready at 127.0.0.1:9222.\n' >&2
+  exit 1
+fi
+
+exec /agent/state/development/npm-global/bin/playwright-mcp \
+  --cdp-endpoint=http://127.0.0.1:9222 \
+  --output-dir=/agent/state/artifacts/playwright-mcp \
+  "$@"

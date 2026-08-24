@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "playwright-current-chrome": {
+      "command": "/usr/local/bin/hominal-playwright-mcp"
+    }
+  }
+}
