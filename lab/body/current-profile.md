@@ -1,7 +1,7 @@
 # G0 目标身体当前事实快照
 
-> 状态：阶段一目标身体快照；正式创生时由 Genesis Lab 重新探测并生成该代 Birth Manifest  
-> 事实时间：2026-08-24 15:03:22 +08:00  
+> 状态：阶段二完成后的目标身体快照；正式创生时重新探测并生成该代 Birth Manifest
+> 事实时间：2026-08-24 19:25:49 +08:00
 > 事实来源：上层 `xconfig.yaml` 与目标 Ubuntu 设备实时读取
 
 ## 创生身份字段
@@ -32,7 +32,7 @@
 | 根卷可用空间 | 约 100.7 GiB |
 | agent 生命卷 | `ubuntu-vg/agent`，`ext4`，40 GiB，挂载于 `/agent` |
 | agent 卷可用空间 | 约 37.7 GiB |
-| 根卷恢复快照 | 唯一快照 `ubuntu-vg/system-baseline`，40 GiB COW，当前数据占用约 0.14% |
+| 根卷恢复快照 | 唯一快照 `ubuntu-vg/system-baseline`，40 GiB COW；真实 merge 后于 2026-08-24 19:23 自动重建 |
 | LVM 未分配空间 | 约 12.52 GiB |
 | 恢复启动介质 | SanDisk 29.3 GiB SystemRescue 优盘，已完成实机 UEFI 启动与只读恢复检查 |
 | 时区 | Asia/Shanghai |
@@ -46,7 +46,7 @@
 
 当前项目目录是开发同步位置。正式 Hominal 发布包规划部署到 `/agent/releases/`，生命状态规划保存在 `/agent/lives/`。完整存储、部署与恢复设计见 [项目架构](../../docs/project-architecture.md)。
 
-阶段一将在正式创生前建立可由 alice 自主使用的 root 通道，并由实时身体探针更新这一事实。
+`hominal.service` 已安装并以 root 运行当前实例；没有活动实例时由 systemd 条件保持静止。正式创生时仍由实时身体探针更新这一事实。
 
 ## 身体工具与网络
 

@@ -1,7 +1,7 @@
 # Hominal 创生实验八阶段实施计划 v0.5
 
 > 文档性质：创生 MVP 的工程实施与代际实验计划  
-> 当前状态：G0 阶段一已冻结；准备进入阶段二  
+> 当前状态：G0 阶段一、阶段二已完成；准备进入阶段三
 > 规范术语：[Hominal 统一核心术语表 v2.3](./core-vocabulary.md)  
 > 产品理论：[Hominal 数字生命创生：产品设计理论与最小框架 v1.3](./product-theory.md)  
 > 动力学基线：[Hominal 最小认知动力学核心 v0.3](./cognitive-dynamics.md)  
@@ -559,45 +559,45 @@ docs/mvp-architecture.md
 
 ### 阶段二：可重复 Ubuntu 身体与 Genesis Lab
 
+本阶段的最小实现与实际执行状态见 [G0 阶段二开发计划](../plans/g0-stage-2-ubuntu-body-and-genesis-lab.md)。
+
 **目的**
 
-先建立真实身体和可重复出生能力，再开发具身认知。避免在 macOS 假环境中设计完成后才发现 Ubuntu、浏览器、网络和快照约束不同。
+用最少基础设施建立能够快速反复使用的真实 Ubuntu 身体循环，再开发具身认知。
 
 **工作内容**
 
-- 准备专属 Ubuntu 基础镜像和可重复恢复方式；
-- 建立本地仓库到目标设备的受控开发同步，沿用现有 Mutagen 工作流但不把本地秘密提交 Git；
-- 确认 root、Shell、文件、进程、网络和 Chrome/Chromium 能力；
-- 建立模型凭据与番茄账号会话的代际注入方式；
-- 实现 Genesis Lab 的部署、启动、停止、最终磁盘快照和下一代重建；
-- 实现 Birth Manifest 生成；
-- 建立最小导师消息中继。
+- 用极小机械测试体贯通构建、部署、重启自启、持续运行、停止保存和重置；
+- 确认 root、网络、模型、Chrome/Playwright MCP 和微信当前可用；
+- 保留现有 Mutagen 开发路径，以冻结构建包部署到正式 `/agent` 目录；
+- 保存足以判断失败和支持下一次重构的实例终态与 systemd 日志；
+- 完成一次真实根卷 LVM 恢复。
 
 **交付物**
 
 ```text
-lab/bootstrap/
-lab/genesisctl
-lab/base-image-manifest.json
-lab/templates/birth-manifest.schema.json
+lab/run.py
+cmd/stage2-fixture/
+deploy/hominal-launcher
 deploy/hominal.service
 ```
 
 **工程决定**
 
-- 正式运行环境从此阶段起始终是目标 Ubuntu；
-- `systemd` 使用 `Restart=always` 和短暂退避维持连续运行；实验结束由 Genesis Lab 明确停止服务并记录终止原因；
-- Hominal 拥有 root，可修改或禁用服务和日志；
-- 基础镜像与代际快照位于当前活动身体之外，避免运行中的 root 意外破坏下一代出生能力；
-- 外部镜像不是行为沙箱，只服务于实验重建。
+- 正式运行环境是目标 Ubuntu；
+- `systemd` 维持异常退出后的连续运行，外部脚本负责明确停止和重置；
+- Hominal 进程以 root 运行；
+- 根卷使用唯一 LVM 基线，实例状态位于独立 agent 卷并在结束时离机保存；
+- 不为阶段二建设观察数据库、复杂状态机和多层实验 Schema。
 
 **退出门**
 
-- 同一基础镜像能够连续重建两次并得到相同初始系统清单；
-- root、浏览器、网络、模型和账号分别完成真实动作验证；
-- Genesis Lab 能从外部停止设备并保存可读取快照；
-- Birth Manifest 与真实设备、额度和账号状态一致；
-- 不依赖尚未实现的 Hominal 内核也能完成全套部署与回收。
+- 一条命令能够构建、部署并重启进入新实例；
+- 测试体开机自启、持续心跳、崩溃恢复和明确停止均通过；
+- root、网络、模型、Chrome/Playwright MCP 和微信得到真实验证；
+- 实例能够离机保存，reset 后能够启动没有前代生命状态的新实例；
+- 完成一次真实 LVM 合并和恢复后启动；
+- 全链不依赖尚未实现的 Hominal 认知内核。
 
 ### 阶段三：生命运行脊柱
 

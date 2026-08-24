@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+agent_mount=/agent
+active_file=$agent_mount/boot/active-instance
+
+mountpoint -q "$agent_mount"
+test -s "$active_file"
+
+instance_id=$(tr -d '\r\n' <"$active_file")
+[[ "$instance_id" =~ ^[A-Za-z0-9._-]+$ ]]
+
+instance_root=$agent_mount/lives/$instance_id
+executable=$instance_root/body/bin/hominald
+test -x "$executable"
+
+export HOMINAL_INSTANCE_ID="$instance_id"
+export HOMINAL_INSTANCE_ROOT="$instance_root"
+exec "$executable"

@@ -5,3 +5,4 @@
 当前计划：
 
 - [G0 阶段一：创生契约与架构冻结](./g0-stage-1-genesis-contract.md)
+- [G0 阶段二：可重复 Ubuntu 身体与 Genesis Lab](./g0-stage-2-ubuntu-body-and-genesis-lab.md)
