@@ -35,4 +35,5 @@ if [[ $(rfb_banner) != RFB* ]]; then
 fi
 
 printf 'VNC tunnel ready at 127.0.0.1:%s\n' "$local_port"
+printf 'If macOS asks for authentication, enter the Ubuntu system password.\n'
 open "vnc://127.0.0.1:${local_port}"

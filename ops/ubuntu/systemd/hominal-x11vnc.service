@@ -6,7 +6,7 @@ RequiresMountsFor=/agent
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/x11vnc -display :0 -auth guess -forever -shared -localhost -rfbport 5900 -nopw -noxdamage -repeat
+ExecStart=/usr/bin/x11vnc -display :0 -auth guess -forever -shared -localhost -rfbport 5900 -rfbauth /agent/state/security/x11vnc.pass -noxdamage -repeat
 Restart=always
 RestartSec=3
 
