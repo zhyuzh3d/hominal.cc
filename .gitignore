@@ -1,0 +1,25 @@
+.DS_Store
+
+# Local configuration and credentials must never enter this repository.
+# The canonical file currently lives outside the worktree at ../xconfig.yaml;
+# these rules also block accidental copies made anywhere inside the worktree.
+**/xconfig.yaml
+**/xconfig.yml
+**/xconfig.*.yaml
+**/xconfig.*.yml
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.sample
+**/credentials.json
+**/secrets.yaml
+**/secrets.yml
+**/*.pem
+**/*.key
+
+# Lab runtime and raw evidence stay outside version control.
+/.lab-runtime/
+/.lab-data/
+
+# Reproducible build artifacts are regenerated from frozen source.
+/dist/
