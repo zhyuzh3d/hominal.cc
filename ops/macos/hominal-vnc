@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ssh_host=${HOMINAL_SSH_HOST:-hominal-cc1-server}
+local_port=${HOMINAL_VNC_PORT:-15900}
+
+rfb_banner() {
+  # Keep stdin open briefly. If nc receives immediate EOF, x11vnc treats the
+  # probe as an incomplete WebSocket handshake and closes before its RFB banner.
+  (sleep 1) | nc -w 2 127.0.0.1 "$local_port" 2>/dev/null | head -c 12 || true
+}
+
+if [[ $(rfb_banner) != RFB* ]]; then
+  if lsof -nP -iTCP:"$local_port" -sTCP:LISTEN >/dev/null 2>&1; then
+    printf 'Local port %s is already used by a non-VNC service.\n' "$local_port" >&2
+    exit 1
+  fi
+
+  ssh -fN \
+    -o ExitOnForwardFailure=yes \
+    -o ServerAliveInterval=30 \
+    -o ServerAliveCountMax=3 \
+    -L "127.0.0.1:${local_port}:127.0.0.1:5900" \
+    "$ssh_host"
+
+  for _ in {1..20}; do
+    [[ $(rfb_banner) == RFB* ]] && break
+    sleep 0.1
+  done
+fi
+
+if [[ $(rfb_banner) != RFB* ]]; then
+  printf 'SSH tunnel opened, but no VNC RFB handshake was received.\n' >&2
+  exit 1
+fi
+
+printf 'VNC tunnel ready at 127.0.0.1:%s\n' "$local_port"
+open "vnc://127.0.0.1:${local_port}"

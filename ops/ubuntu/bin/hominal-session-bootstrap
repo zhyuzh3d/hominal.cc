@@ -6,7 +6,7 @@ log_dir="$state_root/logs"
 agent_start=/agent/app/current/start
 
 mkdir -p "$log_dir"
-xrandr --output HDMI-1 --mode 1920x1080 --rate 60 >/dev/null 2>&1 || true
+xrandr --output HDMI-1 --mode 1280x720 --rate 60 >/dev/null 2>&1 || true
 xset s off >/dev/null 2>&1 || true
 xset -dpms >/dev/null 2>&1 || true
 xset s noblank >/dev/null 2>&1 || true

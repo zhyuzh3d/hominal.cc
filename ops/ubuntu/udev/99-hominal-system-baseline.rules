@@ -1,0 +1,2 @@
+# The XFCE/udisks session must never auto-mount the writable LVM rollback COW.
+ENV{DM_LV_NAME}=="system-baseline", ENV{UDISKS_IGNORE}="1"

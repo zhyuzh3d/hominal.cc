@@ -102,12 +102,14 @@
 
 ## 执行结果（2026-08-24）
 
-本计划已全部执行。服务器运行 Ubuntu 24.04、内核 `7.0.0-30-generic`，默认进入 `graphical.target`；LightDM、Xorg、XFCE、x11vnc 和 Agent 每日备份 timer 均为 active。桌面在重启后自动登录，分辨率固定为 1920×1080，x11vnc 仅监听回环地址。
+本计划已全部执行。服务器运行 Ubuntu 24.04、内核 `7.0.0-30-generic`，默认进入 `graphical.target`；LightDM、Xorg、XFCE、x11vnc 和 Agent 每日备份 timer 均为 active。桌面在重启后自动登录，按照物理显示器的实际分辨率固定为 1280×720，x11vnc 仅监听回环地址。
 
 Google Chrome `151.0.7922.173` 和微信 `4.1.1.8` 已安装。真实 Xorg 桌面验收确认 Chrome 能渲染中文和执行 JavaScript，CDP 仅监听 `127.0.0.1:9222`；微信登录窗口正常出现。Chrome 的异常关机残留锁和恢复气泡已由专用启动器处理。两者的用户状态均持久化到 `/agent/state/profiles`。
 
 Mutagen 会话 `hominal-cc1` 已迁移到 `/agent/app/hominal.cc`，状态为 Watching；`/agent/app/current` 与旧项目路径均指向新目录。项目上层 `xconfig.yaml` 的项目路径和同步端点已同步更新。旧远端目录保存在 `/agent/backup/migrations`，未直接删除。
 
-根卷为 128 GiB，`/agent` 为 40 GiB，系统基线快照为 40 GiB，卷组剩余 12.52 GiB。已建立 7 代 Agent 备份。回滚机制经过两轮真实探针测试，其中完整自动测试确认根卷探针被恢复、`/agent` 探针保留、两阶段自动重启结束后同名基线快照自动重建；随后又以最终配置刷新了基线。当前快照使用率约 0.01%，`dpkg --audit` 为空，待升级软件包为 0。
+根卷为 128 GiB，`/agent` 为 40 GiB，系统基线快照为 40 GiB，卷组剩余 12.52 GiB。已建立 9 代 Agent 备份。回滚机制经过两轮真实探针测试，其中完整自动测试确认根卷探针被恢复、`/agent` 探针保留、两阶段自动重启结束后同名基线快照自动重建；随后又以最终配置刷新了基线。快照通过 udev 规则对 XFCE/udisks 隐藏，创建脚本也会强制确认其未被挂载，避免桌面自动挂载污染 COW。当前快照使用率约 0.02%，`dpkg --audit` 为空，待升级软件包为 0。
 
 唯一尚未执行的是“启动实际智能体业务程序”：当前项目没有 `/agent/app/current/start` 可执行入口。桌面启动器已经预留自动调用逻辑，项目提供该入口后即可随 XFCE 会话启动；这不影响本计划中的操作系统、GUI、同步、持久化、备份和回滚环境验收。
+
+后续补充安装官方 Go `1.27.0` 和 Node.js `24.18.0` LTS（含 npm），并分别通过编译运行和 JavaScript 执行测试。Mac 端同桌面连接改用 `ops/macos/hominal-vnc`：脚本使用本地 15900 端口在后台建立 SSH 隧道，检查 RFB 握手成功后再启动系统“屏幕共享”，避免前台 `ssh -N` 阻塞后续命令。

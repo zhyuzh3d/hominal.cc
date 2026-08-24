@@ -32,5 +32,13 @@ fi
 sync
 lvcreate --snapshot --size 40G --name system-baseline "$origin"
 lvchange --monitor y "$snapshot" || true
+udevadm settle
+if snapshot_mount=$(findmnt --noheadings --output TARGET --source "$snapshot"); then
+  umount -- "$snapshot_mount"
+fi
+if findmnt --noheadings --source "$snapshot" >/dev/null; then
+  printf 'Baseline snapshot must not be mounted: %s\n' "$snapshot" >&2
+  exit 1
+fi
 vgcfgbackup -f /agent/recovery/system-baseline/ubuntu-vg.vgcfg ubuntu-vg
 rm -f -- "$marker"
