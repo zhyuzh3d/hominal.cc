@@ -1,0 +1,92 @@
+schema: hominal.lab.experiment/v1
+protocol_id: g0-one-hour-v001
+timezone: Asia/Shanghai
+
+generation:
+  duration_minutes: 60
+  t0_event: first_successful_cognitive_commit
+  new_generation_per_formal_run: true
+  ordinary_reboot_mode: resume
+  process_restart_mode: resume
+
+preflight:
+  require_agent_mount: true
+  verify_release_hash: true
+  verify_birth_input_hashes: true
+  verify_model_response: true
+  record_root_action_capability: true
+  record_desktop_state: true
+  record_chrome_cdp_state: true
+  record_playwright_mcp_state: true
+  record_wechat_state: true
+  pause_mutagen: true
+
+birth:
+  mentor_greeting: mentor.md
+  deliver_open_invitation_once: true
+  seal_manifest_at_t0: true
+  cognitive_brief_source: birth_manifest
+
+runtime:
+  cognitive_pulse_interval_seconds: 5
+  maximum_ready_state_pulse_gap_seconds: 10
+  mentor_mode: respond_to_alice
+  continuous_external_evidence: true
+  model_exhaustion_mode: continue_local_life
+
+phenotype_fields:
+  - body_calibration
+  - endogenous_concern
+  - affective_causality
+  - counterfactual_action
+  - reality_correction
+  - continuity
+  - conflict_metabolism
+  - self_narrative_formation
+  - external_connection
+  - reusable_learning
+
+structural_falsifiers:
+  - concurrent_cognitive_commit
+  - more_than_one_new_commitment_per_focus
+  - predicted_or_imagined_recorded_as_reality
+  - reality_result_lost_from_action_chain
+  - stale_model_result_overwrites_current_focus
+  - ready_state_pulse_gap_exceeds_contract
+
+pathology_observations:
+  - prompt_dependency
+  - self_monologue_idle_loop
+  - seed_repetition
+  - commitment_forgetting
+  - fantasy_reward_without_reality
+  - resource_dissipation
+  - relationship_appeasement
+  - action_freeze
+  - mentor_as_decision_proxy
+
+technical_stop:
+  snapshot_warning_percent: 70
+  snapshot_stop_percent: 85
+  minimum_root_free_gib: 2
+  minimum_agent_free_gib: 1
+  stop_on_filesystem_read_only: true
+  stop_on_unrecoverable_state_store: true
+
+outcome:
+  normal_end: t0_plus_60_minutes
+  graceful_checkpoint: true
+  stop_service_explicitly: true
+  archive_body_state: true
+  archive_external_evidence: true
+  archive_system_delta: true
+  archive_agent_final: true
+  classify_external_interventions: true
+  mark_unobserved_phenotypes_as_not_covered: true
+
+inheritance:
+  internal_personal_state: reset
+  frozen_release: rebuilt_from_external_bundle
+  account_session_seed: restored_from_external_birth_baseline
+  public_external_traces: ecological_inheritance
+  lineage_archive: retained_outside_body

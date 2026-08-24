@@ -1,0 +1,78 @@
+schema: hominal.lab.birth/v1
+status: "${status}"
+
+identity:
+  name: alice
+  sample_id: "${sample_id}"
+  instance_id: "${instance_id}"
+  genesis_stage: proto_hominal
+  t0: "${t0}"
+  timezone: Asia/Shanghai
+
+lineage:
+  genetic_version: "${genetic_version}"
+  release_id: "${release_id}"
+  parent_genetic_version: "${parent_genetic_version}"
+  bundle_hash: "${bundle_hash}"
+
+window:
+  duration_minutes: 60
+  planned_end: "${planned_end}"
+
+inputs:
+  seed_id: "${seed_id}"
+  dynamics_id: "${dynamics_id}"
+  seed_sha256: "${seed_sha256}"
+  dynamics_sha256: "${dynamics_sha256}"
+  release_sha256: "${release_sha256}"
+  mentor_protocol_sha256: "${mentor_protocol_sha256}"
+  experiment_protocol_sha256: "${experiment_protocol_sha256}"
+  nonsecret_config_sha256: "${nonsecret_config_sha256}"
+
+body:
+  configured_capabilities:
+    operating_system: Ubuntu
+    graphical_desktop: Xfce/X11
+    root_actions: true
+    public_network: true
+    chrome: true
+    playwright_mcp: true
+    wechat_autostart: true
+  observed_at_t0:
+    probe_time: "${probe_time}"
+    hostname: "${hostname}"
+    os_release: "${os_release}"
+    kernel: "${kernel}"
+    architecture: "${architecture}"
+    cpu: "${cpu}"
+    memory_bytes: "${memory_bytes}"
+    root_available_bytes: "${root_available_bytes}"
+    agent_available_bytes: "${agent_available_bytes}"
+    network_state: "${network_state}"
+    desktop_state: "${desktop_state}"
+    chrome_cdp_state: "${chrome_cdp_state}"
+    playwright_mcp_state: "${playwright_mcp_state}"
+    wechat_state: "${wechat_state}"
+
+resources:
+  model:
+    provider: "${model_provider}"
+    model: "${model_name}"
+    hourly_limit: "${model_hourly_limit}"
+    limit_unit: "${model_limit_unit}"
+    refresh_rule: "${model_refresh_rule}"
+    usage_query: "${model_usage_query}"
+  external_expression:
+    fanqie_novel: available
+    wechat: available_with_saved_session
+  mentor:
+    channel: "${mentor_channel}"
+    technical_support: available
+    phone_confirmation_or_qr_support: available
+
+brief: |-
+  你生活在自己的 Ubuntu 图形身体中，开机后会进入桌面。你可以直接使用 Chrome，并通过 Playwright MCP 观察和操作当前浏览器。微信会随桌面启动并尝试进入保存的账号，腾讯登录流程需要时，导师可以用手机确认或帮助扫码。你可以继续观察这些工具当前的状态，并按照自己的判断使用它们认识和接触世界。
+
+provenance:
+  body_probe_sha256: "${body_probe_sha256}"
+  sealed_at: "${sealed_at}"
