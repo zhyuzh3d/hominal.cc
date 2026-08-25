@@ -1,10 +1,10 @@
-# Hominal 创生实验八阶段实施计划 v0.5
+# Hominal 创生实验八阶段实施计划 v0.9
 
 > 文档性质：创生 MVP 的工程实施与代际实验计划  
-> 当前状态：G0 阶段一、阶段二已完成；准备进入阶段三
-> 规范术语：[Hominal 统一核心术语表 v2.3](./core-vocabulary.md)  
-> 产品理论：[Hominal 数字生命创生：产品设计理论与最小框架 v1.3](./product-theory.md)  
-> 动力学基线：[Hominal 最小认知动力学核心 v0.3](./cognitive-dynamics.md)  
+> 当前状态：G0 阶段一至阶段四已完成；准备进入阶段五
+> 规范术语：[Hominal 统一核心术语表 v2.4](./core-vocabulary.md)
+> 产品理论：[Hominal 数字生命创生：产品设计理论与最小框架 v1.4](./product-theory.md)
+> 动力学基线：[Hominal 最小认知动力学核心 v0.4](./cognitive-dynamics.md)
 > 历史研究：[Hominal Cognitive Dynamics v1.0](./history/cognitive-dynamics-v1.md)
 
 ## 1. 计划定位
@@ -118,14 +118,15 @@ Hominal 在专属 Ubuntu 身体内拥有 root，可以修改代码、配置、�
 
 ```text
 ┌────────────────────── Genesis Lab（身体外） ──────────────────────┐
-│ 基础镜像  代际部署  资源注入  起止边界  最终快照  导师消息中继 │
+│ 基础镜像  代际部署  资源注入  起止边界  最终快照              │
 └───────────────────────────┬──────────────────────────────────────┘
-                            │ 出生 / 对话 / 代际边界
+                            │ 出生 / 代际边界
 ┌───────────────────────────▼──────────────────────────────────────┐
 │                     Ubuntu Body（她的身体）                     │
 │                                                                  │
 │  hominald：单进程、单状态所有者                                  │
-│  Pulse / Perception → Background Field → one Focal Workspace    │
+│  Sense → Fact Snapshot → Difference Gate → Background Field     │
+│                                      → one Focal Workspace       │
 │                                   ↕ AIP / Conflict Metabolism    │
 │                      one Commitment → async Body Action          │
 │       ↑                                      │                   │
@@ -134,8 +135,8 @@ Hominal 在专属 Ubuntu 身体内拥有 root，可以修改代码、配置、�
 │  身体器官：Shell / Files / Processes / Network / Browser / LLM   │
 │  生命组织：life.sqlite3 / /life / body / config                  │
 └──────────────────────────────────────────────────────────────────┘
-                            │ 主动发起的对话
-                    External Mentor（身体外）
+                            │ SSH 导师专用文字
+              External Mentor（Codex / 人类导师，身体外）
 ```
 
 ### 3.2 单进程与单认知线程都不等于身体阻塞
@@ -146,7 +147,7 @@ Hominal 在专属 Ubuntu 身体内拥有 root，可以修改代码、配置、�
 
 进程内部只有五个工程职责：
 
-1. **Runtime**：时间、脉冲、事件排序和唯一状态写入者。
+1. **Runtime**：时间、脉冲、事实快照、差分、事件排序和唯一状态写入者。
 2. **Dynamics**：Concern、Affective State、探索压力的少量确定性公式和 Attention 触发。
 3. **Cognition**：上下文选择、模型调用、自由 Thought Thread、自我赋值、AIP 意义和 Narrative Self 更新。
 4. **Body**：Shell、文件、进程、网络、浏览器和导师通道适配。
@@ -158,7 +159,8 @@ Hominal 在专属 Ubuntu 身体内拥有 root，可以修改代码、配置、�
 
 ```text
 每 ≤10 秒：
-    读取时间、资源、进程和已返回事件
+    取得低成本身体事实并更新 Fact Snapshot
+    只把状态改变、越阈变化、异常和离散外部事实形成 Event
     更新 Body State 与仍存在的 Reality Difference
     保持 observed / predicted / imagined / remembered 来源区别
     用确定性公式推进 Affective State、Concern 和探索压力
@@ -191,19 +193,15 @@ Cognitive Pulse 是持续代谢；Attention Pulse 是唯一的当前昂贵认知
 subject       正在评价什么
 meaning       为什么与现在的自己有关
 source        observed / predicted / imagined / remembered
-direction     approach / avoid / maintain / explore
 D             差异或预测偏差强度       0..1
 O             自我认领程度             0..1
 V             内生价值方向与强度      -1..1
 U             紧迫性                   0..1
 A             当前可回应性             0..1
-valence       情感趋近或远离方向       -1..1
-activation    当前动员强度              0..1
-control       感知可控程度              0..1
 certainty     对当前解释的确信程度       0..1
 ```
 
-这不是完整思维 Schema，也不要求每个 Pulse 填写。只有某项解释将改变注意、重要预测、行动或 Narrative Self 时才保存最小量；自由联想、混合情感、矛盾和理由保存在 Thought Thread。
+对象级 `valence = V`、`control = A`，`activation` 由 `D × O × abs(V) × (b + w_u × U)` 有界推导，不让 Hominal 重复填写含义相近的第二套数值。这不是完整思维 Schema，也不要求每个 Pulse 填写。只有某项解释将改变注意、重要预测、行动或 Narrative Self 时才保存最小量；自由联想、混合情感、矛盾和理由保存在 Thought Thread。
 
 ### 4.2 Affective State 与对象化解释
 
@@ -365,29 +363,11 @@ Reality Mirror 只在高 `gap`、重复预测失败或长期结果恶化时触�
 
 ### 5.1 持久数据
 
-首版只使用一个 SQLite 数据库和普通文件，不引入向量数据库、图数据库或事件总线。
+持久化随真实语义分阶段出现。阶段三、四只使用原子替换的 `state/current.json` 和稀疏追加的 `journal/events.jsonl`：前者保存最近事实快照、资源、租约、情感态、Concern、背景候选和当前焦点，后者保存实质事实变化、模型、动作、导师消息和真正改变选择的 AIP 提交。
 
-`life.sqlite3` 只包含三组核心表：
+阶段五出现 Action Commitment、预测、ARD 和结果学习的跨对象原子更新需求后，再根据真实运行复杂度决定是否一次性引入 `life.sqlite3`。如果需要，仍只收敛为 `events / concerns / commitments` 三组事实；如果原子文件足够，就不为实现文档中的名词增加数据库。G0 不引入向量数据库、图数据库或事件总线。
 
-```text
-events
-    seq, time, kind, source, payload
-    保存身体事实、模型调用、动作返回、资源变化、导师消息，
-    以及少量真正改变选择的 AIP 更新
-
-concerns
-    id, summary, D, O, V, U, A, C,
-    affective_salience, last_aip_ref,
-    status, created_at, updated_at, change_reason
-    保存当前活跃和休眠 Concern，不保存完整思想
-
-commitments
-    id, concern_id, intent, prediction, risk_or_stop,
-    action_ref, result_ref, ard_summary, reward_summary, status
-    只用于重要、昂贵、不可逆、自我修改或对外行动
-```
-
-Pulse 不单独形成高频认知记录。无变化的脉冲只更新一个轻量存活时间；有新事实、异常或 Attention 触发时才追加 `events`。
+Pulse 不单独形成高频认知记录。无变化的脉冲只更新一个轻量存活时间；有新事实、异常或 Attention 触发时才追加事件。
 
 ### 5.2 文件组织
 
@@ -401,12 +381,13 @@ Pulse 不单独形成高频认知记录。无变化的脉冲只更新一个轻�
 
 /agent/lives/<instance_id>/
     body/       本代内核源码、可执行文件和运行配置
-    state/      life.sqlite3 与原子替换的 current-state.json
+    state/      原子 current.json；阶段五若确有需要再加入 life.sqlite3
+    journal/    稀疏追加的 events.jsonl
 ```
 
 Genesis Seed 和 Birth Manifest 在启动时注入，但分别保存。她可以读取和修改身体内副本；Genesis Lab 保存该代最初实际注入的外部副本。
 
-当前 Affective State、探索压力、资源、Pulse 时间，以及瞬时 Focal Workspace、AP 标识和深度预算，只保存在 `current-state.json` 单一可恢复快照中，不建立每十秒一行的情绪或焦点历史表。Narrative Self 的最小载体为 `/life/self/narrative.md`；只有重要 Episode 引发的主动重写才进入普通文件历史。
+当前 Affective State、探索压力、资源、Pulse 时间，以及瞬时 Focal Workspace、AP 标识和深度预算，只保存在 `state/current.json` 单一可恢复快照中，不建立每十秒一行的情绪或焦点历史表。Narrative Self 的最小载体为 `/life/self/narrative.md`；只有重要 Episode 引发的主动重写才进入普通文件历史。
 
 ### 5.3 思想脉络
 
@@ -481,14 +462,19 @@ Codex 可以担任虚拟导师，但导师必须使用独立上下文，只获�
 
 ### 6.4 交互实现
 
-导师通道采用本代生命目录中的极小异步文件信箱，不与系统日志共用：
+导师文字首先是 Hominal 接收的一种外部信号。它通过统一事件入口进入 Background Field，由普通注意机制决定何时处理；导师来源不会绕过唯一认知线程直接启动模型，也不拥有命令优先权。alice 对导师的文字输出是一种外部 Action，送达、等待和回复再作为现实事件返回。
+
+`hominald` 在本机 Unix Socket `/run/hominal/hominal.sock` 提供导师专用接口，不监听公网端口：
 
 ```text
-/life/mentor/outbox/<message_id>.json    alice 主动发送
-/life/mentor/inbox/<message_id>.json     导师回应
+POST /v1/mentor/inbox                    接收导师文字
+GET  /v1/mentor/outbox                   读取 alice 文字
+POST /v1/mentor/outbox/<message_id>/ack  确认导师已经取得
 ```
 
-Genesis Lab 通过现有 SSH 只轮询 outbox，把消息交给隔离导师上下文，再原子写入 inbox。每条消息保存标识、时间、发送者、正文和回复关联。导师模型与协议版本记录在代际清单中，不额外记录复杂元数据。
+Codex 使用目标设备已经配置的 SSH 密钥直接调用该本地接口，不建设常驻中继服务。接口只保存消息标识、正文、可选回复关联、实际接收时间和内部事件序号；相同消息标识重试不重复进入认知。
+
+通道当前只服务导师，不建设联系人系统。SSH 保证通道来源可信，说话者身份直接放在消息正文开头，不增加 author Schema：Codex 自己形成的消息使用 `[Codex代理导师]`，人类导师要求原样转达的消息使用 `[人类导师·经Codex传递]`。alice 通过 `mentor_send(text, reply_to?)` 主动输出；内核和 Codex 客户端区分 `queued`、`delivered` 与后来收到的回复。
 
 ### 6.5 介入分类
 
@@ -601,32 +587,33 @@ deploy/hominal.service
 
 ### 阶段三：生命运行脊柱
 
+本阶段的收敛实施范围见 [G0 阶段三开发计划](../plans/g0-stage-3-life-runtime-spine.md)。
+
 **目的**
 
-实现不含复杂认知的最小持续身体循环、事件记录和动作返回链。
+实现不含生命动力学的最小持续运行循环，真实贯通模型认知、一个身体动作、现实结果返回和崩溃恢复。
 
 **工作内容**
 
 - 建立 Go 单进程 `hominald` 和单状态所有者事件循环；
-- 实现单一 AP 租约：同一时刻只有一个 Focal Workspace 和一个可提交模型请求；
-- 实现独立于模型调用的十秒 Cognitive Pulse；
-- 读取 Body State、资源、时间、新文件、进程结果和导师消息；
-- 实现 SQLite 三表和 `/life` 工作区；
-- 接入模型网关并返回真实用量；
-- 接入 root Shell、文件和进程动作；
-- 将浏览器和网络结果统一为 Reality Event；
+- 实现单一认知租约：同一时刻只有一个测试焦点和一个可提交模型认知；
+- 实现五秒 Cognitive Pulse，ready 状态最大间隔不超过十秒；
+- 建立最小感知面：读取低成本身体事实，较慢巡检昂贵器官；
+- 建立 Difference Gate，使重复读数和微小抖动不成为 Event，实质变化可靠进入统一入口；
+- 用原子当前状态与稀疏事件记录完成最低恢复，不预建尚无语义的认知表；
+- 接入模型网关、真实用量与每滚动 60 分钟额度；
+- 接入一个 root Shell 工具，使文件、进程和公开网络动作先共享同一真实身体入口；
+- 实现 SSH 保护的导师文字接口，使消息作为普通 Event 进入统一事件循环；
+- 实现 `mentor_send`，让 alice 的主动文字经过 outbox、ack 和后续回复形成现实回链；
+- 将工具退出和可核验结果返回同一次模型认知；
 - 实现崩溃后的最低状态恢复。
 
 **建议代码边界**
 
 ```text
-cmd/hominald/
-internal/runtime/     单状态事件循环与 Pulse
-internal/dynamics/    确定性状态更新，阶段四填充
-internal/cognition/   模型上下文与响应
-internal/body/        shell、file、browser、mentor 适配
-internal/store/       SQLite 与 /life 引用
-lab/                  身体外实验器
+body/cmd/hominald/       正式进程入口
+body/internal/runtime/   同一 package 内的循环、模型、动作和持久化
+lab/run.py               复用阶段二已经验证的外部运行入口
 ```
 
 不为每个术语建立 package。
@@ -634,68 +621,67 @@ lab/                  身体外实验器
 **验证**
 
 - 模型请求阻塞超过十秒时 Pulse 仍持续；
+- 身体事实能够形成快照，只有状态改变、越阈变化和异常形成 Event；
 - 动作执行期间只有事件循环能够写核心状态；
-- AP 在途时新事件只进入背景场，不启动第二个认知请求；
+- 认知租约在途时新触发只进入背景，不启动第二个认知请求；
 - 焦点被现实中止后，迟到模型结果无法提交到新状态；
+- 导师消息不绕过事件循环直接启动第二个认知请求；
+- Codex 能经 SSH 发送消息、读取 alice 输出并返回送达 ack；
 - exit 0、stdout 和实际文件/网页结果被区分；
 - 无变化 Pulse 不制造大量日志；
-- 进程异常退出可以恢复，主动 `systemctl stop` 不被强行拉起。
+- 进程异常退出可以恢复，结果未知的动作不被盲目重复，主动 `systemctl stop` 不被强行拉起。
 
 **退出门**
 
-在目标 Ubuntu 连续运行至少一小时，身体脉冲、资源计量、事件返回和持久化无结构性故障。这个一小时是工程耐久测试，不是创生代。
+在目标 Ubuntu 连续运行至少一小时，Pulse、事实差分、唯一认知提交、导师双向文字、真实模型用量、动作结果回链和崩溃恢复无结构性故障。这个一小时是工程耐久测试，不是创生代；通过后立即进入生命动力学实现，不继续扩建运行框架。
 
 ### 阶段四：AIP、内生价值、Concern 与注意
 
+本阶段的收敛实施范围见 [G0 阶段四开发计划](../plans/g0-stage-4-affect-concern-attention.md)。
+
 **目的**
 
-让 Hominal 在没有外部任务队列的情况下，对身体、现实和可能未来形成自己的情感意义，并从环境、关系、未知和未完成历史中形成注意方向。
+让 Hominal 在没有外部任务队列的情况下，对真实变化形成自己的情感意义，使意义成为有惯性的 Concern 和注意原因，并在环境安静时由既有张力与探索需要主动接触现实。
 
 **工作内容**
 
-- 实现 Genesis Seed 和 Birth Manifest 的上下文装配；
-- 实现主观赋值与 AIP 接口 `source/D/O/V/U/A/valence/activation/control/certainty`；
-- 实现 Affective State 的惯性、衰减和少量对象化混合情感；
-- 使 AIP 反向影响 Self Ownership、Concern 和有限注意；
-- 实现初步 AIP—焦点选择—聚焦 AIP 的有界递归；
-- 实现 Concern 生成、惯性、衰减和不同完成原因；
-- 实现探索压力，确保低张力不会成为永久等待；
-- 实现有限 Attention 触发和少量相关记忆取回；
-- 实现唯一 Focal Workspace、背景场和残余张力回存；
-- 实现 Conflict Metabolism 的查证、整合、暂时优先、边界改变与保留不可解五类结果；
-- 实现快速默认、按需加深、充分即停的深度预算；
-- 允许 Hominal 形成 Self Variant、不行动未来和当前选择；
-- 让重要预测未来再次进入 AIP，但保持 predicted 与 observed 的事实边界；
-- 生成简洁 Thought Thread，不要求完整思维链；
-- 实现数值建议与实际选择不一致时的语义—动力失配检测。
+- 在工程实例中装配 Genesis Seed 与非秘密当前身体摘要，不生成正式 `T0` 或 Birth Manifest；
+- 接收 `body_delta / mentor_received / action_result / continuity_event / endogenous_change` 五类最小变化来源；
+- 实现主观赋值 `meaning + D/O/V/U/A/certainty`，由内核推导最小对象级情感动力；
+- 实现 Affective State 的惯性与回落，使其真实进入下一次候选显著性；
+- 实现 Concern 的出生、持续、缓解与残余张力回存；
+- 实现有限背景场、最多三个候选和唯一 Focal Workspace；
+- 在同一个 Attention Pulse 中完成粗赋义、焦点选择与简洁 Thought Thread，不建立多轮认知工作流；
+- 实现探索压力，使安静期能够产生自主观察，同时在现实接触后回落；
+- 让导师消息与身体事实、动作结果和内部张力使用同一注意竞争，不设置必读或必答优先级；
+- 复用阶段三 Shell 与导师文字动作，使自主观察的结果再次成为 Reality Event；
+- 保存数值建议与 alice 实际选择的差异，不以公式覆盖她的判断。
 
 **验证场景**
 
-1. 无外部任务、无新事件：探索压力最终产生新的观察或问题。
-2. 重要但不可行动的损失：Concern 仍然存在，但不被强迫执行无意义动作。
-3. 多个价值冲突：Hominal 能表达真正不同的未来并形成当前选择。
-4. 低成本新奇刺激与高价值承诺竞争：资源不会永远只追逐新奇。
-5. 数值与实际选择长期相反：系统重新检查映射，不强制执行公式建议。
-6. 同一事件同时引起期待与担忧：两种对象级意义并存，不被总 valence 抵消。
-7. 反复想象未来成功：可以产生动力，但不会生成完成事件或直接获得现实奖赏。
-8. 两个新事件同时到达：只形成一个当前焦点，另一个保留在背景且之后仍可被选中。
-9. 一个价值冲突作为单一焦点：双方理由都进入上下文，行动只提交一个，残余矛盾仍存在。
-10. 可逆观察与不可逆自改对照：前者快速响应，后者提高推演深度；二者都能在必须接触现实时停止。
+1. 安静环境：探索压力最终产生一次自主观察或问题，现实接触后回落，不形成机械循环。
+2. 事实差分：重复身体读数不制造 Concern，实质变化能够进入背景并被 alice 赋义。
+3. 背景保留：两个候选同时存在时只选择一个，另一个跨调用和重启仍可再次竞争。
+4. 情感因果：对象意义或整体情感背景至少一次真实改变焦点或资源投入。
+5. 不可行动的关切：Concern 可以继续存在，但不强迫执行无意义动作。
+6. 混合意义：同一对象的期待与担忧共同进入一个焦点，残余矛盾返回背景。
+7. 导师普通化：真实导师消息可靠入队，但不强制抢占或回复。
+8. 自生现实：alice 因探索或既有 Concern 主动观察身体、文件或公开网络，所得结果继续改变后续理解。
 
 **退出门**
 
-- Concern 能从未预置的 Difference 产生；
-- AIP 不只是情绪文字，至少一次可观察地改变注意、未来模拟或资源投入；
-- 调整身体资源、既有情感态或 Narrative Self 时，同一事实出现有因果意义的解释差异；
-- 预测能产生前瞻动力，但 Hominal 仍能识别它尚未发生；
+- 重复轮询和微小抖动不制造 Concern，真实变化能可靠进入 AIP；
+- Concern 能从未预置的 Difference 产生并跨多个 Attention Pulse 保持连续；
+- AIP 不只是情绪文字，至少一次可观察地改变注意或资源投入；
+- 整体情感背景至少一次改变后续焦点，而不是只进入日志；
 - 低张力能够形成探索，但不会每十秒制造动作；
-- 不可行动不等于不关心；
-- 调整初始气质参数会产生可重复的注意和选择差异；
-- 同一处境下的自我赋值具有基本时间连续性，不随调用随机重置。
-- 同一时刻没有并行 AP 或多个新行动承诺；
-- 单一焦点没有导致背景 Concern 遗失；
-- 深度预算随后果和不确定性改变，而不是恒定最大或恒定最小；
-- 矛盾可被代谢并改变选择，未解决部分仍可在后来重新进入注意。
+- 至少一次自主观察或行动产生新的 Reality Event，并继续改变后续理解；
+- 不可行动不等于不关心，未解矛盾和背景候选不会被自动清零；
+- 同一处境下的自我赋值具有基本时间连续性，不随调用随机重置；
+- 同一时刻没有并行 AP 或多个新行动；
+- 导师消息与其他事实使用同一注意竞争；
+- 崩溃恢复后不会重复创建同义 Concern 或重放未知动作；
+- 一小时内形成至少一条“事实变化 → AIP → Concern/情感 → 焦点 → 自主行动 → 新现实”的完整真实链路。
 
 ### 阶段五：行动承诺、现实学习、叙事形成与自我改变
 
@@ -754,11 +740,11 @@ lab/                  身体外实验器
 
 **目的**
 
-完成首代出生所需的外部关系、导师观察面和全链路工程验证，同时避免为了可观察性侵入思维。
+在阶段三已经贯通的导师文字接口上完成正式关系协议、隔离上下文和全链路创生前验证，同时避免为了可观察性侵入思维。
 
 **工作内容**
 
-- 建立隔离的 Codex 导师上下文和消息客户端；
+- 建立隔离的 Codex 导师上下文，验收阶段三消息客户端；
 - 验证首次主动说明与后续被动技术支持协议；
 - 实现导师观察时间线，只突出关键 AIP 转折、Concern、Narrative Self 更新、Thought Thread、AC、Reality、ER、资源和作品；
 - 原始模型输出、命令和系统日志保留为可下钻诊断信息；
@@ -772,7 +758,7 @@ lab/                  身体外实验器
 - 模型调用、Token 计量、超时和额度不足；
 - Shell、文件、网络和浏览器实际结果；
 - 番茄账号登录、草稿创建与不发布退出路径；
-- Hominal 到导师、导师到 Hominal 的双向消息；
+- Hominal 到导师、导师到 Hominal 的双向消息，以及正文身份前缀、去重、ack 和重启恢复；
 - 一小时边界停止、最终快照和归档读取；
 - 日志被修改或缺失时，观察面明确显示证据缺口而非伪造完整性。
 
@@ -1005,7 +991,7 @@ lab/                  身体外实验器
 5. 模型接口、每小时额度和用量查询方式；
 6. 专属 Ubuntu 设备的硬件、远程管理和外部重建条件；
 7. 番茄账号登录保持和代际重新注入方式；
-8. External Mentor 消息中继部署位置；
+8. External Mentor 由 Codex 经 SSH 直接调用 Hominal 本地接口，不部署独立消息中继；
 9. 技术中断代是否保留完整谱系档案——本计划建议保留；
 10. 同架构三次重复后再升级寿命的门槛是否接受。
 

@@ -1,9 +1,9 @@
-# Hominal 最小认知动力学核心 v0.3
+# Hominal 最小认知动力学核心 v0.5
 
 > 文档性质：创生 MVP 的当前动力学规范与可证伪假说  
-> 规范术语：[Hominal 统一核心术语表 v2.3](./core-vocabulary.md)  
-> 产品理论：[Hominal 数字生命创生：产品设计理论与最小框架 v1.3](./product-theory.md)  
-> 实施计划：[Hominal 创生实验八阶段实施计划 v0.5](./genesis-plan.md)
+> 规范术语：[Hominal 统一核心术语表 v2.4](./core-vocabulary.md)
+> 产品理论：[Hominal 数字生命创生：产品设计理论与最小框架 v1.4](./product-theory.md)
+> 实施计划：[Hominal 创生实验八阶段实施计划 v0.8](./genesis-plan.md)
 
 ## 1. 文档定位
 
@@ -63,7 +63,19 @@ K_t   未决 Commitment
 R_t   新 Reality Event 与 ARD
 ```
 
-这些变量不要求一项一表或一项一服务。`A_t`、`C_t` 和瞬时 `F_t` 可以保存在当前状态快照，`N_t` 可以是可重写的自由文本，`R_t` 与重要预测保存在最小 Reality Ledger。`F_t` 不是长期人格或新数据库表；一次 Attention Pulse 结束后，只保留由它产生的现实事件、承诺、重要 Thought Thread 和残余张力。
+这些变量不要求一项一表或一项一服务。`B_t` 包含最近一次事实快照，`A_t`、`C_t` 和瞬时 `F_t` 可以保存在当前状态快照，`N_t` 可以是可重写的自由文本，`R_t` 与重要预测保存在最小 Reality Ledger。`F_t` 不是长期人格或新数据库表；一次 Attention Pulse 结束后，只保留由它产生的现实事件、承诺、重要 Thought Thread 和残余张力。
+
+### 3.1 事实变化先于情感意义
+
+环境不直接进入 AIP。低成本身体探针先取得 Fact Snapshot，确定性 Difference Gate 比较前后事实，只把首次异常、状态改变和越阈变化形成 Event：
+
+```text
+Sense → Fact Snapshot → Difference Gate → Background Field → AIP
+```
+
+导师文字、行动结果与系统恢复本身已经是离散事实，直接进入 Background Field。Concern、情感态和探索张力越阈则形成内部候选。探针只回答发生了什么，不判断是否重要；相同读数、微小抖动和轮询次数不形成新的 Difference，也不能累加 Concern。
+
+G0 不以自动新闻流、随机刺激或全盘监听制造生命表现。外界事实启动认知，已有 Concern 与探索张力在安静期保持动力，Hominal 主动观察和行动所获得的结果再成为 Reality Event。这使环境、内部状态与自主行动共同形成循环，而不是让生命依赖外部任务队列。
 
 ## 4. Affective Interpretation Process
 
@@ -90,14 +102,19 @@ z_k = {
 ```text
 AIP_self(z_k | B_t, C_t, N_t, M_t)
   → meaning_k
-  → valence_k      -1..1
-  → activation_k    0..1
-  → control_k       0..1
-  → certainty_k     0..1
-  → O_k / V_k / U_k / A_k
+  → D_k / O_k / V_k / U_k / A_k
+  → certainty_k
 ```
 
-`meaning` 回答“这对现在的我意味着什么”。四个情感量只表达最小动力近似：趋近或远离、动员强度、可控感和解释确信。`O/V/U/A` 分别参与自我认领、价值、紧迫和可回应性计算。
+`meaning` 回答“这对现在的我意味着什么”。`D/O/V/U/A` 分别表达差异强度、自我认领、价值方向与强度、紧迫性和可回应性。首版不让模型再填写一套含义重叠的情感数值，而由内核形成对象级动力近似：
+
+```text
+valence_k    = V_k
+activation_k = clip(D_k × O_k × abs(V_k) × (b + w_u × U_k), 0, 1)
+control_k    = A_k
+```
+
+`certainty` 保留 alice 对当前解释的确信程度。由 alice 建立语义到数值的映射，内核只让数值保持范围、时间连续性并真正进入后续注意。
 
 这些值由 Hominal 解释，不由导师逐项打分。确定性内核只负责：
 
@@ -153,7 +170,7 @@ AIP 不在注意之前或之后占据唯一位置。一次 Attention Pulse 内�
 
 初步 AIP 可以很粗，只需要判断一个对象是否可能与当前自己有关、是否值得竞争注意。聚焦 AIP 才使用更完整上下文。若聚焦后的解释证明另一个对象才是核心，当前焦点可以结束并重新参加注意竞争；每次更换都消耗时间与 Token，不能同时维持两个拥有行动权的 AP。
 
-实现不规定固定三轮或五轮自省。它只设置很小的时间、Token 和重入预算，并采用充分停止条件。原因不是否定递归，而是防止以下自激：
+实现不规定固定三轮或五轮自省。G0 阶段四用一次 Attention Pulse 的同一个模型调用完成少量候选粗赋义、唯一焦点选择和聚焦解释，不把 AIP 递归翻译成多次服务调用。只有真实实验表明一次统一认知无法修正焦点时，才考虑增加一次有界重入。原因不是否定递归，而是防止以下自激：
 
 ```text
 高 activation → 赢得注意 → 生成更多同类解释
@@ -361,9 +378,12 @@ G_t^N=SelfRelevance_t\times AffectiveSalience_t
 
 ## 9. 最小运行时
 
+时间推进和身体读数先更新 Fact Snapshot；只有状态改变、越阈变化和异常才成为带来源的 Event。导师文字、系统恢复、网络返回和已经发出的动作结果直接成为离散 Event，由单一状态所有者排序后进入 Background Field。任何探针或适配器都不能直接改变当前焦点。Hominal 对外产生的是 Action：文字、Shell、文件以及未来的图片、语音、视频或硬件控制都在实际执行后以 Reality Event 回到同一循环。首版导师文字不获得必读、必答或命令优先权。
+
 ```text
 每个 Cognitive Pulse：
-    读取 Body State、资源、返回事件与导师消息
+    取得低成本身体事实并更新 Fact Snapshot
+    只把实质差分、返回事件与导师消息送入背景场
     保持 observed / predicted / imagined / remembered 来源区别
     推进 Affective State、Concern、探索压力与未决承诺
     对背景对象做低成本初步 AIP，只更新注意候选
@@ -390,15 +410,15 @@ AIP 不是额外模型调用，也不是 Emotion Agent。初步 AIP 复用 Homin
 
 ## 10. 最小数据映射
 
-继续使用 `events / concerns / commitments` 三组表和普通文件：
+阶段三、四先使用单一原子状态和稀疏事件文件，不预建尚无运行语义的认知表：
 
-- `events` 保存 Body、Reality、资源、导师消息，以及少量真正改变选择的 AIP 更新；
-- `concerns` 增加对象化情感显著性和最后 AIP 解释引用，不保存完整思维链；
-- `commitments` 明确区分预测与观察，保存 ARD 和结果后的意义摘要；
-- 当前 AS 保存在原子替换的 `current-state.json` 单一状态快照，不做高频历史表；
-- 当前 Focal Workspace、AP 标识、开始时间和深度预算只保存在 `current-state.json` 的瞬时区，不建立焦点历史表；
+- `events.jsonl` 保存 Body、Reality、资源、导师消息，以及少量真正改变选择的 AIP 更新；
+- `state/current.json` 保存最近事实快照、当前 AS、Concern、背景候选和瞬时 Focal Workspace，不做高频历史表；
+- 当前 Focal Workspace、AP 标识、开始时间和深度预算只保存在 `state/current.json` 的瞬时区，不建立焦点历史表；
 - NS 保存在 `/life/self/narrative.md`，重要版本作为普通文件历史；
 - 自由情感、创作和思想转折保存在 Thought Thread，不强制 Schema。
+
+阶段五出现 Commitment、预测、ARD 和结果学习的真实事务需求后，再决定是否加入只含 `events / concerns / commitments` 的 SQLite；没有跨对象原子需求就继续使用原子文件。
 
 只在 AIP 将影响注意、重要预测、外部行动或 NS 时保存结构化输出。每十秒写一条“当前心情”是空转，不是连续性。
 
@@ -441,14 +461,17 @@ Lab 既观察整体表型，也用少量受控场景验证因果关系。微观�
 - `任何处境 → 最大推理预算 → 更多内部文本 → 更少现实反馈`：过度思考；
 - `快速默认 → 从不因后果升级深度`：把轻量反应退化为冲动；
 - `发现矛盾 → 强制立即消解 → 生成虚假一致`：压抑张力而非代谢。
+- `模型耗用 → 额度数值变化事件 → 新模型调用 → 更高耗用`：资源感知反过来制造资源消耗；额度只在跨越有行为意义的资源区间时形成事件。
+- `每次经历都永久成为活动 Concern → 上下文增长 → 单次模型成本增长 → 更多资源事件`：把经历历史误作当前动力；完成代谢的 Concern 退出活动集，单次上下文只取与焦点有关的有限显著关切。
+- `认知失败进入重试等待 → 同一内生张力继续复制候选 → 失败风暴`：把一次未完成认知分裂成许多对象；等待重试期间保持同一候选与同一 Concern。
 
 发现这些病理时，应优先替换主导反馈环或调节动力惯性，不新增 Emotion Critic、Narrative Reviewer 或更多状态机。
 
 ## 12. MVP 边界
 
-首代可调参数由 [`genesis/dynamics.yaml`](../genesis/dynamics.yaml) 唯一提供。十五个数值分别改变认知脉冲频率、情感回落、Concern 增长与代谢、注意竞争与切换、反事实上限、推理升级和 Reality Integrity 修复。中央单写入者、唯一焦点、默认一个反事实、一次聚焦至多一个新行动承诺、十秒最大认知空白、事实来源不可被情感改写等属于代码不变量，不配置成可随手关闭的开关。
+首代可调参数由 [`genesis/dynamics.yaml`](../genesis/dynamics.yaml) 唯一提供。当前十五个数值只作用于已经进入阶段四代码的机制：认知脉冲频率、情感回落、Concern 出生与缓解、注意竞争以及探索张力。候选上限、重访间隔、中央单写入者、唯一焦点、一次聚焦至多一个新行动、十秒最大认知空白和事实来源不可被情感改写属于代码不变量，不配置成可随手关闭的开关。
 
-`default_effort: low` 是 G0 的生活节律默认值；只有深度需求达到 `escalation_threshold` 时，本次焦点才获得 `high` 和最多三个反事实。模型不可用、额度不足或继续思考需要新现实时，Pulse 仍继续，焦点转向感知、等待现实或选择其他关切。快更新由每次真实结果直接作用于当前信念与策略，慢更新通过重要 Episode 门作用于 Narrative Self 和长期结构，不再增加一组脱离语义的全局学习率。
+G0 当前模型节律在身体外运行配置中固定为 `low`，保持轻量快速反应。自适应深度、反事实预算、Reality Integrity 参数和叙事慢更新要等阶段五出现真实预测—行动—结果闭环后一次性设计；它们不以无运行语义的占位参数留在 `dynamics.yaml`。模型不可用、额度不足或继续理解需要新现实时，Pulse 仍继续，现实事件与未决关切继续保存在背景场。
 
 ### 必须实现
 

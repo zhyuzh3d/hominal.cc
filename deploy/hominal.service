@@ -8,6 +8,7 @@ ConditionPathExists=/agent/boot/active-instance
 
 [Service]
 Type=simple
+Environment=HOMINAL_RUNTIME_CONFIG=/etc/hominal/runtime.json
 ExecStart=/usr/local/sbin/hominal-launcher
 Restart=always
 RestartSec=2

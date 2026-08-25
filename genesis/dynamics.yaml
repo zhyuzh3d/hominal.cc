@@ -9,29 +9,23 @@ affect:
   return_rate: 0.10
 
 concern:
+  base_drive: 0.15
+  urgency_weight: 0.85
   growth_gain: 0.25
   resolution_gain: 0.40
   natural_decay_rate: 0.02
 
 attention:
   affect_weight: 0.30
-  narrative_relevance_weight: 0.15
   exploration_weight: 0.20
-  commitment_weight: 0.30
+  novelty_weight: 0.15
   resource_cost_weight: 0.25
-  switch_hysteresis: 0.12
+  trigger_threshold: 0.45
 
-simulation:
-  escalated_counterfactual_limit: 3
-
-reasoning:
-  default_effort: low
-  escalated_effort: high
-  escalation_threshold: 0.65
-
-reality_integrity:
-  debt_accumulation_gain: 0.30
-  verified_repair_gain: 0.40
+exploration:
+  idle_growth: 0.04
+  unknown_growth: 0.10
+  relief: 0.45
 
 bounds:
   signed_value: [-1.0, 1.0]

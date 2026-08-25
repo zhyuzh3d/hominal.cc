@@ -92,12 +92,14 @@ def main() -> int:
             if not lab.get(key):
                 errors.append(f"xconfig system.genesis_lab.{key} is missing")
         mentor = lab.get("mentor", {})
-        if mentor.get("transport") != "ssh_spool" or mentor.get("context_mode") != "isolated":
+        if (
+            mentor.get("transport") != "ssh_unix_socket"
+            or mentor.get("socket_path") != "/run/hominal/hominal.sock"
+            or mentor.get("context_mode") != "isolated"
+        ):
             errors.append("xconfig mentor transport and context isolation have drifted")
-        if runtime.get("reasoning_effort") != dynamics.get("reasoning", {}).get("default_effort"):
-            errors.append("xconfig default reasoning effort must match dynamics")
-        if runtime.get("escalated_reasoning_effort") != dynamics.get("reasoning", {}).get("escalated_effort"):
-            errors.append("xconfig escalated reasoning effort must match dynamics")
+        if runtime.get("reasoning_effort") != "low":
+            errors.append("xconfig default reasoning effort must remain low during G0")
         quota = config.get("llm", {}).get("quota", {})
         for key in ("hourly_limit", "unit", "refresh_rule", "usage_query"):
             if not quota.get(key):

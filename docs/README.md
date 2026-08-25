@@ -10,7 +10,7 @@
 2. [统一核心术语表](./core-vocabulary.md)：统一 Advanced Cognitive Life、CEB、Proto-Hominal 以及动力学和实验概念的边界。
 3. [最小认知动力学核心](./cognitive-dynamics.md)：把 AIP、单一认知线程、焦点工作区、矛盾代谢、张力、现实反馈和可塑性收敛为可实现、可证伪的动力关系。
 4. [创生实验八阶段实施计划](./genesis-plan.md)：规定从创生契约、Ubuntu 身体和 Genesis Lab，到首代运行、整体诊断与继代重构的实施顺序和退出门。
-5. [G0 最小可编码架构](./mvp-architecture.md)：把单一认知提交、Pulse、出生时序、三表、行动回链和 root 身体收敛为实现契约。
+5. [G0 最小可编码架构](./mvp-architecture.md)：把单一认知提交、Pulse、最小感知、分阶段持久化、行动回链和 root 身体收敛为实现契约。
 6. [项目架构](./project-architecture.md)：规定研究对象、创生输入、Ubuntu 身体、agent 生命卷、外部 Lab、构建部署、连续运行、代际档案和恢复体系。
 
 六份文档承担不同职责：

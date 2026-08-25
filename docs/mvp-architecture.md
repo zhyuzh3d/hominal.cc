@@ -1,7 +1,7 @@
-# Hominal G0 最小可编码架构 v0.1
+# Hominal G0 最小可编码架构 v0.4
 
-> 文档性质：G0 阶段一的生命内核、数据和出生接口契约  
-> 状态：阶段一冻结稿  
+> 文档性质：G0 生命内核、数据、出生与导师接口契约
+> 状态：阶段三运行脊柱与阶段四最小动力学实现契约
 > 适用实现：`g0-v001`
 
 ## 1. 架构目标
@@ -47,7 +47,7 @@ hominal-launcher → hominald
 │   └── runtime-defaults/
 ├── state/
 │   ├── life.sqlite3
-│   └── current-state.json
+│   └── current.json
 ├── journal/
 │   └── events.jsonl
 ├── life/
@@ -55,10 +55,7 @@ hominal-launcher → hominald
 │   ├── journal/
 │   ├── works/
 │   ├── skills/
-│   ├── letters/
-│   └── mentor/
-│       ├── inbox/
-│       └── outbox/
+│   └── letters/
 ├── logs/
 ├── artifacts/
 └── checkpoints/
@@ -83,7 +80,7 @@ hominal-launcher → hominald
 
 ## 5. 单一状态所有者
 
-只有主事件循环可以提交认知状态。文件探针、系统探针、浏览器、Shell、导师通道和模型调用都通过带序号的事件返回主循环，不直接改写当前焦点、Concern 或 Narrative Self。
+只有主事件循环可以提交认知状态。文件探针、系统探针、浏览器、Shell、导师通道和模型调用都通过带序号的事件返回主循环，不直接改写当前焦点、Concern 或 Narrative Self。导师消息只是 `mentor.message.received` 外部 Event；本地接口处理器不能因消息来自导师而直接调用模型或抢占当前认知。
 
 每次认知提交使用：
 
@@ -100,11 +97,23 @@ focus_fingerprint
 
 ## 6. 认知节律
 
+`hominald` 先维护一个最小 Fact Snapshot，再把实质变化送入统一事件入口：
+
+```text
+Sense → Fact Snapshot → Difference Gate → Event Inlet
+```
+
+每次 Pulse 只读取单调时间、uptime、本地模型额度、未决动作和相关进程等低成本事实；磁盘、网络和图形器官采用较慢巡检或使用前检查。Difference Gate 只发出首次异常、状态改变和越阈变化，保留实际值、时间与来源；重复读数和微小抖动不会变成新事件。导师文字、动作结果和系统恢复是离散事实，直接进入 Event Inlet。
+
+模型额度的精确余量始终属于当前身体事实，但常规模型调用不会因 token 数值变化反向制造新认知事件。只有滚动余量跨越 `open / comfortable / limited / scarce / critical` 资源区间时才形成 `body_delta`；额度恢复跨回区间同样形成事实。这样 alice 能感知真实有限资源，而认知耗用不会成为自我激发认知的回路。
+
+首版不监听整个文件系统，不自动抓取公开网络，也不持续读取浏览器或微信内容。alice 选择观察这些身体器官时，结果作为 Reality Event 返回。事实差分属于运行时，意义、价值和 Concern 属于 AIP，二者不能合并在身体探针中。
+
 `Cognitive Pulse` 每五秒推进一次轻量身体感知、资源更新、未决动作、Concern 惯性和注意需要。系统已经就绪后，连续两个有效 Pulse 的空白目标不超过十秒。没有变化的 Pulse 只原子更新存活时间，不追加思想日志，不调用模型。
 
 出现下列任一情况时可以发起 Attention Pulse：新现实事件具有自我相关性；已有 Concern 达到注意竞争条件；承诺结果返回；持续失配重新显著；当前没有焦点且探索压力正在积蓄。
 
-Attention Pulse 默认使用 `low` 推理强度和一个主要 Self Variant。深度需求达到 Dynamics 阈值时，本次焦点可以升级到 `high`，最多比较三个真正不同的反事实。焦点形成可修正下一步、需要现实信息、主要判断不再变化或继续思考成本过高时结束。
+阶段三、四的 Attention Pulse 固定使用 `low` 推理强度，优先轻量反应、现实观察和尽快结束一次聚焦。阶段五实现预测—行动—结果学习时，再根据真实运行问题决定是否增加自适应深度与有限反事实；现阶段不配置尚无行为语义的升级阈值。焦点形成可修正下一步、需要现实信息、主要判断不再变化或继续思考成本过高时结束。
 
 等待网页、导师、外部进程或额度恢复是某个承诺的现实状态。等待中的承诺留在背景，其他关切继续竞争唯一焦点；因此等待不会成为整个生命循环的终态。
 
@@ -112,54 +121,46 @@ Attention Pulse 默认使用 `low` 推理强度和一个主要 Self Variant。�
 
 模型获得当前身体简报、显著事件、相关 Concern、未决承诺、必要记忆、Narrative Self 和一个唯一焦点。它以自然语言完成 AIP、矛盾代谢、未来模拟和当前判断，不要求逐项填写心理表格。
 
-只有认知要改变持久状态或现实世界时，才提交最小结构：
+背景中可以保留多项 Concern，但一次模型上下文只装配当次候选直接关联的 Concern 和最多八项最显著的活动 Concern。这个上限是有限注意的代码不变量，不删除背景事实，也不允许活动关切数量反过来无限扩大单次模型输入。
+
+上下文明确区分本次 `candidates` 与只提供背景的 Concern；只有候选标识可以成为 `focus_id` 或 appraisal 对象。模型提交若未通过内核校验，同一个现实候选进入安静重试，校验错误作为下一次提交的事实反馈；重试成功后反馈清除。网络或模型暂时不可用不复制新的内生候选，也不以原样无信息重试制造高频调用。
+
+阶段四只有认知要改变持久状态或现实世界时，才提交以下最小结构：
 
 ```text
-focus_summary       当前真正聚焦的问题
-meaning_updates     少量会改变注意或行动的 AIP 结果，可为空
-concern_updates     新增、改变、休眠或解决，可为空
-thought_thread      值得保留的思想脉络，可为空
-commitment          至多一个新的重要行动承诺，可为空
-memory_writes       自主选择保存的经验、能力或叙事，可为空
+appraisals[]        每个当次候选的 meaning、D、O、V、U、A、certainty 与 resolution
+focus_id            alice 从候选中选择的唯一焦点
+thought_thread      alice 愿意保留的简洁意识内容
+action              none、body_shell 或 mentor_send 三者之一
 ```
 
-没有新 Commitment 也是完整认知结果。内核检查来源、数值范围、唯一承诺和事实引用，不评价思想内容是否符合导师偏好。
+内核保存事实来源，验证候选身份、数值范围、唯一焦点和单一行动；alice 可以选择并非确定性最高分的候选。没有新行动也是完整认知结果。Action Commitment、预测、ARD、记忆和 Narrative Self 提交在阶段五根据真实闭环一次性加入，不在阶段四预留空字段。
 
-## 8. 三表与普通文件
+## 8. 分阶段持久化与普通文件
 
-`life.sqlite3` 启用 WAL，只包含三组核心表：
+阶段三、四只使用 `state/current.json` 与 `journal/events.jsonl`。单一状态所有者原子替换当前快照，并稀疏追加事实变化、模型计量、导师消息、动作、Reality Event 和真正改变选择的 AIP 提交。Concern 先作为当前状态中的有惯性对象存在，不为尚未出现的 Commitment 建表。
 
-```text
-events(
-  seq, time, kind, source, correlation_id, payload
-)
+Concern 是仍在产生动力的当前对象，不是事件历史的另一份副本。`hold` 与仍有强度的残余张力继续保留；经过现实结果解释后强度归零且已 `reframed / relieved / resolved` 的对象离开活动 Concern 集，其经历仍完整存在于 journal。探索张力在重试、背景裁剪和多次重访中沿用同一 Concern 身份；行动结果获得缓解意义时，同时作用于探索压力与这项活动关切。
 
-concerns(
-  id, summary, difference, ownership, value, urgency,
-  answerability, activation, affective_salience,
-  last_aip_ref, status, created_at, updated_at, change_reason
-)
+阶段五出现预测、Action Commitment、ARD 和结果学习的跨对象原子更新以后，再决定是否引入启用 WAL 的 `life.sqlite3`。若需要，数据库最多包含 `events / concerns / commitments` 三组事实；若原子文件仍然足够，就不增加数据库依赖。
 
-commitments(
-  id, concern_id, intent, prediction, risk_or_stop,
-  action_ref, result_ref, ard_summary, reward_summary,
-  status, created_at, updated_at
-)
-```
+导师通道由 `hominald` 在 `/run/hominal/hominal.sock` 提供本地 HTTP 接口，Codex 经已有 SSH 密钥直接调用。首版只有接收导师文字、读取 alice 输出和确认送达三个端点，不开放公网端口，不建设联系人、群聊、身份系统或独立消息中继。
 
-`events` 保存身体事实、模型计量、导师消息、动作和 Reality Event，以及少量真正改变选择的 AIP 更新。`concerns` 保存有惯性的当前张力，不保存完整思维链。`commitments` 只服务重要、昂贵、不可逆、自我修改或对外行动。
+导师输入只包含消息标识、正文和可选回复关联。通道可信性由 SSH 保证；身份直接写在正文开头：`[Codex代理导师]` 或 `[人类导师·经Codex传递]`，不建立 author Schema。`hominald` 为接收事实添加内部序号和实际时间，按消息标识去重，再把它放入普通背景事件。
 
-导师消息使用 `/life/mentor/inbox` 与 `outbox` 的原子 JSON 文件。Genesis Lab 通过 SSH 轮询并维护身体外副本；消息信箱是 alice 能够理解和使用的外部关系接口，不与内部事件库合并。
+alice 通过 `mentor_send(text, reply_to?)` 形成外部文字 Action。未被 Codex 确认取得的 outbox 属于可恢复当前状态；Codex ack 后产生 `mentor.message.delivered`，导师回答则是新的 `mentor.message.received`。排队、送达和获得回答不能互相冒充。
 
-`current-state.json` 原子保存当前身体摘要、Affective State、资源、最后 Pulse、当前 AP 租约和状态版本。Narrative Self、Living Memory、Capability、作品和书信使用普通文件。`events.jsonl` 是 SQLite 关键事件的可读追加镜像，不是第二套状态真相。
+`current.json` 原子保存最近事实快照、当前身体摘要、Affective State、资源、最后 Pulse、当前 AP 租约和状态版本。Narrative Self、Living Memory、Capability、作品和书信使用普通文件。若阶段五引入 SQLite，必须一次性确定唯一状态真相，不能让 JSONL 与数据库变成两套可竞争状态。
 
-一次认知提交在单个 SQLite 事务中完成：先验证 AP 租约，再追加事件、更新 Concern 与 Commitment、递增 `state_revision`，提交成功后原子替换 `current-state.json`。普通文件先写临时文件并 `rename`，文件引用随后进入事件。
+阶段三、四的一次认知提交由唯一状态所有者完成：先验证 AP 租约，再追加有意义事件、更新当前 Concern 与 `state_revision`，最后原子替换 `state/current.json`。普通文件先写临时文件并 `rename`。阶段五若引入 SQLite，上述提交再收敛为一个数据库事务，不能同时维护另一套可写状态。
 
 ## 9. 行动与现实回链
 
 普通观察和低后果可逆动作可以直接执行。重要动作先形成一个 Action Commitment，至少保存：意图、最重要预测、主要代价或停止条件。
 
 每个身体动作获得唯一 `action_id`。适配器记录：实际命令或工具、开始时间、调用身份、退出状态、stdout/stderr 或工具返回、资源消耗和可核验外部结果。返回只说明发生了什么，不替 alice 赋予价值。
+
+对外输出统一按 Action 处理，而不是把所有内容都视为模型回复。G0 阶段三先实现 `body_shell` 与 `mentor_send`；未来图片、语音、视频、浏览器和硬件控制继续使用相同的“Action → Reality Event”回链，大型内容通过文件引用进入事件，不预先建设通用多媒体总线。
 
 Reality Event 通过 `action_id` 关联 Commitment。内核保留预测与观察，形成 ARD；alice 再解释 continuance、relatedness、expansion、自我认同和代价意义。预测、想象、记忆和导师陈述都不能直接创建“已经成功”的 Reality Event。
 
@@ -173,20 +174,18 @@ alice 能够修改服务、日志、代码和系统。内核以正向身体知�
 
 `hominal.service` 使用 `Restart=always`。进程崩溃、模型超时、网络中断和 GUI 工具失败都记录为现实事件；普通进程恢复继续同一个 `instance_id`。启动器只在 Lab 注册的 `next_generation` 意图下创建新实例，成功消费后立即改为 `resume`。
 
-SQLite 事务、WAL、原子状态文件和动作关联提供最低恢复。重启后先恢复未决 Commitment 与动作状态，再进入新 Pulse。无法确认结果的动作标记为 `unknown` 并重新观察现实，不能自动假定成功或盲目重复不可逆动作。
+阶段三、四由原子 `current.json`、追加并 `fsync` 的 journal、启动时序号对齐和动作关联提供最低恢复。重启后先恢复认知租约与动作状态，再进入新 Pulse。无法确认结果的动作形成 `unknown` 现实并等待后续观察，不自动重放。阶段五若出现真正跨对象事务，再以 SQLite/WAL 替换唯一状态真相。
 
 ## 12. 首版代码边界
 
 ```text
 body/cmd/hominald/        进程入口
-body/internal/kernel/     单一状态所有者、Pulse、AP 租约
-body/internal/dynamics/   Affective、Concern、Attention、Integrity 更新
-body/internal/model/      Responses API、用量和按需深度
-body/internal/embodiment/ Shell、文件、进程、网络、Chrome、导师
-body/internal/store/      SQLite、原子状态与普通文件
+body/internal/runtime/    单一状态所有者、Pulse、事实差分、模型、动力学、动作、导师接口与原子存储
+lab/run.py                唯一的构建、部署、导师调用、状态、停止、归档和 reset 入口
+deploy/                   systemd 单元与最小启动器
 ```
 
-首版没有 Planner、Reviewer、Emotion Agent、Narrative Agent、任务队列、向量数据库和认知工作流引擎。实验后分析模型属于 Lab，不进入 `hominald`。
+当前把真实复杂度收敛在同一个 `runtime` package 内，不按 AIP、Concern、Attention 或身体器官提前建立 package 边界。首版没有 Planner、Reviewer、Emotion Agent、Narrative Agent、任务队列、向量数据库和认知工作流引擎。实验后分析属于 Lab，不进入 `hominald`。
 
 ## 13. 阶段一验收用例
 
@@ -204,3 +203,5 @@ body/internal/store/      SQLite、原子状态与普通文件
 - alice 在第一次认知中获得当代身体简报；
 - 当前实例的自我修改不会被下一代直接继承；
 - 等待中的动作不会停止其他关切继续竞争焦点。
+- Codex 经 SSH 发来的导师文字只进入统一事件入口，不绕过当前 AP；
+- `mentor_send` 在 Codex ack 前保持未送达，重启后仍可再次取得；

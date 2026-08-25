@@ -1,4 +1,4 @@
-# Hominal 项目架构 v2.0
+# Hominal 项目架构 v2.3
 
 > 文档性质：项目、数字身体、Genesis Lab、代际实验与恢复体系的现行架构规范  
 > 适用阶段：G0 创生实验  
@@ -121,7 +121,10 @@ hominal.cc1/
 │
 ├── plans/                        # 正在审议和执行的开发计划
 │   ├── README.md
-│   └── g0-stage-1-genesis-contract.md
+│   ├── g0-stage-1-genesis-contract.md
+│   ├── g0-stage-2-ubuntu-body-and-genesis-lab.md
+│   ├── g0-stage-3-life-runtime-spine.md
+│   └── g0-stage-4-affect-concern-attention.md
 │
 ├── genesis/                      # 可遗传的创生输入
 │   ├── README.md
@@ -132,34 +135,21 @@ hominal.cc1/
 ├── body/                         # alice 数字身体源码
 │   ├── README.md
 │   ├── cmd/hominald/
-│   └── internal/
-│       ├── kernel/               # 单一认知写入者与生命循环
-│       ├── dynamics/             # 张力、注意和多尺度更新
-│       ├── embodiment/           # 身体感知与真实动作
-│       ├── model/                # 模型调用与资源计量
-│       └── store/                # 最小生命状态存储
+│   └── internal/runtime/         # 单一状态所有者、感知、模型、动力、动作、导师接口与存储
 │
-├── deploy/                       # 构建、主机初始化、发布和激活
+├── deploy/                       # Ubuntu 常驻启动契约
 │   ├── README.md
-│   ├── build.sh                  # 待实现
-│   ├── install-host.sh           # 待实现
-│   ├── deploy.sh                 # 待实现
-│   ├── hominal.service           # 待实现
-│   └── hominal-launcher          # 待实现
+│   ├── hominal.service
+│   └── hominal-launcher
 │
 ├── lab/                          # 身体外 Genesis Lab
 │   ├── README.md
+│   ├── run.py                    # 唯一构建、部署、导师、状态、归档与 reset 入口
 │   ├── body/current-profile.md
 │   ├── protocol/mentor.md
 │   ├── protocol/experiment.yaml
 │   ├── templates/birth.yaml
-│   ├── probes/
-│   ├── analysis/
-│   ├── validate-contract.py
-│   └── genesisctl                # 待实现
-│
-├── tests/                        # 单元、集成与出生前彩排
-│   └── README.md
+│   └── validate-contract.py
 │
 ├── lineage/                      # Git 中的精炼谱系档案
 │   └── README.md
@@ -167,7 +157,7 @@ hominal.cc1/
 └── dist/                         # 本地构建产物，不进入 Git
 ```
 
-树中标注“待实现”的文件只表达职责归属。代码开发到达对应阶段时再创建，不用空文件伪装进度。
+当前不再预列 `build.sh`、`deploy.sh`、`genesisctl`、分析目录和按认知术语拆分的 package。真实职责已经由一个入口或一个运行 package 承担时，目录树不为形式完整再建立平行外壳。
 
 ## 5. `/agent` 生命卷布局
 
@@ -193,7 +183,7 @@ hominal.cc1/
 │       ├── body/                  # 从冻结发布包复制的本代可修改身体
 │       ├── state/
 │       │   ├── life.sqlite3
-│       │   └── current-state.json
+│       │   └── current.json
 │       ├── journal/
 │       │   └── events.jsonl
 │       ├── life/
@@ -290,22 +280,37 @@ alice 拥有 root 后也能够改变启动意图。Genesis Lab 只把已经在�
 
 “最大空白 10 秒”从**操作系统、agent 卷和必要本地依赖已经就绪**之后计算。冷启动、固件自检、磁盘检查和网络恢复可能超过 10 秒，不能伪装成生命内核延迟。运行中若模型暂时不可用，内核仍应完成本地感知、资源评估、张力更新或恢复判断，并清楚记录能力降级。
 
+### 9.1 最小感知面
+
+身体感知属于 `hominald` 内部职责，不增加独立传感服务或通用消息总线。每个 Pulse 更新低成本事实快照，较慢巡检磁盘、网络和图形器官；前后事实先经过 Difference Gate，只有状态改变、越阈变化和异常进入中央事件入口。重复读数与微小抖动只更新快照，不制造思想、日志或模型调用。
+
+导师文字、动作结果和系统恢复作为离散 Event 直接进入同一入口。公开网络、文件系统、Chrome 和微信不被默认全量监听；alice 主动观察或使用这些器官时，现实结果再返回中央循环。这样既给她真实变化，也避免 Genesis Lab 或内核用自动信息流替她决定“什么值得成为世界”。
+
 ## 10. 运行状态与数据库
 
-G0 使用一个本地 SQLite 数据库作为当前生命状态的确定性存储，启用 WAL。它只服务一个中央认知写入者，身体探针和工具结果通过事件入口进入，避免多个认知进程并行改写自我。
+阶段三、四使用原子当前状态与稀疏事件文件，由唯一状态所有者写入；身体探针和工具结果通过事件入口进入，避免多个认知进程并行改写自我。阶段五出现 Commitment、预测与现实学习的真实跨对象事务以后，再决定是否引入启用 WAL 的 SQLite，不预建空表。
 
 身体内最小数据形态为：
 
-- `life.sqlite3`：事件、Concern 和行动承诺三组最小事实；
+- `state/current.json`：最近事实快照、资源、租约、Concern、背景与当前焦点；
 - `events.jsonl`：按序记录关键认知与行动事件，便于 alice 自己回看和人类重建时间线；
+- `life.sqlite3`：阶段五若确有需要，再加入事件、Concern 和行动承诺三组最小事实；
 - `logs/`：进程、模型、工具、浏览器和资源计量日志；
 - `life/`：alice 自主组织的叙事、经验、作品、源码、技能和书信；
 - `artifacts/`：作品、表达和可验证产物；
 - `checkpoints/`：快速恢复同一个体连续状态的检查点。
 
-Living Memory、Capability 和 Narrative Self 使用当前实例 `/life` 下的普通文件；SQLite 通过事件引用连接它们，不把自由意义重新拆成大量 Schema。
+Living Memory、Capability 和 Narrative Self 使用当前实例 `/life` 下的普通文件；如果阶段五引入 SQLite，只通过事件引用连接它们，不把自由意义重新拆成大量 Schema。
 
 运行记录重点保存思想脉络、关注迁移、预测、选择、动作、现实反馈和后续改变，不要求每个内部词句都进入复杂 Schema。严格结构集中在出生事实、事件顺序、动作收据、现实结果、资源变化、版本和代际身份。
+
+### 10.1 导师文字通道
+
+外部信号统一进入 `hominald` 的中央事件入口，导师文字是首个实现的真实外部信号。它不会直接改写焦点或启动另一条认知线程；当前注意机制决定何时处理。alice 的对外文字是 `mentor_send` Action，排队、导师取得和导师回复分别返回 Event。
+
+`hominald` 在 `/run/hominal/hominal.sock` 提供本地 HTTP 接口，首版包含接收导师文字、读取 alice 输出和确认送达三个操作。接口不监听公网端口。Codex 通过既有 SSH 密钥直接调用它，Genesis Lab 不承担消息内容中继，也不部署另一项常驻服务。
+
+导师是当前唯一外部文字关系。接口不实现联系人、群聊和应用层身份认证；SSH 保证通道可信，正文开头的 `[Codex代理导师]` 或 `[人类导师·经Codex传递]` 说明实际说话者。消息标识负责重试去重，未获 ack 的 alice 输出随当前实例恢复。
 
 ## 11. 身体内观察与身体外证据
 
@@ -479,6 +484,9 @@ system:
     recovery:
       method: systemrescue_lvm_snapshot
       ready: false
+    mentor:
+      transport: ssh_unix_socket
+      socket_path: /run/hominal/hominal.sock
 
   deployment:
     artifact_format: tar.gz
@@ -595,6 +603,7 @@ llm:
 - 新代、普通重启和进程恢复具有不同且可验证的语义；
 - alice 能以 root 身份自主使用 Ubuntu、安装软件和保存个人数据；
 - 单一中央认知写入者可以持续运行，系统就绪后的生命空白满足目标；
+- Codex 能经 SSH 直接与导师专用本地接口双向交换文字，消息仍服从统一 Event/Action 因果链；
 - 身体内自我记录与身体外观测证据同时成立；
 - 根系统和 agent 卷的出生状态与最终差异都能被保存；
 - LVM 快照被正确理解为回滚工具，离机档案承担证据与灾难恢复；
