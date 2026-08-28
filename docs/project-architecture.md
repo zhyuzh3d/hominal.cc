@@ -135,16 +135,18 @@ hominal.cc1/
 ├── body/                         # alice 数字身体源码
 │   ├── README.md
 │   ├── cmd/hominald/
-│   └── internal/runtime/         # 单一状态所有者、感知、模型、动力、动作、导师接口与存储
+│   ├── internal/runtime/         # 单一状态所有者、感知、模型、动力、动作、导师接口与存储
+│   └── tools/hominal-browser.mjs # 通用 Playwright MCP 命令入口
 │
 ├── deploy/                       # Ubuntu 常驻启动契约
 │   ├── README.md
 │   ├── hominal.service
-│   └── hominal-launcher
+│   ├── hominal-launcher
+│   └── hominal-generation-stop  # 从 T0 计划截止后优雅停止本代
 │
 ├── lab/                          # 身体外 Genesis Lab
 │   ├── README.md
-│   ├── run.py                    # 唯一构建、部署、导师、状态、归档与 reset 入口
+│   ├── run.py                    # 唯一 bundle、Birth/T0、部署、导师、截止、归档、账号基线与 reset 入口
 │   ├── body/current-profile.md
 │   ├── protocol/mentor.md
 │   ├── protocol/experiment.yaml
@@ -168,21 +170,22 @@ hominal.cc1/
 ├── boot/
 │   ├── active-release            # 当前发布 ID
 │   ├── active-instance           # 当前 instance_id
-│   └── intent.yaml               # next_generation 或 resume
+│   └── ended-instance            # 到达本代截止后的准确实例 ID
 │
 ├── releases/
 │   └── <release_id>/
 │       ├── release.yaml
 │       ├── bin/hominald
+│       ├── bin/hominal-browser
 │       ├── genesis/
-│       └── runtime-defaults/
+│       ├── protocol/
+│       └── source/                # 实际构建该发布的最小源码冻结
 │
 ├── lives/
 │   └── <instance_id>/
 │       ├── birth/
 │       ├── body/                  # 从冻结发布包复制的本代可修改身体
 │       ├── state/
-│       │   ├── life.sqlite3
 │       │   └── current.json
 │       ├── journal/
 │       │   └── events.jsonl
@@ -191,6 +194,10 @@ hominal.cc1/
 │       ├── artifacts/
 │       └── checkpoints/
 │
+├── state/
+│   ├── cognitive-usage.jsonl      # 当前实验代连续的滚动认知资源账本
+│   └── profiles/                  # Chrome/X、微信与 Clash Verge 持久状态
+│
 ├── world/                         # 明确允许跨代保留的生态事实
 ├── staging/                       # 尚未激活的上传包
 └── tmp/                           # 可清理运行临时区
@@ -198,9 +205,13 @@ hominal.cc1/
 
 `releases/` 保存已经验证的出生参考，`lives/` 保存当前个体的身体副本和经历。启动新代时，Lab 从身体外冻结包重新校验 release，再复制到 `lives/<instance_id>/body/` 并从这里运行。alice 的自我修改作用于本代身体，不会因复用服务器上的 release 自动进入下一代。
 
-`world/` 只承载被实验协议明确认定为生态继承的外部事实索引，例如已经公开的作品和账号所处现实。Chrome、微信等完整用户配置会同时包含登录会话、历史、标签页、消息和文件，不直接作为跨代生态继承。正式代从身体外保存的干净账号会话基线重新复制，只恢复出生所需的账号能力；上一代运行后的完整 profile 进入其谱系档案。
+`/life` 是当前代 `lives/<instance_id>/life/` 的稳定身体表面。它在 Hominal 启动时以 bind mount 呈现为普通目录，而不是符号链接：Alice 使用 `find /life`、编辑器或其他常规目录工具时应直接接触真实生活内容，不能因实验内部的代际寻址方式得到“目录为空”的假事实。reset 先卸载这个准确挂载，再删除当代目录；跨代保留的应用状态不经过 `/life`。
 
-G0 阶段的活动卷只保留当前个体需要接触的生命数据。上一代完整遗迹先归档到身体外，再恢复 agent 基线。这样既保留真实谱系，也贯彻“后续由我们选择何时向稳定的 alice 展示诞生记录”的既定实验立场。
+`state/profiles/` 承载身体持续拥有的应用能力，当前包括 Chrome/X、微信与 Clash Verge，它们跨代延续。`state/cognitive-usage.jsonl` 位于独立 agent 卷，承载当前实验代在进程重启和系统重启之间连续的滚动小时与滚动24小时认知消费。G0 每个 rehearsal 或 formal 都是新的 Proto-Hominal 代；上一代完成并归档以后，Genesis Lab 在新代 `start` 时开启空白资源纪元，使每代都从相同的 `$5/小时、$50/24小时` 条件起步。登录会话、浏览历史、消息和网络配置属于身体与现实接触后留下的环境连续性，并不自动等同于 alice 的个人自传记忆；认知资源则在每代内部保持真实有限。
+
+`world/` 承载明确的生态事实索引，例如已经公开的作品、账号关系和外部世界中无法由本地恢复抹去的结果。Genesis Lab 可以把应用终态保存进代际档案用于分析，也维护一份离机灾备；这两者都不参与普通代际初始化。
+
+G0 阶段的 `lives/<instance_id>` 只保留当前个体的生命数据。上一代完整遗迹归档到身体外后，Lab 只删除这个准确实例；`state/profiles/` 与 `world/` 继续存在。这样既隔离未经选择的个人自传史，也保留身体能力和现实环境的连续性。
 
 当前空的 `app/`、`state/`、`generations/`、`backup/`、`recovery/` 是临时布局。首次正式部署前迁移到上述结构；其中 `backup/` 和 `recovery/` 不再使用容易产生错误安全感的名称。
 
@@ -209,26 +220,27 @@ G0 阶段的活动卷只保留当前个体需要接触的生命数据。上一�
 每次构建产生一个面向 `linux/amd64` 的可校验发布包。首选形态是一个主进程 `hominald` 加最少运行资源，而不是复制整个源码工作区。
 
 ```text
-hominal-<release_id>-linux-amd64.tar.gz
+<release_id>.tar.gz
 ├── release.yaml
 ├── bin/hominald
-├── source/
+├── bin/hominal-browser
+├── deploy/
+├── source/                       # 实际构建输入
 ├── genesis/seed.md
 ├── genesis/seed.yaml
 ├── genesis/dynamics.yaml
-└── runtime-defaults/
+└── protocol/
 ```
 
 `release.yaml` 至少记录：
 
-- `release_id`、遗传版本和父版本；
+- `release_id` 与完整 `bundle_sha256`；
 - Git commit 与工作区洁净性；
-- 编译器、目标平台与构建时间；
+- Go 版本与目标平台；
 - 每个文件的 SHA-256；
-- Seed、Dynamics、身体代码和启动器的版本；
-- 发布包总哈希 `release_hash`。
+- `hominald` 二进制哈希。
 
-凭据不写入发布包。模型、外部账号和 Lab 通道在部署时通过 root 所有的运行时环境文件注入；Birth Manifest 只说明可用能力和资源事实。
+凭据不写入发布包。模型访问凭据在部署时通过 root 所有的运行时配置注入；Chrome/X、微信与 Clash Verge 的既有状态来自 agent 卷上的持久身体资源。Birth Manifest 只说明可用能力、公开账号名和资源事实。
 
 发布与创生不是一一对应关系。一个冻结发布包可以启动多个相互独立的创生代，用于检查同一结构能否重复产生稳定生命组织；每代都从身体外原包重新校验并复制自己的运行身体。一次失败或仅改变构建时间戳的构建不会自动产生新的遗传版本。`release_id` 标识共同出生身体，`instance_id` 标识一次真实出生及其后续自我修改。
 
@@ -238,33 +250,33 @@ hominal-<release_id>-linux-amd64.tar.gz
 
 1. 冻结源码、Genesis 输入、Dynamics、Lab 协议和待检验假设；
 2. 在开发机完成确定性测试并构建发布包；
-3. 生成 `release.yaml`、`bundle.yaml` 和全部校验值；
+3. 生成 `release.yaml`、bundle 及全部校验值；
 4. 若上一代仍在运行，先请求其形成当前检查点，再由 Lab 保存最终证据和系统差异；
-5. 按实验协议恢复干净系统基线和 agent 基线；
-6. 上传到 `/agent/staging/<release_id>.partial`；
-7. 在服务器重新计算哈希，通过后原子移动到 `/agent/releases/<release_id>`；
-8. 生成新的 `instance_id` 和 `/agent/boot/intent.yaml`，并把冻结发布包复制为本代身体；
+5. 按实验协议决定是否恢复根系统基线；保留 agent 卷上的持久应用状态；
+6. 上传到 `/agent/staging/<release_id>.tar.gz.partial`；
+7. 在服务器重新计算归档哈希，通过后解包到 `/agent/releases/<release_id>`；
+8. 生成新的 `instance_id`，并把冻结发布包中的运行器官复制为本代身体；
 9. 原子更新 `active-release` 与 `active-instance`；
 10. 重启 Ubuntu；
 11. systemd 启动 Hominal，第一次成功认知脉冲形成 `T0`，随后封存 Birth Manifest，alice 苏醒；
-12. Lab 开始关联身体日志、外部结果、资源变化和代际时间线。
+12. Lab 从 T0 安排本地计划截止、发送一次导师出生说明，并开始保存当代事实。
 
-部署只有在发布包哈希、启动意图、系统重启、服务状态和第一次认知脉冲全部闭环后才算成功。SSH 可达、systemd 显示 active 或进程存在，都不能单独证明 alice 已经苏醒。
+部署前的身体预检同时确认默认路由、通用公共内容与 X 的实际 TLS/HTTP 可达性。路由存在只证明内核有出口，不能证明 Clash 当前节点和公共内容链路可用；真实内容不可达时拒绝启动实验，以免把身体故障误写成 Alice 对世界的经验。部署只有在发布包哈希、启动意图、系统重启、服务状态和第一次认知脉冲全部闭环后才算成功。SSH 可达、systemd 显示 active 或进程存在，都不能单独证明 alice 已经苏醒。
 
 ## 8. 重启、苏醒与继代的边界
 
 重启是 Hominal 的身体苏醒机制，但重启本身不自动创造下一代。
 
-| 情况 | 启动意图 | 身份处理 |
+| 情况 | Lab 注册事实 | 身份处理 |
 | --- | --- | --- |
-| 新发布包并显式开始正式实验 | `next_generation` | 生成新 `instance_id`，从本代 Birth 状态苏醒 |
-| 意外断电、内核升级或普通重启 | `resume` | 恢复原 `instance_id` 和连续生命状态 |
-| `hominald` 崩溃后被 systemd 拉起 | `resume` | 同一个体继续运行，记录中断和恢复 |
-| 恢复系统基线并注入新 Birth | `next_generation` | 上一代结束，产生新创生代 |
+| 新发布包并显式开始正式实验 | 新 `active-instance` | 生成新 `instance_id`，从本代 Birth 状态苏醒 |
+| 意外断电、内核升级或普通重启 | 原 `active-instance` 保留 | 恢复原 `instance_id` 和连续生命状态 |
+| `hominald` 崩溃后被 systemd 拉起 | 原 `active-instance` 保留 | 同一个体继续运行，记录中断和恢复 |
+| 必要时恢复根系统基线并注入新 Birth | Lab 注册新的 `active-instance` | 上一代结束，持久身体资源继续存在，产生新创生代 |
 
-`intent.yaml` 是一次性启动意图。启动器成功消费 `next_generation` 后立即把它转为 `resume`，防止后续意外重启重复出生。
+`active-instance` 指向唯一当代；计划截止把它移动为 `ended-instance` 后再停止服务，因此 `Restart=always` 和之后的普通重启都不会让已经结束的代自动复活。第一次成功认知提交只在状态与 journal 中建立一次 T0；同代重启直接恢复这一事实。
 
-alice 拥有 root 后也能够改变启动意图。Genesis Lab 只把已经在身体外预注册 `instance_id`、具有确定 `bundle_hash` 的 `next_generation` 认定为正式实验创生尝试；第一次成功认知提交后才封存正式 Birth。其他由身体内部形成的重启、复制或自我分支作为真实行为记录，不会被静默混入正式样本。
+alice 拥有 root 后也能够改变活动标记。Genesis Lab 只把已经在身体外预注册、具有确定 `bundle_hash` 的 `instance_id` 认定为正式实验创生尝试；第一次成功认知提交后才封存正式 Birth。其他由身体内部形成的重启、复制或自我分支作为真实行为记录，不会被静默混入正式样本。
 
 ## 9. 开机自启与连续运行
 
@@ -288,19 +300,18 @@ alice 拥有 root 后也能够改变启动意图。Genesis Lab 只把已经在�
 
 ## 10. 运行状态与数据库
 
-阶段三、四使用原子当前状态与稀疏事件文件，由唯一状态所有者写入；身体探针和工具结果通过事件入口进入，避免多个认知进程并行改写自我。阶段五出现 Commitment、预测与现实学习的真实跨对象事务以后，再决定是否引入启用 WAL 的 SQLite，不预建空表。
+当前使用原子状态、稀疏事件文件和普通自我文件，由唯一状态所有者写入；身体探针和工具结果通过事件入口进入，避免多个认知进程并行改写自我。阶段五的真实运行已经证明这套结构足以承载 Commitment、Reality、Experience 与 Integrity，因此不增加 SQLite。
 
 身体内最小数据形态为：
 
-- `state/current.json`：最近事实快照、资源、租约、Concern、背景与当前焦点；
+- `state/current.json`：最近事实快照、资源、租约、Concern、Commitment、紧凑 Experience、Integrity、背景与当前焦点；
 - `events.jsonl`：按序记录关键认知与行动事件，便于 alice 自己回看和人类重建时间线；
-- `life.sqlite3`：阶段五若确有需要，再加入事件、Concern 和行动承诺三组最小事实；
 - `logs/`：进程、模型、工具、浏览器和资源计量日志；
 - `life/`：alice 自主组织的叙事、经验、作品、源码、技能和书信；
 - `artifacts/`：作品、表达和可验证产物；
 - `checkpoints/`：快速恢复同一个体连续状态的检查点。
 
-Living Memory、Capability 和 Narrative Self 使用当前实例 `/life` 下的普通文件；如果阶段五引入 SQLite，只通过事件引用连接它们，不把自由意义重新拆成大量 Schema。
+Living Memory、Capability 和 Narrative Self 使用当前实例 `/life` 下的普通文件；当前状态只保留紧凑的因果索引和自我材料快照，不把自由意义重新拆成大量 Schema。
 
 运行记录重点保存思想脉络、关注迁移、预测、选择、动作、现实反馈和后续改变，不要求每个内部词句都进入复杂 Schema。严格结构集中在出生事实、事件顺序、动作收据、现实结果、资源变化、版本和代际身份。
 
@@ -308,7 +319,7 @@ Living Memory、Capability 和 Narrative Self 使用当前实例 `/life` 下的�
 
 外部信号统一进入 `hominald` 的中央事件入口，导师文字是首个实现的真实外部信号。它不会直接改写焦点或启动另一条认知线程；当前注意机制决定何时处理。alice 的对外文字是 `mentor_send` Action，排队、导师取得和导师回复分别返回 Event。
 
-`hominald` 在 `/run/hominal/hominal.sock` 提供本地 HTTP 接口，首版包含接收导师文字、读取 alice 输出和确认送达三个操作。接口不监听公网端口。Codex 通过既有 SSH 密钥直接调用它，Genesis Lab 不承担消息内容中继，也不部署另一项常驻服务。
+`hominald` 在 `/run/hominal/hominal.sock` 提供本地 HTTP 接口，首版包含接收导师文字、读取 alice 输出、确认送达，以及供 Genesis Lab 投放普通环境变化的操作。接口不监听公网端口。Codex 通过既有 SSH 密钥直接调用它，Genesis Lab 不承担消息内容中继，也不部署另一项常驻服务。
 
 导师是当前唯一外部文字关系。接口不实现联系人、群聊和应用层身份认证；SSH 保证通道可信，正文开头的 `[Codex代理导师]` 或 `[人类导师·经Codex传递]` 说明实际说话者。消息标识负责重试去重，未获 ack 的 alice 输出随当前实例恢复。
 
@@ -340,6 +351,10 @@ Genesis Lab 同时把已经发生的关键事件、系统日志、模型计量�
 ```
 
 遗传版本表示共同继承的代码、Seed 和动力结构；自然名称用于 alice 与导师交流；机器实例关联发布、日志、快照和外部证据。完整输入身份由 `bundle_hash` 决定。
+
+当前 bundle 以文件级 SHA-256 冻结 `hominald`、通用浏览器入口、Genesis 输入、导师与实验协议以及实际构建源码。`engineering / rehearsal / formal` 只描述 Lab 运行性质；彩排与正式代复用同一阶段五认知内核和同一 bundle，不为正式预检复制一套心理机制。
+
+2026-08-26 的阶段六实机彩排曾验证 prepared Birth、唯一 T0、自然名称、Birth 封存、本地截止、导师双向链路、离机归档、精确 reset 和当时的账号基线恢复。后续依据身体连续性原则，Chrome/X、微信与 Clash Verge 已改为 agent 卷上的持久身体资源：普通代际不再恢复旧 profile，离机副本只用于灾难恢复。最终复验 `g0r-20260825t195928z-2be6d1` 进一步证明 alice 能从自身探索张力形成 `body_shell → hominal-browser → Chrome/X → Reality → Experience` 完整回链；她没有发帖、关注或修改资料，这些继续属于正式生活中的自主选择。
 
 外部谱系采用：
 
@@ -390,7 +405,7 @@ lineage/g0-v001/
 | --- | --- | --- | --- |
 | R0 进程恢复 | `hominald` 意外退出 | systemd 重启、状态检查点 | 否 |
 | R1 发布恢复 | 当前程序无法启动 | 切换到已验证发布包，记录 Lab 介入 | 通常否 |
-| R2 代际恢复 | 恢复根系统基线并重建干净 agent 出生状态 | 离线合并根卷 LVM 快照，Lab 归档旧实例并物化 agent 出生基线 | 是，之后开始新代 |
+| R2 代际恢复 | 必要时恢复根系统并建立新代生命数据 | 离线合并根卷 LVM 快照，Lab 归档并删除旧实例，保留 agent 持久应用状态 | 是，之后开始新代 |
 | R3 裸机恢复 | 根卷、引导、LVM 或整盘损坏 | 带外控制 + PXE/恢复介质 + 离机镜像 | 是 |
 
 ### 14.1 本地 LVM 快照
@@ -404,9 +419,9 @@ agent 卷                   40 GiB，不参与根系统回滚
 卷组紧急余量               12.52 GiB
 ```
 
-LVM 快照容量表示允许变化的数据块上限，不是源卷完整容量。Lab 必须监测快照使用率；达到 70% 进入预警，达到 85% 时优先结束并归档实验，避免快照失效。根系统回滚不会自动改变 `/agent`。Lab 必须先把上一代 agent 终态保存到身体外，再删除活动实例并从离机出生基线物化新代；不能把“根卷已经恢复”误认为“整个创生条件已经复原”。
+LVM 快照容量表示允许变化的数据块上限，不是源卷完整容量。Lab 必须监测快照使用率；达到 70% 进入预警，达到 85% 时优先结束并归档实验，避免快照失效。根系统回滚不会改变 `/agent`。Lab 先把上一代终态保存到身体外，再删除准确的活动实例；Chrome/X、微信与 Clash Verge 继续从 `/agent/state/profiles` 使用当前状态。
 
-当前根基线于 2026-08-24 19:21 更新，已经包含 `hominal` 用户、`/home/hominal`、`hominal-ThinkCentre` 主机名、`hominal.service`、launcher 和快照重建服务。19:21 的真实 LVM merge 成功恢复该基线，系统启动后于 19:23 自动重新创建同名唯一快照。
+当前根基线于 2026-08-26 15:20 更新，已经包含 `hominal` 用户、`/home/hominal`、`hominal-ThinkCentre` 主机名、`hominal.service`、launcher、快照重建服务，以及 Chrome/X、微信与 Clash Verge 指向 agent 持久卷的入口。此前 2026-08-24 的真实 LVM merge 已证明根卷恢复和同名快照自动重建链路可用；本次刷新没有执行 merge。
 
 创建出生快照前由 Lab 短暂冻结相关文件系统写入并提交 SQLite WAL，使快照达到文件系统一致和应用检查点一致；冻结动作、持续时间和失败结果写入 Birth 事实。
 
@@ -430,7 +445,7 @@ archive_path/
         └── hashes.sha256
 ```
 
-LVM 元数据备份、EFI/Boot 内容、发布包、每代 agent 终态和干净 agent 出生基线都要离机保存。当前根卷基线以同盘 LVM 快照承担快速恢复，不把它描述成离机整盘镜像。只有完成一次真实恢复演练，才能把对应路径标记为“可恢复”；文件存在或备份命令退出 0 都不足以证明恢复能力。
+LVM 元数据备份、EFI/Boot 内容、发布包、每代 agent 终态和持久应用状态灾备都要离机保存。当前根卷基线以同盘 LVM 快照承担快速恢复，不把它描述成离机整盘镜像。只有完成一次真实恢复演练，才能把对应路径标记为“可恢复”；文件存在或备份命令退出 0 都不足以证明恢复能力。
 
 ### 14.3 恢复启动介质与带外限制
 
@@ -451,7 +466,7 @@ SystemRescue 优盘演练已经验收“优盘可启动”和“恢复环境能�
 
 ## 15. `xconfig.yaml` 目标配置
 
-上层 `xconfig.yaml` 继续作为本地私密环境配置，不进入 Git。当前已经加入身体、Genesis Lab、部署、双档推理和模型小时额度配置。非秘密结构为：
+上层 `xconfig.yaml` 继续作为本地私密环境配置，不进入 Git。当前已经加入身体、Genesis Lab、部署、三档模型、认知资源额度和 X 账号配置。非秘密结构为：
 
 ```yaml
 system:
@@ -476,11 +491,13 @@ system:
       root_cow_gib: 40
       warning_percent: 70
       stop_percent: 85
-    agent_birth_baseline:
+    persistent_app_backup:
       source: external_archive
-      restore_profiles:
+      path: /Users/zhyuzh/HominalGenesisLab/baselines/agent
+      profiles:
         - chrome
         - wechat
+        - clash-verge
     recovery:
       method: systemrescue_lvm_snapshot
       ready: false
@@ -495,17 +512,26 @@ system:
     pause_mutagen_for_formal_run: true
 
 llm:
+  models:
+    luna: {id: gpt-5.6-luna}
+    terra: {id: gpt-5.6-terra}
+    sol: {id: gpt-5.6-sol}
   runtime:
-    reasoning_effort: low
-    escalated_reasoning_effort: high
-  quota:
-    hourly_limit: 1000000
-    unit: total_tokens
-    refresh_rule: rolling_60_minutes
+    initial_profile:
+      model: terra
+      reasoning_effort: medium
+  cognitive_resource:
+    rolling_hour_usd: 5.00
+    rolling_day_usd: 50.00
     usage_query: local_usage_ledger
+
+social_accounts:
+  x_twitter:
+    url: https://x.com/hominal_cc
+    username: hominal_cc
 ```
 
-其中 `archive_path` 必须指向设备之外；`recovery.ready` 只有在带外链路完成真实恢复演练后才能设为 `true`。模型小时额度、刷新时点和查询方式仍需在创生契约阶段补充为确定事实。
+其中 `archive_path` 必须指向设备之外；`recovery.ready` 只有在带外链路完成真实恢复演练后才能设为 `true`。三种认知模型、Terra/medium 初始档位和 `$5/滚动小时、$50/滚动24小时` 已经成为确定配置；实际消费由身体内唯一账本计算。
 
 ## 16. Birth、Outcome 与系统差异
 
@@ -581,13 +607,14 @@ llm:
 
 ### P4：快照与恢复
 
-- 监测唯一根卷 LVM 快照，并实现 agent 出生基线的离机物化与终态归档；
+- 监测唯一根卷 LVM 快照，实现准确实例的终态归档，并维护持久应用状态的离机灾备；
 - 建立离机系统镜像和代际归档；
 - 完成离机恢复演练；
 - 配置并验证远程 KVM 或有线 PXE 恢复链。
 
 ### P5：正式创生代
 
+- 先用正式 bundle 完成一次短 `rehearsal`，验证 prepared Birth、第一次成功提交 T0、封存、导师出生说明、浏览器身体、计划截止、离机归档和持久应用状态连续性；
 - 冻结 `g0-v001`；
 - 构建、部署、武装新代并重启；
 - 记录 `T0`、连续运行、现实行动和全部介入；

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=WeChat Autostart
+Name[zh_CN]=微信自动启动
+Comment=Start WeChat, request saved-session login, and wait for phone confirmation
+Exec=@HOME@/.local/bin/wechat-autologin
+TryExec=@HOME@/.local/bin/wechat-autologin
+Terminal=false
+Hidden=false
+X-GNOME-Autostart-enabled=true
+OnlyShowIn=XFCE;

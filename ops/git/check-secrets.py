@@ -20,7 +20,7 @@ from typing import Iterable
 ZERO_OID = "0" * 40
 SENSITIVE_KEY = re.compile(
     r"(?:^|[_-])(?:api[_-]?key|access[_-]?key|app[_-]?secret|auth(?:orization)?|"
-    r"client[_-]?secret|cookie|credential|pass(?:word)?|private[_-]?key|secret|token)(?:$|[_-])",
+    r"client[_-]?secret|cookie|credential|pass(?:word)?|phone|mobile|private[_-]?key|secret|token)(?:$|[_-])",
     re.IGNORECASE,
 )
 FORBIDDEN_NAME = re.compile(

@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+instance_id=${1:-}
+[[ "$instance_id" =~ ^[A-Za-z0-9._-]+$ ]]
+
+exec 9>/run/lock/hominal-generation-stop.lock
+flock 9
+
+active_file=/agent/boot/active-instance
+ended_file=/agent/boot/ended-instance
+instance_root=/agent/lives/$instance_id
+active=
+if [[ -r "$active_file" ]]; then
+  active=$(tr -d '\r\n' <"$active_file")
+fi
+
+if [[ "$active" != "$instance_id" ]]; then
+  exit 0
+fi
+
+drain_timeout_seconds=180
+drain_deadline=$((SECONDS + drain_timeout_seconds))
+drain_completed=false
+state_file=$instance_root/state/current.json
+while (( SECONDS < drain_deadline )); do
+  if ! systemctl is-active --quiet hominal.service; then
+    drain_completed=true
+    break
+  fi
+  if [[ -r "$state_file" ]] && python3 - "$state_file" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    state = json.load(handle)
+open_statuses = {"formed", "acting", "reality_available", "reality_unknown"}
+open_commitment = any(item.get("status") in open_statuses for item in state.get("commitments", []))
+open_feedback = any(
+    item.get("kind") == "mentor_received"
+    and item.get("status") in {"pending", "in_focus", "retry_wait"}
+    and isinstance(item.get("payload"), dict)
+    and item["payload"].get("commitment_id")
+    for item in state.get("background", [])
+)
+open_outbox = any(
+    item.get("status") in {"queued", "delivered"}
+    and not item.get("replied_at")
+    for item in state.get("mentor", {}).get("outbox", [])
+)
+raise SystemExit(1 if state.get("lease") or state.get("pending_action") or open_commitment or open_feedback or open_outbox else 0)
+PY
+  then
+    drain_completed=true
+    break
+  fi
+  sleep 1
+done
+
+systemctl stop hominal.service
+if [[ -d "$instance_root/state" ]]; then
+  printf '{"instance_id":"%s","ended_at":"%s","reason":"planned_end","drain_completed":%s,"drain_timeout_seconds":%d}\n' \
+    "$instance_id" "$(date --iso-8601=seconds)" "$drain_completed" "$drain_timeout_seconds" >"$instance_root/state/generation-ended.json"
+fi
+printf '%s\n' "$instance_id" >"$ended_file.partial"
+mv "$ended_file.partial" "$ended_file"
+rm -f -- "$active_file" /agent/boot/active-release

@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+mode="${1:-check}"
+target_user="${2:-hominal}"
+
+if [[ "${EUID}" -ne 0 ]]; then
+  echo "This command must run as root." >&2
+  exit 1
+fi
+if [[ "${mode}" != "check" && "${mode}" != "migrate" ]]; then
+  echo "Usage: $0 [check|migrate] [user]" >&2
+  exit 2
+fi
+if ! mountpoint -q /agent; then
+  echo "/agent is not mounted; refusing to touch application state." >&2
+  exit 1
+fi
+
+user_home="$(getent passwd "${target_user}" | cut -d: -f6)"
+user_uid="$(id -u "${target_user}")"
+user_gid="$(id -g "${target_user}")"
+profile_root="/agent/state/profiles/clash-verge"
+stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+
+sources=(
+  "${user_home}/.config/io.github.clash-verge-rev.clash-verge-rev"
+  "${user_home}/.config/mihomo"
+  "${user_home}/.local/share/io.github.clash-verge-rev.clash-verge-rev"
+  "${user_home}/.config/autostart/clash-verge.desktop"
+  "${user_home}/.local/share/applications/clash-verge.desktop"
+  "${user_home}/.local/share/applications/clash-verge-handler.desktop"
+)
+targets=(
+  "${profile_root}/app-config"
+  "${profile_root}/mihomo"
+  "${profile_root}/app-data"
+  "${profile_root}/desktop/autostart.desktop"
+  "${profile_root}/desktop/application.desktop"
+  "${profile_root}/desktop/handler.desktop"
+)
+
+check_links() {
+  local index source target
+  for index in "${!sources[@]}"; do
+    source="${sources[$index]}"
+    target="${targets[$index]}"
+    if [[ ! -e "${target}" ]]; then
+      echo "Missing persistent target: ${target}" >&2
+      return 1
+    fi
+    if [[ ! -L "${source}" || "$(readlink "${source}")" != "${target}" ]]; then
+      echo "Application state is not linked to the persistent target: ${source}" >&2
+      return 1
+    fi
+  done
+  echo "persistent_app_state=passed"
+}
+
+start_verge() {
+  mkdir -p /agent/state/logs
+  chown "${user_uid}:${user_gid}" /agent/state/logs
+  systemctl start clash-verge-service.service || true
+  if [[ -S "/run/user/${user_uid}/bus" ]] && ! pgrep -u "${target_user}" -x clash-verge >/dev/null; then
+    runuser -u "${target_user}" -- env \
+      HOME="${user_home}" \
+      DISPLAY=:0 \
+      XAUTHORITY="${user_home}/.Xauthority" \
+      XDG_RUNTIME_DIR="/run/user/${user_uid}" \
+      DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${user_uid}/bus" \
+      /bin/sh -c 'nohup /usr/bin/clash-verge >>/agent/state/logs/clash-verge.log 2>&1 &'
+  fi
+}
+
+if [[ "${mode}" == "check" ]]; then
+  check_links
+  exit 0
+fi
+
+systemctl stop clash-verge-service.service || true
+pkill -TERM -u "${target_user}" -x clash-verge 2>/dev/null || true
+for _ in $(seq 1 40); do
+  if ! pgrep -u "${target_user}" -x clash-verge >/dev/null && ! pgrep -x verge-mihomo >/dev/null; then
+    break
+  fi
+  sleep 0.25
+done
+if pgrep -u "${target_user}" -x clash-verge >/dev/null || pgrep -x verge-mihomo >/dev/null; then
+  echo "Clash Verge did not stop cleanly; no files were changed." >&2
+  start_verge
+  exit 1
+fi
+
+mkdir -p "${profile_root}"
+chown "${user_uid}:${user_gid}" "${profile_root}"
+
+for index in "${!sources[@]}"; do
+  source="${sources[$index]}"
+  target="${targets[$index]}"
+  mkdir -p "$(dirname "${target}")" "$(dirname "${source}")"
+
+  if [[ -L "${source}" ]]; then
+    if [[ "$(readlink "${source}")" != "${target}" ]]; then
+      echo "Unexpected symbolic link at ${source}; refusing to replace it." >&2
+      start_verge
+      exit 1
+    fi
+    continue
+  fi
+
+  if [[ ! -e "${target}" ]]; then
+    if [[ ! -e "${source}" ]]; then
+      echo "Neither source nor persistent target exists for ${source}." >&2
+      start_verge
+      exit 1
+    fi
+    partial="${target}.partial.$$"
+    rm -rf -- "${partial}"
+    cp -a -- "${source}" "${partial}"
+    chown -R "${user_uid}:${user_gid}" "${partial}"
+    mv -- "${partial}" "${target}"
+  fi
+
+  if [[ -e "${source}" ]]; then
+    backup="${source}.root-backup.${stamp}"
+    mv -- "${source}" "${backup}"
+  fi
+  ln -s "${target}" "${source}"
+  chown -h "${user_uid}:${user_gid}" "${source}"
+done
+
+check_links
+start_verge
+echo "migration=passed"

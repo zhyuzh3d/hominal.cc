@@ -8,3 +8,9 @@
 - [G0 阶段二：可重复 Ubuntu 身体与 Genesis Lab](./g0-stage-2-ubuntu-body-and-genesis-lab.md)（已完成）
 - [G0 阶段三：生命运行脊柱](./g0-stage-3-life-runtime-spine.md)（已完成）
 - [G0 阶段四：最小情感—关切—注意动力学](./g0-stage-4-affect-concern-attention.md)（已完成）
+- [G0 阶段五：现实学习、记忆与叙事自我](./g0-stage-5-reality-learning-and-self.md)（已完成）
+- [G0 阶段六：正式创生链路与出生前预检](./g0-stage-6-formal-genesis-preflight.md)（已完成）
+- [G0 阶段七：第一代正式创生与开放世界生活实验](./g0-stage-7-first-formal-generation.md)（已完成；`alice0826n` 结构性失败）
+- [G0 阶段 7.1：因果代谢与处境化探索重构](./g0-stage-7-1-causal-metabolism-and-situated-exploration.md)（已完成；最终正式实例 `g0f-20260826t125913z-dabbcb`）
+- [G0 阶段八：自生关切与叙事自我成长](./g0-stage-8-self-originating-concern-and-narrative-growth.md)（待讨论，尚未实施）
+- [G0 阶段九：反事实演化与技能型学习](./g0-stage-9-counterfactual-evolution-and-skill-learning.md)（方向预留；阶段八完成后细化）

@@ -1,0 +1,14 @@
+[Unit]
+Description=Rename the Ubuntu desktop account to hominal
+DefaultDependencies=no
+After=local-fs.target
+Before=systemd-user-sessions.service display-manager.service ssh.service
+ConditionPathExists=/etc/hominal-user-migration.pending
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/hominal-rename-user
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target

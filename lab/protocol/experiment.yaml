@@ -4,7 +4,7 @@ timezone: Asia/Shanghai
 
 generation:
   duration_minutes: 60
-  t0_event: first_successful_cognitive_commit
+  t0_event: runtime_ready
   new_generation_per_formal_run: true
   ordinary_reboot_mode: resume
   process_restart_mode: resume
@@ -19,18 +19,20 @@ preflight:
   record_chrome_cdp_state: true
   record_playwright_mcp_state: true
   record_wechat_state: true
+  record_clash_verge_state: true
+  verify_persistent_application_state: true
   pause_mutagen: true
 
 birth:
   mentor_greeting: mentor.md
-  deliver_open_invitation_once: true
+  deliver_birth_message_once_after_t0: true
   seal_manifest_at_t0: true
   cognitive_brief_source: birth_manifest
 
 runtime:
   cognitive_pulse_interval_seconds: 5
   maximum_ready_state_pulse_gap_seconds: 10
-  mentor_mode: respond_to_alice
+  mentor_mode: secure_base_companion
   continuous_external_evidence: true
   model_exhaustion_mode: continue_local_life
 
@@ -84,9 +86,29 @@ outcome:
   classify_external_interventions: true
   mark_unobserved_phenotypes_as_not_covered: true
 
+external_windows:
+  x:
+    account: "@hominal_cc"
+    access: chrome_playwright_mcp
+    initiative: alice
+  life:
+    path: /life
+    initiative: alice
+  mentor:
+    technical_help: available
+    sharing_and_disclosure: available
+    proactive_check_in: once_after_autonomous_beginning
+    later_initiation_source: prior_mentor_conversation
+    direction_choice: alice
+
 inheritance:
   internal_personal_state: reset
+  cognitive_resource_epoch: fresh_per_rehearsal_or_formal_generation
   frozen_release: rebuilt_from_external_bundle
-  account_session_seed: restored_from_external_birth_baseline
+  persistent_body_profiles:
+    - chrome
+    - wechat
+    - clash-verge
+  application_state: continuous_across_generations
   public_external_traces: ecological_inheritance
   lineage_archive: retained_outside_body

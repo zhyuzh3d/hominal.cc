@@ -13,18 +13,31 @@ fi
 
 rm -rf -- "$temporary"
 install -d -m 0700 "$temporary/boot" "$temporary/efi"
+sync
+lvcreate --snapshot --size 40G --name system-baseline "$origin"
+snapshot_created=true
+cleanup_snapshot() {
+  if [[ ${snapshot_created:-false} == true ]]; then
+    lvremove -f "$snapshot" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup_snapshot ERR
+
 rsync -aHAX --numeric-ids --delete --exclude='/efi/' /boot/ "$temporary/boot/"
 rsync -aHAX --numeric-ids --delete /boot/efi/ "$temporary/efi/"
 dpkg-query -W -f='${binary:Package}\t${Version}\n' >"$temporary/packages.tsv"
 findmnt --real >"$temporary/findmnt.txt"
+lsblk -o NAME,PATH,SIZE,TYPE,FSTYPE,LABEL,UUID,PARTUUID,MOUNTPOINTS,MODEL,TRAN >"$temporary/lsblk.txt"
+blkid >"$temporary/blkid.txt"
+sfdisk --dump /dev/sda >"$temporary/sda.sfdisk"
 uname -a >"$temporary/uname.txt"
+hostnamectl >"$temporary/hostnamectl.txt"
+cp /etc/os-release "$temporary/os-release"
 vgcfgbackup -f "$temporary/ubuntu-vg.vgcfg" ubuntu-vg
 date --iso-8601=seconds >"$temporary/created-at.txt"
 
 rm -rf -- "$recovery_root"
 mv -- "$temporary" "$recovery_root"
-sync
-lvcreate --snapshot --size 40G --name system-baseline "$origin"
 lvchange --monitor y "$snapshot" || true
 udevadm settle
 if snapshot_mount=$(findmnt --noheadings --output TARGET --source "$snapshot"); then
@@ -34,4 +47,6 @@ if findmnt --noheadings --source "$snapshot" >/dev/null; then
   printf 'Baseline snapshot must not be mounted: %s\n' "$snapshot" >&2
   exit 1
 fi
+snapshot_created=false
+trap - ERR
 printf 'Created %s and recovery files in %s\n' "$snapshot" "$recovery_root"

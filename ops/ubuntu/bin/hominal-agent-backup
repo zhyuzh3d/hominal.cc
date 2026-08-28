@@ -10,9 +10,9 @@ temporary="$generation_root/.${generation_name}.tmp"
 destination="$generation_root/$generation_name"
 latest="$generation_root/latest"
 
-install -d -m 0750 -o zhyuzh -g zhyuzh "$generation_root"
+install -d -m 0750 -o hominal -g hominal "$generation_root"
 rm -rf -- "$temporary"
-install -d -m 0750 -o zhyuzh -g zhyuzh "$temporary/app" "$temporary/state"
+install -d -m 0750 -o hominal -g hominal "$temporary/app" "$temporary/state"
 
 app_link_options=()
 state_link_options=()
@@ -33,7 +33,7 @@ rsync -aHAX --numeric-ids --delete \
   printf 'host=%s\n' "$(hostname)"
 } >"$temporary/manifest.txt"
 
-chown -R zhyuzh:zhyuzh "$temporary"
+chown -R hominal:hominal "$temporary"
 mv -- "$temporary" "$destination"
 ln -sfn "$generation_name" "$latest"
 printf '%s\n' "$destination"

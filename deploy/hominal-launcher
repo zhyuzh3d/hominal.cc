@@ -14,6 +14,28 @@ instance_root=$agent_mount/lives/$instance_id
 executable=$instance_root/body/bin/hominald
 test -x "$executable"
 
+# /life is a body surface, so ordinary directory tools must observe it as a
+# directory.  The per-generation storage location is an implementation detail;
+# exposing it as a symlink made `find /life` silently inspect only the link and
+# repeatedly taught a false environmental fact.  Reset unmounts the previous
+# generation before changing active-instance, so an existing mount here belongs
+# to this same generation and can be reused after a service restart.
+life_source=$instance_root/life
+life_surface=/life
+test -d "$life_source"
+if [[ -L "$life_surface" ]]; then
+  rm -f -- "$life_surface"
+fi
+install -d -m 0755 "$life_surface"
+if ! mountpoint -q "$life_surface"; then
+  mount --bind "$life_source" "$life_surface"
+fi
+
+install -d -m 0755 "$agent_mount/state"
+
 export HOMINAL_INSTANCE_ID="$instance_id"
 export HOMINAL_INSTANCE_ROOT="$instance_root"
+export HOMINAL_RESOURCE_LEDGER="$agent_mount/state/cognitive-usage.jsonl"
+export PATH="$instance_root/body/bin:$PATH"
+cd "$instance_root"
 exec "$executable"

@@ -76,6 +76,8 @@ func (h *mentorHandler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	switch {
 	case request.Method == http.MethodPost && request.URL.Path == "/v1/mentor/inbox":
 		h.receive(writer, request)
+	case request.Method == http.MethodPost && request.URL.Path == "/v1/environment/events":
+		h.receiveEnvironment(writer, request)
 	case request.Method == http.MethodGet && request.URL.Path == "/v1/mentor/outbox":
 		h.command(writer, request, RuntimeCommand{Kind: "mentor_outbox"})
 	case request.Method == http.MethodPost && strings.HasPrefix(request.URL.Path, "/v1/mentor/outbox/") && strings.HasSuffix(request.URL.Path, "/ack"):
@@ -88,6 +90,27 @@ func (h *mentorHandler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	default:
 		writeJSON(writer, http.StatusNotFound, map[string]string{"error": "not found"})
 	}
+}
+
+func (h *mentorHandler) receiveEnvironment(writer http.ResponseWriter, request *http.Request) {
+	request.Body = http.MaxBytesReader(writer, request.Body, 64*1024)
+	decoder := json.NewDecoder(request.Body)
+	decoder.DisallowUnknownFields()
+	var input EnvironmentInput
+	if err := decoder.Decode(&input); err != nil {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	input.Summary = strings.TrimSpace(input.Summary)
+	if !messageIDPattern.MatchString(input.EventID) || input.Summary == "" || len(input.Summary) > 4096 {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid environment event"})
+		return
+	}
+	if len(input.Payload) > 56*1024 || (len(input.Payload) > 0 && !json.Valid(input.Payload)) {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid environment payload"})
+		return
+	}
+	h.command(writer, request, RuntimeCommand{Kind: "environment_receive", Environment: input})
 }
 
 func (h *mentorHandler) receive(writer http.ResponseWriter, request *http.Request) {

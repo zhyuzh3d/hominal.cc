@@ -122,7 +122,7 @@ x_{t+1}=F(x_t,E_t;\theta,S)
 9. 把图形桌面、Chrome、Playwright MCP 和微信组成一条可验证的身体能力链，而不是四条静态“已安装”声明；
 10. 生成面向 alice 的简短身体简报，并在第一次成功认知脉冲中直接装配，同时保留完整 Manifest 供她随时读取。
 
-当前已验证的出生身体能力基线为：LightDM 自动进入 `hominal` 的 Xubuntu/Xfce X11 桌面；Google Chrome 使用 `/agent/state/profiles/chrome` 保存连续状态；`/usr/local/bin/hominal-playwright-mcp` 通过本机 CDP 操作同一个真实 Chrome；Linux 微信随桌面启动，使用 `/agent/state/profiles/wechat` 保存账号状态，并在腾讯流程需要时等待导师手机确认或扫码。
+当前已验证的出生身体能力基线为：LightDM 自动进入 `hominal` 的 Xubuntu/Xfce X11 桌面；Google Chrome 使用 `/agent/state/profiles/chrome` 保存连续状态；`/usr/local/bin/hominal-playwright-mcp` 通过本机 CDP 操作同一个真实 Chrome；Linux 微信随桌面启动，使用 `/agent/state/profiles/wechat` 保存账号状态，并在腾讯流程需要时等待导师手机确认或扫码；Clash Verge 使用 `/agent/state/profiles/clash-verge` 保存网络连接配置。三类应用状态都是持续身体资源，不随普通代际 reset 回滚。
 
 Manifest 对这条能力链分别保存“已配置能力”和“T0 当前状态”。已配置能力说明 alice 可以怎样使用身体；当前状态来自创生前探针，例如桌面会话是否建立、Chrome/CDP 是否可达、Playwright MCP 烟测是否通过、微信进程和窗口处于什么状态。账号凭据、Cookies 和登录数据不进入 Manifest 正文。
 

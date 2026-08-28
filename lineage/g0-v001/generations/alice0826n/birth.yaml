@@ -1,0 +1,22 @@
+schema: hominal.lineage.birth/v1
+name: alice
+sample_id: alice0826n
+instance_id: g0f-20260826t054935z-bc8087
+generation_kind: formal
+t0: '2026-08-26T05:50:20.25218223Z'
+planned_end: '2026-08-26T06:50:20.25218223Z'
+release_id: g0s5-bc808719b2ab
+body:
+  hostname: hominal-ThinkCentre
+  os: Ubuntu 24.04.4 LTS
+  chrome_cdp: ready
+  playwright_mcp: installed
+  x_account: '@hominal_cc'
+  x_session: authenticated
+resources:
+  initial_model: gpt-5.6-terra
+  reasoning_effort: medium
+  rolling_hour_usd: 4.0
+  rolling_day_usd: 24.0
+archive_birth_sha256: be0f20549dedf79c591269e7adbd809715a6ccd7c16e4b65a84845f3bdb0bc1b
+

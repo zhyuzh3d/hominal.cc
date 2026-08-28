@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+manifest=/etc/hominal-recovery.env
+work_root=/run/hominal-restore
+
+usage() {
+  printf 'Usage: %s --check | --confirm-merge\n' "$0" >&2
+  exit 2
+}
+
+fail() {
+  printf 'ERROR: %s\n' "$*" >&2
+  exit 1
+}
+
+cleanup() {
+  umount "$work_root/efi" 2>/dev/null || true
+  umount "$work_root/boot" 2>/dev/null || true
+  umount "$work_root/agent" 2>/dev/null || true
+}
+
+[ "${EUID}" -eq 0 ] || fail 'run as root from SystemRescue'
+case "${1:-}" in
+  --check|--confirm-merge) mode=$1 ;;
+  *) usage ;;
+esac
+
+[ -r "$manifest" ] || fail "missing recovery manifest: $manifest"
+# shellcheck disable=SC1090
+source "$manifest"
+
+for required in \
+  EXPECTED_VG EXPECTED_VG_UUID EXPECTED_SNAPSHOT \
+  EXPECTED_ORIGIN EXPECTED_ORIGIN_UUID EXPECTED_AGENT EXPECTED_AGENT_UUID \
+  EXPECTED_AGENT_FS_UUID EXPECTED_BOOT_FS_UUID EXPECTED_EFI_FS_UUID; do
+  [ -n "${!required:-}" ] || fail "manifest field is empty: $required"
+done
+
+for command_name in lvs vgs vgchange findfs findmnt mount umount rsync lvconvert; do
+  command -v "$command_name" >/dev/null || fail "missing command: $command_name"
+done
+
+vgchange -ay "$EXPECTED_VG" >/dev/null
+
+actual_vg_uuid=$(vgs --noheadings -o vg_uuid "$EXPECTED_VG" | xargs)
+[ "$actual_vg_uuid" = "$EXPECTED_VG_UUID" ] || fail 'volume-group UUID mismatch'
+
+snapshot="$EXPECTED_VG/$EXPECTED_SNAPSHOT"
+origin="$EXPECTED_VG/$EXPECTED_ORIGIN"
+agent="$EXPECTED_VG/$EXPECTED_AGENT"
+
+[ -n "$(lvs --noheadings -o lv_uuid "$snapshot" 2>/dev/null | xargs)" ] || fail 'baseline snapshot is missing'
+[ "$(lvs --noheadings -o origin "$snapshot" | xargs)" = "$EXPECTED_ORIGIN" ] || fail 'snapshot origin mismatch'
+[ "$(lvs --noheadings -o lv_uuid "$origin" | xargs)" = "$EXPECTED_ORIGIN_UUID" ] || fail 'root LV UUID mismatch'
+[ "$(lvs --noheadings -o lv_uuid "$agent" | xargs)" = "$EXPECTED_AGENT_UUID" ] || fail 'agent LV UUID mismatch'
+
+snapshot_attr=$(lvs --noheadings -o lv_attr "$snapshot" | xargs)
+[[ ${snapshot_attr:0:1} == s ]] || fail "snapshot is not merge-ready: $snapshot_attr"
+snapshot_data=$(lvs --noheadings -o data_percent "$snapshot" | xargs)
+awk -v value="$snapshot_data" 'BEGIN { exit !(value >= 0 && value < 100) }' || fail 'snapshot is full or invalid'
+
+origin_device=$(readlink -f "/dev/$origin")
+snapshot_device=$(readlink -f "/dev/$snapshot")
+if findmnt -rn -S "$origin_device" >/dev/null || findmnt -rn -S "$snapshot_device" >/dev/null; then
+  fail 'root origin or snapshot is mounted; boot SystemRescue instead of the installed Ubuntu'
+fi
+
+agent_device=$(findfs "UUID=$EXPECTED_AGENT_FS_UUID")
+boot_device=$(findfs "UUID=$EXPECTED_BOOT_FS_UUID")
+efi_device=$(findfs "UUID=$EXPECTED_EFI_FS_UUID")
+
+install -d -m 0700 "$work_root/agent" "$work_root/boot" "$work_root/efi"
+trap cleanup EXIT
+
+if [ "$mode" = --check ]; then
+  mount -o ro "$agent_device" "$work_root/agent"
+else
+  mount "$agent_device" "$work_root/agent"
+fi
+
+recovery_root="$work_root/agent/recovery/system-baseline"
+[ -d "$recovery_root/boot" ] || fail 'baseline /boot copy is missing'
+[ -d "$recovery_root/efi" ] || fail 'baseline EFI copy is missing'
+[ -s "$recovery_root/created-at.txt" ] || fail 'baseline timestamp is missing'
+baseline_created_at=$(cat "$recovery_root/created-at.txt")
+
+if [ "$mode" = --check ]; then
+  printf 'Recovery check passed.\n'
+  printf 'Snapshot: %s, data usage: %s%%\n' "$snapshot" "$snapshot_data"
+  printf 'Baseline time: %s\n' "$baseline_created_at"
+  exit 0
+fi
+
+mount "$boot_device" "$work_root/boot"
+mount "$efi_device" "$work_root/efi"
+
+rsync -aHAX --numeric-ids --delete "$recovery_root/boot/" "$work_root/boot/"
+rsync -aHAX --numeric-ids --delete "$recovery_root/efi/" "$work_root/efi/"
+sync
+umount "$work_root/efi"
+umount "$work_root/boot"
+
+lvconvert --merge "$snapshot"
+printf 'external-recovery\n' >"$work_root/agent/recovery/recreate-system-baseline"
+sync
+umount "$work_root/agent"
+trap - EXIT
+
+printf 'Merge accepted. The machine will reboot into the restored baseline.\n'
+printf 'A fresh single baseline snapshot will be created automatically.\n'
+systemctl reboot

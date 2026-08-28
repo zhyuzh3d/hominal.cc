@@ -40,7 +40,7 @@ func run() error {
 	if err := decoder.Decode(&config); err != nil {
 		return fmt.Errorf("decode runtime config: %w", err)
 	}
-	if config.Model.APIKey == "" || config.Model.BaseURL == "" || config.Model.Name == "" {
+	if config.ModelGateway.APIKey == "" || config.ModelGateway.BaseURL == "" || len(config.CognitiveResource.Models) == 0 {
 		return errors.New("runtime model configuration is incomplete")
 	}
 	runtime, err := hominal.New(instanceRoot, instanceID, config, hominal.NewModelClient())

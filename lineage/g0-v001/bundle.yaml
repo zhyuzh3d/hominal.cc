@@ -1,0 +1,11 @@
+schema: hominal.lineage.bundle/v1
+lineage_id: g0-v001
+release_id: g0s5-bc808719b2ab
+stage: 5
+bundle_sha256: bc808719b2ab4d3682a26f0f7b60e40ba7252e6dc9b1ec847aa05e90c993721e
+binary_sha256: 72baab927ef5b72a881187996ec8712eaab1c5a6552066b3af9e7a8aaae3bb7c
+git_commit: d3e2b359d66010a277a2b4af65c0ca7a69a55394
+frozen_for:
+  - g0f-20260826t054935z-bc8087
+source_archive: /Users/zhyuzh/HominalGenesisLab/archive/bundles/g0s5-bc808719b2ab
+

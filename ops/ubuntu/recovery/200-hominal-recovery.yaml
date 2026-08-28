@@ -1,0 +1,16 @@
+---
+global:
+    copytoram: true
+    checksum: true
+    dostartx: false
+    rootshell: "/bin/bash"
+
+autorun:
+    exec:
+        200:
+            path: "/usr/bin/bash"
+            parameters:
+                - "/run/archiso/bootmnt/autorun/autorun0"
+            wait: never
+            on_error: continue
+

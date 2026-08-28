@@ -21,11 +21,18 @@ attention:
   novelty_weight: 0.15
   resource_cost_weight: 0.25
   trigger_threshold: 0.45
+  revisit_seconds: 10
 
 exploration:
-  idle_growth: 0.04
+  idle_growth: 0.60
   unknown_growth: 0.10
   relief: 0.45
+
+integrity:
+  persistence: 0.85
+  gap_gain: 0.50
+  repair_gain: 0.40
+  mirror_threshold: 0.60
 
 bounds:
   signed_value: [-1.0, 1.0]

@@ -13,13 +13,13 @@
 - 持久逻辑卷 `ubuntu-vg/agent` 为 40 GiB，挂载到 `/agent`。
 - 卷组在创建 Agent 卷后仍有约 52.52 GiB 空闲。
 - 当前 HDMI 桌面输出为 1280×720。
-- 当前 Mutagen 会话 `hominal-cc1` 同步到 `/home/zhyuzh/hominal.cc`，需要迁移到 `/agent/app/hominal.cc`。
+- Mutagen 会话 `hominal-cc1` 已同步到 `/agent/app/hominal.cc`。
 
 ## 执行原则
 
 1. 始终先验证 SSH 可用，避免桌面安装破坏远程管理。
 2. 使用 `xubuntu-desktop-minimal --no-install-recommends`，只补齐中文、音频、授权代理、托盘、终端和 X11 自动化能力。
-3. LightDM 自动登录 `zhyuzh`，所有 GUI 程序运行在本地 Xorg `:0` 会话。
+3. LightDM 自动登录 `hominal`，所有 GUI 程序运行在本地 Xorg `:0` 会话。
 4. 使用只监听 `127.0.0.1` 的 x11vnc 查看同一桌面；外部访问必须经过 SSH 隧道，不开放 5900。
 5. Chrome、微信及智能体状态落在 `/agent/state`；项目落在 `/agent/app`。
 6. 不触碰已发现的额外 `/dev/sdb` 设备。
@@ -38,7 +38,7 @@
 
 ### 2. 持久图形会话与远程观看
 
-- 配置 LightDM 自动登录 `zhyuzh` 和 Xubuntu Session。
+- 配置 LightDM 自动登录 `hominal` 和 Xubuntu Session。
 - 安装 XFCE 会话启动器，关闭屏幕休眠，并尝试启动 `/agent/app/current/start`。
 - 安装 x11vnc systemd 服务，只监听本机回环地址并连接 Xorg `:0`。
 - 重启后验证 Xorg、XFCE、LightDM、D-Bus 用户会话和 x11vnc。
@@ -61,7 +61,7 @@
 - 将旧远端目录保存到 `/agent/backup/migrations`，不直接删除。
 - 重新创建 `hominal-cc1` 会话，目标改为 `/agent/app/hominal.cc`。
 - 建立 `/agent/app/current -> /agent/app/hominal.cc`。
-- 将旧路径 `/home/zhyuzh/hominal.cc` 改为指向新路径的符号链接。
+- 将兼容路径 `/home/hominal/hominal.cc` 指向 `/agent/app/hominal.cc`。
 - 更新项目上层 `xconfig.yaml` 中的远端项目路径和同步端点。
 - 配置 SSH 在 `agent.mount` 完成挂载尝试后再接受连接，避免重启期间 Mutagen 将未挂载路径误判为根删除；挂载失败不阻止 SSH 修复。
 

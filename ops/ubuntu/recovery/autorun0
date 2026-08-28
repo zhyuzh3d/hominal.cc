@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -u
+
+source_dir=/run/archiso/bootmnt/autorun
+boot_test_mount=/run/hominal-usb-boot-test
+
+install -m 0755 "$source_dir/restore-system-baseline" /usr/local/sbin/hominal-restore
+install -m 0600 "$source_dir/recovery-manifest.env" /etc/hominal-recovery.env
+
+printf '\nHominal recovery environment is ready.\n'
+if /usr/local/sbin/hominal-restore --check; then
+  # A marker on /agent turns one rescue boot into a read-only acceptance test.
+  # It is removed before rebooting, so an ordinary recovery boot remains
+  # interactive and can never loop automatically.
+  # shellcheck disable=SC1091
+  source /etc/hominal-recovery.env
+  agent_device=$(findfs "UUID=$EXPECTED_AGENT_FS_UUID" 2>/dev/null || true)
+  if [ -n "$agent_device" ]; then
+    install -d -m 0700 "$boot_test_mount"
+    if mount "$agent_device" "$boot_test_mount"; then
+      request="$boot_test_mount/recovery/usb-boot-test-request"
+      result="$boot_test_mount/recovery/usb-boot-test-result"
+      if [ -f "$request" ]; then
+        rm -f "$request"
+        {
+          printf 'status=passed\n'
+          printf 'checked_at=%s\n' "$(date --iso-8601=seconds)"
+          printf 'source=systemrescue-usb\n'
+        } >"$result"
+        sync
+        umount "$boot_test_mount"
+        printf '\nOne-time USB boot check passed. Rebooting to installed Ubuntu.\n\n'
+        systemctl reboot
+        exit 0
+      fi
+      umount "$boot_test_mount"
+    fi
+  fi
+
+  printf '\nTo restore the internal root snapshot, run:\n'
+  printf '  hominal-restore --confirm-merge\n\n'
+else
+  printf '\nAutomatic readiness check failed. No disk changes were made.\n\n'
+fi

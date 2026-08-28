@@ -9,11 +9,12 @@
 1. [产品设计理论与最小框架](./product-theory.md)：说明为什么建设成人级高级认知生命、意识表现行为的工程目标、产品立场和总体框架。
 2. [统一核心术语表](./core-vocabulary.md)：统一 Advanced Cognitive Life、CEB、Proto-Hominal 以及动力学和实验概念的边界。
 3. [最小认知动力学核心](./cognitive-dynamics.md)：把 AIP、单一认知线程、焦点工作区、矛盾代谢、张力、现实反馈和可塑性收敛为可实现、可证伪的动力关系。
-4. [创生实验八阶段实施计划](./genesis-plan.md)：规定从创生契约、Ubuntu 身体和 Genesis Lab，到首代运行、整体诊断与继代重构的实施顺序和退出门。
+4. [创生实验实施计划](./genesis-plan.md)：规定从创生契约、Ubuntu 身体和 Genesis Lab，到正式运行、继代重构、反事实学习与寿命升级的实施顺序和退出门。
 5. [G0 最小可编码架构](./mvp-architecture.md)：把单一认知提交、Pulse、最小感知、分阶段持久化、行动回链和 root 身体收敛为实现契约。
 6. [项目架构](./project-architecture.md)：规定研究对象、创生输入、Ubuntu 身体、agent 生命卷、外部 Lab、构建部署、连续运行、代际档案和恢复体系。
+7. [认知资源自主机制](./cognitive-resource-autonomy.md)：规定三种模型资源、费用账本、调用闸门、自主档位选择和异常保护。
 
-六份文档承担不同职责：
+七份文档承担不同职责：
 
 | 文档 | 回答的问题 | 规范范围 |
 | --- | --- | --- |
@@ -23,10 +24,15 @@
 | `genesis-plan.md` | 怎样开发和验证 | 工程阶段、Lab 协议与验收门 |
 | `mvp-architecture.md` | 首版代码必须怎样工作 | 进程、数据、出生、动作和恢复契约 |
 | `project-architecture.md` | 项目与数字身体怎样运行 | 源码、实验器、agent 卷、部署、苏醒、代际、证据与恢复 |
+| `cognitive-resource-autonomy.md` | alice 怎样感知并掌控模型资源 | 模型档位、价格、预算、选择、结算与保护 |
 
 ## 奠基推导记录
 
-[创生奠基假设与 G0 工程原则](./genesis-foundations.md) 保存成人级高级认知生命、CEB、Proto-Hominal、Self Model、Narrative Self、Memory、Tension 和预测回差等结论的集中推导过程。其确认结论已经吸收进五份当前规范；该文件用于理解设计来源，不再形成第二套实现要求。
+[创生奠基假设与 G0 工程原则](./genesis-foundations.md) 保存成人级高级认知生命、CEB、Proto-Hominal、Self Model、Narrative Self、Memory、Tension 和预测回差等结论的集中推导过程。其确认结论已经吸收进当前规范；该文件用于理解设计来源，不再形成第二套实现要求。
+
+## 认知资源专项契约
+
+[认知资源自主机制](./cognitive-resource-autonomy.md) 定义模型能力、推理强度、费用账户、资源身体感知、自主选择、异常保护和经验学习的最小闭环。首版代码已经进入当前内核，并在阶段五 Ubuntu 实验中完成真实结算、默认档位、选择表达和异常保护验证；更长期的资源策略演化仍由后续实验观察。
 
 如果当前规范出现冲突，不应由实现者随意选择一份，也不应通过兼容层同时保留两套含义。冲突本身说明设计尚未收敛，应先统一修改相关文档，再进入开发。
 
@@ -65,6 +71,7 @@
 - 每代 Birth Manifest 由身体外 `lab/` 生成，精炼事实进入 `lineage/`，可读副本注入当代身体；
 - `hominald` 的生命状态、Reality Ledger 和个人文件属于 Ubuntu 身体内的运行数据，不进入 `docs/`；
 - 完整磁盘快照、原始日志和大型实验产物由身体外 Genesis Lab 保存，不进入 Git；
-- 正式创生代的简要 Manifest、分析和档案校验值，等第一代实际发生后再进入未来的 `lineage/`。
+- 正式创生代的简要 Manifest、分析和档案校验值进入 [`lineage/`](../lineage/)；第一份正式谱系为 `g0-v001/alice0826n`。
+- 已由多轮实验支持、会影响后续架构判断的跨代经验进入 [`lineage/research-memory.md`](../lineage/research-memory.md)；它是实验前必读的研究记忆，不形成另一套产品规范。
 
 文档不是现实证据。理论上定义了某项能力、公式或生命现象，不代表运行中已经实现或验证了它。

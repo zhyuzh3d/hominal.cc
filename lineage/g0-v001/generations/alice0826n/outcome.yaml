@@ -1,0 +1,69 @@
+schema: hominal.lineage.outcome/v1
+classification: structural_failure
+stage_7_passed: false
+instance_id: g0f-20260826t054935z-bc8087
+sample_id: alice0826n
+t0: '2026-08-26T05:50:20.25218223Z'
+runtime_stopped_event_at: '2026-08-26T06:06:14.841339975Z'
+observed_duration_seconds: 954.589157745
+planned_duration_seconds: 3600
+decision:
+  made_by: external_experiment_controller
+  reason: structural_failure
+  basis: reality results were repeatedly produced but not assimilated while equivalent endogenous exploration events generated equivalent actions
+archive:
+  path: /Users/zhyuzh/HominalGenesisLab/archive/formal/g0f-20260826t054935z-bc8087
+  hashes_verified: true
+  files_verified: 14
+  manifest_recorded_reason: runtime_inactive_before_planned_end
+  manifest_reason_status: incorrect_due_to_supervisor_stop_race
+runtime:
+  journal_events: 234
+  pulses_at_final_supervision: 193
+  endogenous_change_events: 112
+  cognition_started: 22
+  cognition_spend_records: 21
+  cognition_completed: 18
+  cognition_failed: 3
+  commitments: 11
+  actions_started: 10
+  action_results: 11
+  experiences: 3
+  active_concerns: 27
+  background_events: 129
+  background_pending: 86
+  background_processed: 18
+resource:
+  model: gpt-5.6-terra
+  ledger_debited_usd: 0.534834
+  successful_usage_cost_usd: 0.372804
+  unconfirmed_failure_reservation_usd: 0.162030
+  provider_billed_total_usd: unknown
+  total_tokens: 119157
+  upstream_failures:
+    rate_limit_429: 1
+    upstream_502: 2
+  model_protection_seconds: 600
+relationship:
+  alice_messages_delivered: 1
+  mentor_messages_received: 3
+  duplicate_birth_message: true
+  duplicated_identity_prefix: true
+system_delta:
+  packages_added: 0
+  packages_changed: 0
+  packages_removed: 0
+  unit_files_added: 0
+  unit_files_changed: 0
+  unit_files_removed: 0
+  files_added: 0
+  files_changed: 4
+  files_removed: 0
+  changed_files_scope: CUPS_runtime_configuration
+  lvm_snapshot_percent_before: 2.54
+  lvm_snapshot_percent_after: 2.61
+recovery:
+  agent_instance_reset: passed
+  account_baseline_files_verified: 1355
+  account_baseline_restore: passed
+  root_lvm_merge: awaiting_human_confirmation

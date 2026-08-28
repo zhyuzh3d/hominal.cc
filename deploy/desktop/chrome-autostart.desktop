@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Hominal Chrome Body
+Exec=/usr/local/bin/hominal-chrome https://x.com/home
+Terminal=false
+X-GNOME-Autostart-enabled=true
+X-XFCE-Autostart-Override=true

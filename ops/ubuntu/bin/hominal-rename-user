@@ -1,0 +1,175 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+old_user=zhyuzh
+new_user=hominal
+old_group=zhyuzh
+new_group=hominal
+old_home=/home/zhyuzh
+new_home=/home/hominal
+pending_file=/etc/hominal-user-migration.pending
+log_file=/var/log/hominal-user-migration.log
+
+exec >>"$log_file" 2>&1
+
+log() {
+  printf '%s %s\n' "$(date --iso-8601=seconds)" "$*"
+}
+
+replace_text() {
+  local file=$1
+
+  [ -f "$file" ] || return 0
+  sed -i \
+    -e "s|$old_home|$new_home|g" \
+    -e "s|autologin-user=$old_user|autologin-user=$new_user|g" \
+    "$file"
+}
+
+if [ "${EUID}" -ne 0 ]; then
+  printf 'This migration must run as root.\n' >&2
+  exit 1
+fi
+
+log "migration_start boot_id=$(cat /proc/sys/kernel/random/boot_id)"
+
+old_record=$(getent passwd "$old_user" || true)
+new_record=$(getent passwd "$new_user" || true)
+
+if [ -n "$old_record" ] && [ -n "$new_record" ]; then
+  log "migration_error both_accounts_exist"
+  exit 1
+fi
+
+if [ -z "$old_record" ] && [ -z "$new_record" ]; then
+  log "migration_error neither_account_exists"
+  exit 1
+fi
+
+if [ -n "$old_record" ]; then
+  old_uid=$(printf '%s\n' "$old_record" | cut -d: -f3)
+  old_gid=$(printf '%s\n' "$old_record" | cut -d: -f4)
+  old_shell=$(printf '%s\n' "$old_record" | cut -d: -f7)
+  old_group_ids=$(id -G "$old_user" | tr ' ' '\n' | sort -n | tr '\n' ' ')
+  old_password_hash=$(getent shadow "$old_user" | cut -d: -f2)
+
+  if [ "$old_uid" != 1000 ] || [ "$old_gid" != 1000 ]; then
+    log "migration_error unexpected_identity uid=$old_uid gid=$old_gid"
+    exit 1
+  fi
+
+  if pgrep -u "$old_uid" >/dev/null 2>&1; then
+    log "migration_error old_user_has_running_processes"
+    exit 1
+  fi
+
+  if [ ! -d "$old_home" ] || [ -e "$new_home" ]; then
+    log "migration_error unexpected_home_state"
+    exit 1
+  fi
+
+  if ! getent group "$old_group" >/dev/null; then
+    log "migration_error old_primary_group_missing"
+    exit 1
+  fi
+
+  if getent group "$new_group" >/dev/null; then
+    log "migration_error new_primary_group_exists"
+    exit 1
+  fi
+
+  usermod -l "$new_user" "$old_user"
+  groupmod -n "$new_group" "$old_group"
+  usermod -d "$new_home" -m "$new_user"
+  usermod -c "$new_user" "$new_user"
+
+  new_password_hash=$(getent shadow "$new_user" | cut -d: -f2)
+  if [ -z "$old_password_hash" ] || [ "$new_password_hash" != "$old_password_hash" ]; then
+    log "migration_error password_hash_changed"
+    exit 1
+  fi
+
+  new_record=$(getent passwd "$new_user")
+  new_uid=$(printf '%s\n' "$new_record" | cut -d: -f3)
+  new_gid=$(printf '%s\n' "$new_record" | cut -d: -f4)
+  new_shell=$(printf '%s\n' "$new_record" | cut -d: -f7)
+  new_group_ids=$(id -G "$new_user" | tr ' ' '\n' | sort -n | tr '\n' ' ')
+
+  if [ "$new_uid" != "$old_uid" ] || [ "$new_gid" != "$old_gid" ] || \
+     [ "$new_shell" != "$old_shell" ] || [ "$new_group_ids" != "$old_group_ids" ]; then
+    log "migration_error identity_properties_changed"
+    exit 1
+  fi
+
+  log "account_renamed uid=$new_uid gid=$new_gid home=$new_home"
+else
+  new_uid=$(printf '%s\n' "$new_record" | cut -d: -f3)
+  new_gid=$(printf '%s\n' "$new_record" | cut -d: -f4)
+  if [ "$new_uid" != 1000 ] || [ "$new_gid" != 1000 ]; then
+    log "migration_error existing_new_identity_unexpected uid=$new_uid gid=$new_gid"
+    exit 1
+  fi
+fi
+
+for map_file in /etc/subuid /etc/subgid; do
+  if [ -f "$map_file" ]; then
+    sed -i "s/^${old_user}:/${new_user}:/" "$map_file"
+  fi
+done
+
+if [ -e "/var/lib/AccountsService/users/$old_user" ]; then
+  mv "/var/lib/AccountsService/users/$old_user" "/var/lib/AccountsService/users/$new_user"
+fi
+replace_text "/var/lib/AccountsService/users/$new_user"
+
+if [ -e "/var/lib/systemd/linger/$old_user" ]; then
+  mv "/var/lib/systemd/linger/$old_user" "/var/lib/systemd/linger/$new_user"
+fi
+
+if [ -e "/var/mail/$old_user" ] && [ ! -e "/var/mail/$new_user" ]; then
+  mv "/var/mail/$old_user" "/var/mail/$new_user"
+fi
+
+if [ -e "/var/spool/cron/crontabs/$old_user" ] && [ ! -e "/var/spool/cron/crontabs/$new_user" ]; then
+  mv "/var/spool/cron/crontabs/$old_user" "/var/spool/cron/crontabs/$new_user"
+fi
+
+while IFS= read -r -d '' link_path; do
+  link_target=$(readlink "$link_path")
+  case "$link_target" in
+    "$old_home"/*)
+      ln -sfn "$new_home/${link_target#"$old_home"/}" "$link_path"
+      chown -h "$new_user:$new_group" "$link_path"
+      ;;
+  esac
+done < <(find "$new_home" -xdev -type l -print0)
+
+replace_text /etc/lightdm/lightdm.conf
+for config_file in /etc/lightdm/lightdm.conf.d/*.conf; do
+  replace_text "$config_file"
+done
+
+replace_text "$new_home/.config/autostart/wechat.desktop"
+replace_text "$new_home/.config/gtk-3.0/bookmarks"
+replace_text "$new_home/.local/share/pki/nssdb/pkcs11.txt"
+for config_file in "$new_home"/.config/xfce4/desktop/*.rc; do
+  replace_text "$config_file"
+done
+
+chown -h "$new_user:$new_group" "$new_home"
+
+if [ "$(stat -c %u "$new_home")" != 1000 ] || \
+   [ "$(stat -c %g "$new_home")" != 1000 ] || \
+   [ ! -f "$new_home/.ssh/authorized_keys" ] || \
+   [ "$(readlink "$new_home/.xwechat" 2>/dev/null || true)" != /agent/state/profiles/wechat/config ]; then
+  log "migration_error critical_home_validation_failed"
+  exit 1
+fi
+
+if getent passwd "$old_user" >/dev/null || getent group "$old_group" >/dev/null; then
+  log "migration_error old_identity_still_active"
+  exit 1
+fi
+
+rm -f "$pending_file"
+log "migration_complete user=$new_user home=$new_home password_hash_preserved=true"

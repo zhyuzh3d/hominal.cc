@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-install -d -m 0750 -o zhyuzh -g zhyuzh /agent/state/profiles/chrome
+install -d -m 0750 -o hominal -g hominal /agent/state/profiles/chrome
 
 # A forced reboot can leave Chrome's singleton symlinks behind. Only remove
 # those exact stale locks when this user has no live Chrome process.

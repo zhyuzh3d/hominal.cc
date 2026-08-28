@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+set -u
+
+startup_wait_seconds=${WECHAT_STARTUP_WAIT_SECONDS:-120}
+confirmation_wait_seconds=${WECHAT_CONFIRMATION_WAIT_SECONDS:-900}
+log_dir=/agent/state/logs
+log_file="$log_dir/wechat-autologin.log"
+
+if ! mountpoint -q /agent; then
+  logger -t hominal-wechat "agent volume is not mounted; WeChat autostart skipped"
+  exit 1
+fi
+
+mkdir -p "$log_dir"
+exec 9>"$log_dir/wechat-autologin.lock"
+flock -n 9 || exit 0
+
+log() {
+  printf '%s %s\n' "$(date --iso-8601=seconds)" "$*" >>"$log_file"
+}
+
+log "start boot_id=$(cat /proc/sys/kernel/random/boot_id)"
+
+if ! pgrep -f '^/usr/bin/wechat$' >/dev/null 2>&1; then
+  /usr/bin/wechat 9>&- >/dev/null 2>&1 &
+  log "wechat_started pid=$!"
+else
+  log "wechat_already_running"
+fi
+
+for attempt in $(seq 1 "$startup_wait_seconds"); do
+  line=$(wmctrl -lxG 2>/dev/null | awk 'tolower($7)=="wechat.wechat" {print; exit}')
+  if [ -n "$line" ]; then
+    read -r wid _desktop _x _y width height _rest <<<"$line"
+
+    if [ "$width" -ge 600 ] && [ "$height" -ge 400 ]; then
+      log "main_ready width=$width height=$height attempt=$attempt"
+      exit 0
+    fi
+
+    if [ "$width" -le 420 ] && [ "$height" -le 520 ]; then
+      log "saved_login_detected width=$width height=$height attempt=$attempt"
+      xdotool windowactivate --sync "$wid" >/dev/null 2>&1 || true
+      xdotool key --window "$wid" Return >/dev/null 2>&1 || true
+      log "login_requested phone_confirmation_expected=true"
+
+      for verify in $(seq 1 "$confirmation_wait_seconds"); do
+        sleep 1
+        main=$(wmctrl -lxG 2>/dev/null | awk 'tolower($7)=="wechat.wechat" && $5>=600 && $6>=400 {print; exit}')
+        if [ -n "$main" ]; then
+          read -r _ _ _ _ main_width main_height _ <<<"$main"
+          log "login_completed width=$main_width height=$main_height verify=$verify"
+          exit 0
+        fi
+
+        if [ "$verify" -eq 30 ]; then
+          log "phone_confirmation_pending"
+        fi
+
+        if ! pgrep -f '^/usr/bin/wechat$' >/dev/null 2>&1; then
+          log "wechat_exited_while_waiting"
+          exit 1
+        fi
+      done
+
+      log "phone_confirmation_timeout seconds=$confirmation_wait_seconds"
+      exit 0
+    fi
+  fi
+
+  sleep 1
+done
+
+log "wechat_window_timeout seconds=$startup_wait_seconds"
+exit 1
