@@ -35,7 +35,7 @@ func New(instanceRoot, instanceID string, config Config, cognizer Cognizer) (*Ru
 	if instanceID == "" {
 		return nil, errors.New("instance id is required")
 	}
-	if config.Stage != 3 && config.Stage != 4 && config.Stage != 5 && config.Stage != 8 {
+	if config.Stage != 3 && config.Stage != 4 && config.Stage != 5 && config.Stage != 8 && config.Stage != 9 {
 		return nil, fmt.Errorf("unsupported runtime stage %d", config.Stage)
 	}
 	if config.GenerationKind == "" {
@@ -44,8 +44,8 @@ func New(instanceRoot, instanceID string, config Config, cognizer Cognizer) (*Ru
 	switch config.GenerationKind {
 	case "engineering":
 	case "rehearsal", "formal":
-		if config.Stage != 5 && config.Stage != 8 {
-			return nil, errors.New("rehearsal and formal generations require the stage-five or stage-eight cognition core")
+		if config.Stage != 5 && config.Stage != 8 && config.Stage != 9 {
+			return nil, errors.New("rehearsal and formal generations require the stage-five, stage-eight, or stage-nine cognition core")
 		}
 		if config.GenerationWindowSeconds <= 0 {
 			return nil, errors.New("generation window is required")
@@ -98,7 +98,7 @@ func New(instanceRoot, instanceID string, config Config, cognizer Cognizer) (*Ru
 		config:           config,
 		store:            store,
 		cognizer:         cognizer,
-		commands:         make(chan RuntimeCommand),
+		commands:         make(chan RuntimeCommand, 16),
 		notices:          make(chan WorkerNotice),
 		results:          make(chan CognitiveResult, 1),
 		actionResults:    make(chan ActionResultNotice, 4),
@@ -852,15 +852,38 @@ func (r *Runtime) handleCognitiveResult(ctx context.Context, result CognitiveRes
 			}
 			attempts := markEventForRetry(&r.state, r.state.Lease.FocusID, result.Error.Error())
 			protected := false
+			waitModel := ""
 			if isCallFailure {
 				var err error
 				protected, err = r.protectModelAfterFailures(r.state.Lease.Profile.Model)
 				if err != nil {
 					return err
 				}
+				if r.state.Lease.ProfileSource == "resource_recovery" && r.state.Lease.RecoveryForModel != "" {
+					// Two distinct routes for the same cognition have now failed.
+					// Preserve the Reality, but stop rapid gateway probing for the
+					// full configured protection window. This is a bodily backoff,
+					// not a judgment about the focus or a persistent model choice.
+					if err := r.extendModelProtectionAfterRecoveryFailure(r.state.Lease.RecoveryForModel); err != nil {
+						return err
+					}
+					waitModel = r.state.Lease.RecoveryForModel
+				} else if protected {
+					waitModel = r.state.Lease.Profile.Model
+				}
 			}
-			if protected {
-				markEventModelWait(&r.state, r.state.Lease.FocusID, r.state.Lease.Profile.Model)
+			if waitModel != "" {
+				// Keep the same causal foreground eligible for the one bounded
+				// alternate-model recovery. Sending it straight to model_wait here
+				// made the action Reality block every other focus until the failed
+				// model's timer expired; expiry then removed the protection record,
+				// so the runtime retried the same model and could never reach the
+				// recovery path in maybeStartCognition.
+				if waitModel == r.state.Lease.Profile.Model && r.protectedModelRecoveryAvailable(r.state.Lease.Profile.Model) {
+					markEvent(&r.state, r.state.Lease.FocusID, "pending")
+				} else {
+					markEventModelWait(&r.state, r.state.Lease.FocusID, waitModel)
+				}
 			} else if paidUnusable && attempts > r.config.CognitiveResource.ValidationRetryPerFocus && !r.focusIsActionResult(r.state.Lease.FocusID) {
 				recovered, err := r.planValidationRecovery(r.state.Lease.FocusID, r.state.Lease.Profile)
 				if err != nil {
@@ -1114,18 +1137,13 @@ func (r *Runtime) maybeStartCognition(parent context.Context) {
 	requestedModel := profile.Model
 	if protected, _ := modelProtected(r.state, requestedModel, time.Now().UTC()); protected {
 		protectedState := r.state.CognitiveResource.ProtectedModels[requestedModel]
-		if !protectedState.RecoveryOffered {
-			if recovery, ok := r.recoveryProfile(requestedModel); ok {
-				profile = recovery
-				profileSource = "resource_recovery"
-				profilePurpose = "理解当前模型不可用的身体事实，并自主选择等待、切换或转向"
-				protectedState.RecoveryOffered = true
-				r.state.CognitiveResource.ProtectedModels[requestedModel] = protectedState
-			} else {
-				markEventModelWait(&r.state, request.Focus.ID, requestedModel)
-				_ = r.persist()
-				return
-			}
+		if r.protectedModelRecoveryAvailable(requestedModel) {
+			recovery, _ := r.recoveryProfile(requestedModel)
+			profile = recovery
+			profileSource = "resource_recovery"
+			profilePurpose = "理解当前模型不可用的身体事实，并自主选择等待、切换或转向"
+			protectedState.RecoveryOffered = true
+			r.state.CognitiveResource.ProtectedModels[requestedModel] = protectedState
 		} else {
 			markEventModelWait(&r.state, request.Focus.ID, requestedModel)
 			_ = r.persist()
@@ -1134,6 +1152,9 @@ func (r *Runtime) maybeStartCognition(parent context.Context) {
 	}
 	r.state.Revision++
 	lease := Lease{ID: "lease-" + randomID(), Revision: r.state.Revision, PulseID: r.state.PulseID, FocusID: request.Focus.ID, StartedAt: nowUTC(), Profile: profile, ProfileSource: profileSource, ProfilePurpose: profilePurpose, VariationBias: request.VariationBias, VariationSeed: request.VariationSeed}
+	if profileSource == "resource_recovery" {
+		lease.RecoveryForModel = requestedModel
+	}
 	r.state.Lease = &lease
 	if r.state.CognitiveResource.NextProfile != nil && r.state.CognitiveResource.NextProfile.FocusID == request.Focus.ID {
 		r.state.CognitiveResource.NextProfile = nil
@@ -1193,6 +1214,36 @@ func (r *Runtime) recoveryProfile(failedModel string) (CognitiveProfile, bool) {
 		}
 	}
 	return CognitiveProfile{}, false
+}
+
+func (r *Runtime) protectedModelRecoveryAvailable(model string) bool {
+	protected, active := r.state.CognitiveResource.ProtectedModels[model]
+	if !active || protected.RecoveryOffered {
+		return false
+	}
+	if stillProtected, _ := modelProtected(r.state, model, time.Now().UTC()); !stillProtected {
+		return false
+	}
+	_, available := r.recoveryProfile(model)
+	return available
+}
+
+func (r *Runtime) extendModelProtectionAfterRecoveryFailure(model string) error {
+	protected, ok := r.state.CognitiveResource.ProtectedModels[model]
+	if !ok {
+		return nil
+	}
+	now := time.Now().UTC()
+	until := now.Add(time.Duration(r.config.CognitiveResource.ModelProtectionMinutes) * time.Minute)
+	if current, err := time.Parse(time.RFC3339Nano, protected.Until); err == nil && current.After(until) {
+		until = current
+	}
+	protected.Until = until.Format(time.RFC3339Nano)
+	protected.RecoveryOffered = true
+	r.state.CognitiveResource.ProtectedModels[model] = protected
+	return r.journal("cognitive_recovery_failed", model, map[string]any{
+		"model": model, "until": protected.Until,
+	})
 }
 
 func (r *Runtime) nextCognitiveRequest() (CognitiveRequest, bool) {

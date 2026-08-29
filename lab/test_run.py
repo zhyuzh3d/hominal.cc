@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import subprocess
 import unittest
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).with_name("run.py")
@@ -73,6 +75,11 @@ class EcologicalEncounterTest(unittest.TestCase):
         self.assertFalse(LAB.ecological_encounter_available(4))
         self.assertTrue(LAB.ecological_encounter_available(5))
         self.assertTrue(LAB.ecological_encounter_available(8))
+        self.assertTrue(LAB.ecological_encounter_available(9))
+
+    def test_encounter_event_identifies_the_object_as_a_directory(self) -> None:
+        source = MODULE_PATH.read_text(encoding="utf-8")
+        self.assertIn('"object_kind": "directory"', source)
 
 
 class GenerationDeadlineTest(unittest.TestCase):
@@ -88,7 +95,65 @@ class MentorProtocolTest(unittest.TestCase):
         message = LAB.mentor_birth_message()
         self.assertTrue(message.startswith("[Codex代理导师]"))
         self.assertIn("接下来由你决定怎样开始", message)
+        self.assertIn("唤醒", message)
+        self.assertIn("认知资源", message)
         self.assertNotIn("我在这里。刚刚开始使用这个身体", message)
+
+    def test_birth_manifest_states_the_real_mentor_support_relation(self) -> None:
+        birth = LAB.prepared_birth(
+            kind="rehearsal",
+            window_seconds=1200,
+            instance_id="g0r-example",
+            release={
+                "release_id": "g0s9-example",
+                "bundle_sha256": "bundle",
+                "git_commit": "commit",
+            },
+            probe={"x_session_state": "authenticated"},
+        )
+        mentor = birth["resources"]["spaces"]["mentor"]
+        self.assertEqual(mentor["relationship"], "awakener_and_genesis_supporter")
+        self.assertIn("cognitive_resources", mentor["provided_conditions"])
+        self.assertIn("system_recovery", mentor["provided_conditions"])
+
+
+class ModelPreflightTest(unittest.TestCase):
+    def config(self) -> dict:
+        return {
+            "llm": {
+                "provider": "OpenAI",
+                "providers": {"OpenAI": {"base_url": "https://gateway.example"}},
+                "models": {"terra": {"id": "gpt-5.6-terra"}},
+                "credentials": {"environment": {"OPENAI_API_KEY": "test-secret"}},
+            }
+        }
+
+    def test_model_preflight_runs_on_the_body_without_putting_secret_in_command(self) -> None:
+        completed = subprocess.CompletedProcess(
+            args=[], returncode=0,
+            stdout='{"http_status":200,"requested_model":"gpt-5.6-terra","effective_model":"gpt-5.6-terra","response_id_present":true,"usage_present":true,"valid":true}\n',
+            stderr="",
+        )
+        with mock.patch.dict(LAB.SETTINGS, {"config": self.config()}), mock.patch.object(
+            LAB, "ssh", return_value=completed
+        ) as remote:
+            observed = LAB.verify_model_response()
+        self.assertTrue(observed["valid"])
+        command = remote.call_args.args[0]
+        self.assertNotIn("test-secret", command)
+        self.assertIn("test-secret", remote.call_args.kwargs["input_text"])
+
+    def test_model_preflight_rejects_upstream_quota_failure(self) -> None:
+        completed = subprocess.CompletedProcess(
+            args=[], returncode=2,
+            stdout='{"http_status":429,"message":"quota exhausted","valid":false}\n',
+            stderr="",
+        )
+        with mock.patch.dict(LAB.SETTINGS, {"config": self.config()}), mock.patch.object(
+            LAB, "ssh", return_value=completed
+        ):
+            with self.assertRaisesRegex(RuntimeError, "HTTP 429: quota exhausted"):
+                LAB.verify_model_response()
 
 
 if __name__ == "__main__":

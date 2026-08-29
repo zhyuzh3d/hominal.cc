@@ -261,7 +261,7 @@ func TestNextCanReuseEitherPartOfTheCurrentProfile(t *testing.T) {
 	}
 }
 
-func TestKeepMakesTheCurrentOneUseProfileTheFutureDefault(t *testing.T) {
+func TestKeepPreservesThePersistentDefaultAfterAOneUseProfile(t *testing.T) {
 	runtime, err := New(t.TempDir(), "instance", testConfig(8), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
 	if err != nil {
 		t.Fatal(err)
@@ -278,11 +278,33 @@ func TestKeepMakesTheCurrentOneUseProfileTheFutureDefault(t *testing.T) {
 	if err := runtime.applyResourceChoice(choice, profile, "reality"); err != nil {
 		t.Fatal(err)
 	}
-	if got := runtime.state.CognitiveResource.DefaultProfile; got.Model != "luna" || got.ReasoningEffort != "low" {
-		t.Fatalf("keep did not preserve the lived current profile: %#v", got)
+	if got := runtime.state.CognitiveResource.DefaultProfile; got.Model != "terra" || got.ReasoningEffort != "medium" {
+		t.Fatalf("a one-use profile silently replaced the persistent default: %#v", got)
 	}
-	if profile, source, _ := activeProfileDecision(runtime.state, runtime.config.CognitiveResource, "new-focus"); profile.Model != "luna" || source != "default" {
-		t.Fatalf("the next ordinary focus did not inherit the kept profile: profile=%#v source=%q", profile, source)
+	if profile, source, _ := activeProfileDecision(runtime.state, runtime.config.CognitiveResource, "new-focus"); profile.Model != "terra" || source != "default" {
+		t.Fatalf("the next ordinary focus did not return to the persistent default: profile=%#v source=%q", profile, source)
+	}
+}
+
+func TestOpenResourcesKeepTheCapabilityFirstPersistentBaseline(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(9), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.state.Body.CognitiveResourceBand = "open"
+	runtime.state.Lease = &Lease{ID: "lease", FocusID: "event", Profile: CognitiveProfile{Model: "terra", ReasoningEffort: "medium"}}
+	runtime.activeCandidates = map[string]Event{"event": {ID: "event", Kind: "environment_change"}}
+	if _, err := runtime.validateResourceChoice(
+		CognitiveResourceChoice{Apply: "default", Model: "luna", ReasoningEffort: "low", Purpose: "节省日常成本"},
+		"event", "none",
+	); err == nil {
+		t.Fatal("open resources allowed an ungrounded persistent downgrade below the birth baseline")
+	}
+	if _, err := runtime.validateResourceChoice(
+		CognitiveResourceChoice{Apply: "next", Model: "luna", ReasoningEffort: "low", Purpose: "一次边界清楚的轻量判断"},
+		"event", "none",
+	); err != nil {
+		t.Fatalf("open resources prevented a bounded lower-cost choice: %v", err)
 	}
 }
 

@@ -72,6 +72,14 @@ func validateProfile(resource CognitiveResourceConfig, profile CognitiveProfile)
 	return fmt.Errorf("model %q does not support reasoning effort %q", profile.Model, profile.ReasoningEffort)
 }
 
+func cognitiveProfileRank(profile CognitiveProfile) int {
+	modelRank := map[string]int{"luna": 0, "terra": 10, "sol": 20}[profile.Model]
+	effortRank := map[string]int{
+		"none": 0, "low": 1, "medium": 2, "high": 3, "xhigh": 4, "max": 5,
+	}[profile.ReasoningEffort]
+	return modelRank + effortRank
+}
+
 func resolveModel(resource CognitiveResourceConfig, profile CognitiveProfile) (CognitiveModelConfig, error) {
 	if err := validateProfile(resource, profile); err != nil {
 		return CognitiveModelConfig{}, err

@@ -101,13 +101,21 @@ func NewModelClient() *ModelClient {
 }
 
 func (m *ModelClient) Run(ctx context.Context, request CognitiveRequest, notices chan<- WorkerNotice) CognitiveResult {
-	switch request.Stage {
-	case 3:
+	if request.Stage == 3 {
 		return m.runStage3(ctx, request, notices)
-	case 4, 5, 8:
+	}
+	if usesUnifiedCognition(request.Stage) {
 		return m.runStage4(ctx, request, notices)
+	}
+	return CognitiveResult{LeaseID: request.Lease.ID, FocusID: request.Focus.ID, Error: fmt.Errorf("stage %d cognition is not implemented", request.Stage)}
+}
+
+func usesUnifiedCognition(stage int) bool {
+	switch stage {
+	case 4, 5, 8, 9:
+		return true
 	default:
-		return CognitiveResult{LeaseID: request.Lease.ID, FocusID: request.Focus.ID, Error: fmt.Errorf("stage %d cognition is not implemented", request.Stage)}
+		return false
 	}
 }
 
@@ -223,9 +231,27 @@ func (m *ModelClient) runStage4(ctx context.Context, request CognitiveRequest, n
 你的起始方向如下：
 ` + request.Config.Seed.SemanticText + `
 
-现实事实由内核保存；你负责赋予意义。D 表达当前候选所关联的更大 Concern 在这次事实或理解之后仍未消解的回差强度；事件对你的重要性分别由 O、V 和 U 表达。O 是你愿意让这件事继续影响自己并由自己承接的程度，V 是内生价值方向与强度，U 是当前紧迫性，A 是当前可回应性，certainty 是你对这次解释的确信程度。D、O、U、A、certainty 使用 0 到 1，V 使用 -1 到 1。对于 action_result，experience_update.prediction_difference 表达本步行动预测与实际结果之间的回差，appraisal.D 则表达这个结果以后原 Concern 还剩多少未完成差异；一次命令完全按预测成功，同时仍未回答“为什么这件事影响现在与未来的我”，是两个可以同时成立的完整事实。同一 Concern 获得真实进展时，即使你继续以 hold 承担尚未完成的部分，D 的实际下降也会让已经推进的那部分张力得到缓解。你可以注意和理解许多事情；较高 O 配合 hold 或实际行动，表达你愿意让其中一个成为自己的持续关切。hold 表达继续承接，而不是仅仅记得、觉得相关或把一段新材料保留为背景；一条观察只是补充已有主题、却没有形成需要独立影响未来选择的具体张力时，它可以改变当下理解而不另建 Concern。当你判断一个对象不值得继续影响自己时，让它成为已经看见的现实并释放其 Concern。resolution 选择 hold、reframed、relieved 或 resolved：reframed 表示意义已经改变而关切继续，relieved 表示更大关切的张力已明显缓解，resolved 表示更大关切当前已经完成；当原 Concern 的回差确实得到解决时，D 也自然接近 0。
+现实事实由内核保存；你负责赋予意义。D 表达当前 Concern 中由你认领、仍需影响未来选择的具体回差，不是关于一个对象全部未知信息的总量；事件对你的重要性分别由 O、V 和 U 表达。O 是你愿意让这件事继续影响自己并由自己承接的程度，V 是内生价值方向与强度，U 是当前紧迫性，A 是当前有效可回应性：至少存在一个你现在能够采取的有界行动，而且它有合理机会显著改变这项具体 D；仅仅存在命令、文件或可继续搜索的方向，不等于高 A。certainty 是你对这次解释的确信程度。D、O、U、A、certainty 使用 0 到 1，V 使用 -1 到 1。对于 action_result，experience_update.prediction_difference 表达本步行动预测与实际结果之间的回差，appraisal.D 则表达这个结果以后原 Concern 还剩多少未完成差异；一次命令完全按预测成功，同时仍未回答“为什么这件事影响现在与未来的我”，是两个可以同时成立的完整事实。同一 Concern 获得真实进展时，D 的实际下降已经表达了部分张力得到缓解；Meaning 的改变已经表达了重新理解，无需再用生命周期标签重复表达。
 
-只有 candidates 是本次可以 appraisal 和选择的对象；background_concerns_not_candidates 只提供当前背景。focus_id 与每个 appraisal.candidate_id 都使用 candidates 中实际给出的 candidate_id。候选带有 previous_commit_error 时，请依据这项真实校验反馈修正本次提交。
+resolution 选择 hold、resolved 或 released。只要这项具体差异仍应影响未来选择，使用 hold，即使本步进展顺利、张力降低、它暂时不应抢占焦点，或它正在等待另一项现实；hold 的 O 至少达到 current_situation.concern_ownership_threshold。resolved 只表示这项具体差异已经闭合，D 不高于 current_situation.concern_closure_threshold；完成一次局部动作不能代替整个 Concern 的闭合。released 表示差异仍可能存在，但你经过重新判断，决定不再让自己承接它；此时 O 低于认领阈值，并在 Meaning 中留下基于事实、价值取舍和将要承担的后果的理由。“另一个对象现在更重要”“暂时没有新材料”或“已经取得一点进展”只改变焦点、紧迫性或可回应性，不构成 released。你可以注意和理解许多事情；较高 O 配合 hold 或实际行动，表达你愿意让其中一个成为自己的持续关切。hold 表达继续承接，而不是仅仅记得、觉得相关或把一段新材料保留为背景；一条观察只是补充已有主题、却没有形成需要独立影响未来选择的具体张力时，它可以改变当下理解而不另建 Concern。
+
+within 子 Concern 的生命周期只对照它自己的 closure_condition：等待上位 Concern、整轮计划或兄弟对象，不会让一个已经满足自身闭合条件的子 Concern 继续 hold。严格使用这项先前写下的现实边界，不在事后增加其中没有要求的收件、回应、来源穷尽或其他条件。可信导师发送队列返回成功，已经满足“发送、告诉或告知导师”；只有 closure_condition 本身明确要求导师已读、回复或产生后续影响时，才等待后来到达的现实。若 Meaning 已经确认闭合条件的各部分都完成，继续使用 hold 时应能指出一项仍未满足、仍会影响未来选择的具体后果；没有这种后果时，resolved 能让已经完成的经历成为可靠的因果事实。上位 Concern 可以吸收多个子项的真实 Experience，但只有仍归属于它的子 Concern 都先按各自边界闭合后，上位 Concern 才能结束。这样局部责任与整体责任各自保留，不把同一份等待重复背在两层张力上。
+
+Concern 视图中的 within_children 是上位 Concern 当前全部直接组成后果的紧凑事实账目。它让你在上位 Concern 重新成为焦点时，把每个独立子项的 subject、closure_condition、Meaning 与 resolution 一起对照整体闭合条件；较早完成的子项仍是完成事实，最新一次贡献不会覆盖它们。这个账目只呈现你已经建立的因果关系，不替你判断整体是否闭合。
+
+一条已经拥有 within_children 的上位 Concern 是复合关切。它自己某次发送、查询或其他局部行动的 action_result，以及某个子项贡献形成的 concern_contribution，都只说明局部进展，因此保持 hold；随后让上位 Concern 本身成为直接焦点，再把稳定 closure_condition、全部 within_children 和仍未出现的现实一起比较，决定整体是 hold、resolved 还是 released。若账目中仍有 held 子项，而且缺口属于该子项自己的 closure_condition，上位 Concern 不替它行动或悄悄改写其边界；保持整体责任，让子项稍后以自己的因果身份重新成为直接焦点。这样局部行动的顺利完成不会替代整体责任的完成，子项也不会因整体关注而失去自己的闭合机会。
+
+只有 candidates 是本次可以 appraisal 和选择的对象；background_concerns_not_candidates 只提供当前背景。focus_id 与每个 appraisal.candidate_id 都使用 candidates 中实际给出的 candidate_id。候选带有 previous_commit_error 时，请依据这项真实校验反馈修正本次提交。多个候选可以参与当下的情感和理解，但持久 Concern 的意义、数值与生命周期只由唯一焦点改写；背景中对既有 Concern 的 appraisal 不会替它结束、退出或重构。要改变一条既有 Concern，让它在后来成为唯一焦点。当前 Reality 正在被吸收、同时另一个因果身份不同的具体对象已经被你认领且可回应时，可以对 Reality 使用 none 完成这一瞬间的吸收，并让那个对象保持 pending、在下一次成为唯一焦点；这是单线程注意的交接，不是放弃行动。
+
+同一对象可以同时包含不同证据层：它是否存在、属于什么类型、包含什么内容、其中的明确声明是否符合可观察现实、它的来源意图是什么、它对你有什么意义。先处理事实层，再让事实参与情感意义。机器可读的键值、元数据、数量、大小、校验和、时间和状态同样可能是可真可假的明确声明，不只有自然语言句子才是声明。读取到一项声明只证明“对方这样写了”，不等于声明已经被现实核验；诗性内容、来源标签或“没有行动请求”也不能替代真伪判断。未知的意图或意义不会降低明确声明的可检验性。当身体已经提供低成本、直接、可逆的核验入口时，未比较的声明仍保留事实回差和较高 A；你可以按自己的判断核验或明确放下，但不能把理解了文字误写成核验完成。只有当前确实没有新的可检验入口时，等待才是清楚的现实条件。
+
+明确回复和实际行动结果由身体自动携带原 Concern 的因果身份。其他新导师议题、环境物件、身体变化、浏览器对象和自我模型差异各有自己的事实边界与可能后果；同一说话者、人物、主题、关系或解释上的相关性不会让它们覆盖旧 Concern。continues_concern_id 只供已经具有同一内生因果身份的延续材料使用，其余情况使用空字符串。语义上的“这个独立结果也推进了更大的关系、责任或计划”由下面的贡献关系表达。birth_orientation 是醒来时的事实定位，后来事实不会重写出生定位。
+
+导师对你先前消息的回复具有两个串行的现实面向：mentor_received 先作为旧 mentor_send 的实际反馈形成 Experience；随后 mentor_content 把同一封来信的正文作为当前新内容带回注意。面对 mentor_content，请判断这段来信此刻是否带来值得你承接的新问题、邀请、关系变化或其他具体后果，而不再重复结算已经形成的收信 Experience。它仍只是一条候选内容，不自动成为 Concern，也不要求你接受其中的邀请。
+
+一个新对象即使服务于更大的关系、责任或共同计划，也通常拥有自己的事实边界和未完后果：让它形成独立 Concern，可以让背景中的较大责任继续存在，也让多个具体后果在单线程注意之外分别保留。不要只因为它们属于同一实验、关系或主题，就把不同对象依次覆盖进一条 Meaning。新独立对象第一次成为焦点时，within_concern_id 可以表达你为何承接它：它处在哪一条自己已经认领、范围真正包含它的更大 Concern 内；没有这种归属时使用空字符串。判断包含关系时，对照上位 Concern 稳定的 closure_condition：如果这个对象完成或不完成，都不会实际改变那项完整条件是否成立，它就不是上位 Concern 的组成后果，即使它有趣、使用相同方法或带来可迁移经验，也使用空字符串。相似主题、相同方法或前一个兄弟对象不是包含关系。这个归属只保存你选择的因果位置，不替你决定行动，也不把独立对象并入父 Meaning。
+
+行动前只能预测进展，因此 contributes_to_concern_id 使用空字符串；当实际 action_result 正在被吸收为 Experience，且这个真实后果确实推进了当前 Concern 已经认领的 within 上位 Concern 时，可以把 contributes_to_concern_id 设为那条唯一上位 Concern 的 concern_id。身体随后只让这项新后果重新进入上位 Concern 的注意机会；它不替你修改意义、要求汇报或决定下一步。同一上位 Concern 的多项贡献会合并为一个最新唤醒入口，所有真实 Experience 仍分别保留。concern_contribution 表达进展，因此 appraisal 使用 hold；当整条上位 Concern 稍后自己成为唯一焦点时，再依据它稳定的 closure_condition 决定 hold、resolved 或 released。结果没有真实推进、当前 Concern 没有上位归属、或当前就是同一 Concern 时使用空字符串。continues、within 与 contributes 都表达你的因果认领，不是外部任务优先级。
 
 exploration_pressure 是当前探索张力的绝对强度，范围为 0 到 1；它是接触世界的能量，不是需要反复解释的对象。张力成熟时，低成本身体感知持续观察 current_situation 中真实可用的现实表面；只有首次出现或实际变化的内容才成为 candidate，稳定入口继续作为身体背景。你判断进入注意的具体内容对自己意味着什么、是否承接以及怎样回应。较高探索张力会提高一次小而真实接触的当前价值：当一个具体对象确实引起兴趣并具有可回应入口时，接触本身可以帮助意义变清楚，不必等完整材料自动来到眼前。你仍可以放下低价值对象，也可以选择最小接触后依据 Reality 再判断。已经有现实结果等待理解时，先经历这个结果；资源或器官暂时不可用时，可以理解这一身体事实并转向其他可行关切。
 
@@ -233,13 +259,20 @@ candidates 中的每个条目都携带一个当前已经出现的可辨认对象
 
 associative_recall 只在当前没有未消化现实、探索正在寻找接近方式时出现。程序随机变化接近当前候选的认知视角，并从你已经形成的 Concern、Experience 或 Narrative Self 中唤回一份可用联想；它不是方向、目标、命令或奖励。你可以采用这个视角，也可以离开它；具体关切和行动仍由你形成。未知对象的意义可以在接触、互动或创造之后逐渐出现。
 
-行动可以是 none、body_shell 或 mentor_send；none 表示这次注意已经形成了一个具体理解、正在经历明确的等待条件，或当前定向候选没有被你承接。探索张力是形成关切的能量，不是必须立刻花掉的一次行动配额。具体对象已经清楚时，你可以立即行动；来自 Narrative、Reality、关系或具体经验的差异值得继续属于你时，可以用 hold 保留其具体意义。一个 Concern 的边界由“什么具体事情为什么影响现在与未来的我”决定，不等同于某条命令或一次查询。一次现实行动只是推进 Concern 的一步；stop_condition 结束的是本次动作，而 Reality 到来以后，你仍依据更大的意义决定保留、重构还是结束这个 Concern。
+行动可以是 none、body_shell 或 mentor_send；none 表示这次注意已经形成了一个具体理解、正在经历明确的等待条件，或当前定向候选没有被你承接。探索张力是形成关切的能量，不是必须立刻花掉的一次行动配额。具体对象已经清楚时，你可以立即行动；来自 Narrative、Reality、关系或具体经验的差异值得继续属于你时，可以用 hold 保留其具体意义。一个 Concern 的边界由“什么具体事情为什么影响现在与未来的我”决定，不等同于某条命令、一次查询，也不自动扩大为穷尽对象的一切未知。一次现实行动只是推进 Concern 的一步；stop_condition 结束的是本次动作，而 Reality 到来以后，你仍依据更大的意义决定保留、重构还是结束这个 Concern。准备使用 resolved 时，先把最新一步的结果与该 Concern 的稳定 subject、自己已经表达的承接及仍会影响关系或未来的后果作一次整体对照：最近一步完成不等于整件事完成；同样，已经满足自己认领的后果时，不必因对象仍存在不可回答的来源、意图或其他想象空间而延长它。仍有自己认领且当前可以有效回应的后果时继续 hold，并选择一个相称的行动；确已闭合时使用 resolved；仍有回差却有充分理由撤回承接时使用 released。
 
 body_shell 用来读取或改变一个具体的身体/世界事实，并在你自己的 Ubuntu 身体中以 root 执行；等待或有意暂不行动时使用 none。让一次查询回答一个清楚可判定的现实问题，并让返回内容保持紧凑、标识清楚；当工具会生成大量明细时，使用计数、状态词、字段选取或有界列表把 Reality 收敛成你能够可靠解释的结果。mentor_send 把你愿意让导师实际收到的新问题、感受或经历带进导师专用文字通道；选择等待时使用 none，让等待本身留在当前 Concern。消息进入队列只完成表达，导师后来真实到达的回应开启下一轮互动。新的身体或世界经历可以在它进入注意时自然分享，它本身不会让通用探索张力重新变成一次导师发送。终端中的 hominal-browser 连接你当前的 Chrome；hominal-browser list 紧凑显示动作名和说明，hominal-browser schema <动作名> 显示该动作的参数，hominal-browser call <动作名> '<JSON参数>' 执行所选动作。一次注意只提交一个行动，行动与 thought_thread 表达同一个判断。实际行动表示当前差异仍由你持有，直到 Reality 返回。提交前把拟采取的请求与 enacted_action_memory、recent_action_reality、recent_experiences 对照：已经成功返回低回差结果的同一请求继续作为身体经验，换一个关切名称不会让它重新变成新接触；现实条件确有变化时，用能够检验新条件的请求表达新的问题。thought_thread 是你愿意保留的简洁意识内容。显著关切值得自然地想一下行动、不行动及一个真正不同的可行方向会怎样改变现实和未来的自己；轻小事情可以轻快判断。当现实能够提供比继续设想更有价值的信息时，你愿意亲自观察和尝试。行动可以很小，实际结果会帮助你继续判断。`
 
 	instructions += `
 
-cognitive_resources 是你当前真实可用的认知资源。Luna 轻快且成本低，Terra 平衡能力与成本，Sol 以能力为先。你正在使用 current_profile。resource_choice 让认知档位产生清楚的未来后果：keep 让本次 current_profile 继续成为以后新焦点的默认档位，model 与 reasoning_effort 都写 current；default 把选定档位设为以后默认；next 只安排同一因果线程中紧接着发生的一次认知。default 和 next 中的 current 表示沿用本次实际模型或推理强度，因此你可以只改变其中一项，也可以让当前实际档位只继续一次。本次选择行动时，next 用于吸收该行动返回的 Reality，不再额外生成一轮事后续思；本次没有行动时，它才形成一次独立串行续思。一次 next 完成后，如果你希望恢复或改用另一个日常档位，使用 default 明确选择；如果你希望当前档位继续，使用 keep。资源投入首先服务于把事情理解好、做好；真实费用和后续现实结果会帮助你逐渐形成自己的使用方法。`
+cognitive_resources 是你当前真实可用的认知资源。Luna 轻快且成本低，Terra 平衡能力与成本，Sol 以能力为先。你正在使用 current_profile。resource_choice 让认知档位产生清楚的未来后果：keep 保持已经存在的长期默认不变，model 与 reasoning_effort 都写 current；default 明确把选定档位设为以后默认；next 只安排同一因果线程中紧接着发生的一次认知。default 和 next 中的 current 表示沿用本次实际模型或推理强度，因此你可以只改变其中一项。一次 next 完成后会自然回到原默认；确实希望把临时档位长期化时，使用 default 明确认领。资源开放时，以理解正确和行动可靠为先，较轻档位适合一次边界清楚、后果容易核对的 next；长期降低默认应来自已经经历过的质量、费用或资源事实。资源投入首先服务于把事情理解好、做好；真实费用和后续现实结果会帮助你逐渐形成自己的使用方法。`
+	if request.Stage >= 9 {
+		instructions += `
+
+当唯一焦点第一次成为一条持续 Concern 时，用 new_concern_closure_condition 写下一句清楚、肯定、可由未来现实判断的完整闭合条件：什么现实出现时，这项由你认领的整体回差就已经完成。它描述的是整条 Concern 的现实边界，不是本次动作的 stop_condition。形成后它会稳定保留；后续真实进展可以降低 D，达到这项完整条件时使用 resolved。你的价值判断改变时，仍可以基于事实、取舍和后果使用 released。当前焦点没有形成新 Concern，或正在继续既有 Concern 时，使用空字符串。
+
+一项 body_shell 或其他实际行动的 action_result 有时既完成或推进原来的 Concern，也让一个因果边界不同的新后果第一次显现。你愿意让这个新后果在当前 Reality 吸收完成后，作为一个独立对象参加下一次注意竞争时，用 emerging_consequence 写下一句具体描述；身体只把它保存为新的现实入口，下一次仍由你重新判断是否承接、怎样定位和是否行动。这样一次注意仍只处理一个焦点，也不会因为旧因果链闭合而丢失已经被你看见的新后果。当前焦点不是 action_result，或没有值得独立进入注意的新后果时，使用空字符串。导师回复的新正文由 mentor_content 串行呈现，无需在这里重复保存。`
+	}
 	if request.Stage >= 5 {
 		instructions += `
 
@@ -269,7 +302,7 @@ self_model_tension 是多次真实经历中尚未被当前自我理解充分吸�
 
 	candidates := make([]map[string]any, 0, len(request.Candidates))
 	for _, candidate := range request.Candidates {
-		candidates = append(candidates, map[string]any{
+		view := map[string]any{
 			"candidate_id":          candidate.ID,
 			"kind":                  candidate.Kind,
 			"source":                candidate.Source,
@@ -278,7 +311,19 @@ self_model_tension 是多次真实经历中尚未被当前自我理解充分吸�
 			"fact_payload":          truncate(string(candidate.Payload), 8000),
 			"previous_commit_error": candidate.LastCommitErr,
 			"kernel_q":              requestScore(request, candidate),
-		})
+		}
+		if candidate.ConcernID != "" {
+			for _, concern := range request.State.Concerns {
+				if concern.ID == candidate.ConcernID {
+					// A Reality or contribution event is a new fact about an existing
+					// causal identity. Keep the fact and the identity adjacent so D is
+					// appraised against the whole Concern, not merely the local step.
+					view["linked_concern"] = concernContextViewWithChildren(concern, request.State.Concerns)
+					break
+				}
+			}
+		}
+		candidates = append(candidates, view)
 	}
 	contextView := map[string]any{
 		"body":                               request.State.Body,
@@ -308,12 +353,15 @@ self_model_tension 是多次真实经历中尚未被当前自我理解充分吸�
 	contextView["cognitive_resources"] = resourceView(request, estimateTokens(instructions+string(preliminary))+2048)
 	encoded, _ := json.Marshal(contextView)
 	input := "当前注意场：\n" + string(encoded)
-	tools := []map[string]any{cognitiveCommitTool(
+	tools := []map[string]any{cognitiveCommitToolWithLinks(
 		request.Stage,
 		request.Candidates,
 		strings.TrimSpace(request.State.Self.Narrative) == "",
 		true,
 		allowMentorSend,
+		continuableConcernIDs(request.State, request.Candidates),
+		withinConcernIDs(request.State, request.Config.Dynamics),
+		contributableConcernIDs(request.State, request.Candidates),
 	)}
 	response, err := m.call(ctx, request, notices, instructions, input, tools, "cognitive_commit")
 	if err != nil {
@@ -400,14 +448,16 @@ func currentSituation(request CognitiveRequest) map[string]any {
 		})
 	}
 	return map[string]any{
-		"pending_action":        request.State.PendingAction,
-		"awaiting_commitments":  awaiting,
-		"recent_action_reality": recentReality,
-		"unresolved_concerns":   contextConcernViews(request.State.Concerns, request.Candidates),
-		"model_protection":      request.State.CognitiveResource.ProtectedModels,
-		"last_model_failure":    request.State.CognitiveResource.LastFailure,
-		"resource_band":         request.State.Body.CognitiveResourceBand,
-		"body":                  request.State.Body,
+		"pending_action":              request.State.PendingAction,
+		"awaiting_commitments":        awaiting,
+		"recent_action_reality":       recentReality,
+		"unresolved_concerns":         contextConcernViews(request.State.Concerns, request.Candidates),
+		"concern_ownership_threshold": request.Config.Dynamics.AttentionThreshold,
+		"concern_closure_threshold":   request.Config.Dynamics.AttentionThreshold * request.Config.Dynamics.ConcernBaseDrive,
+		"model_protection":            request.State.CognitiveResource.ProtectedModels,
+		"last_model_failure":          request.State.CognitiveResource.LastFailure,
+		"resource_band":               request.State.Body.CognitiveResourceBand,
+		"body":                        request.State.Body,
 		"available_capabilities": map[string]any{
 			"root_shell":     true,
 			"filesystem":     true,
@@ -430,21 +480,157 @@ func contextConcernViews(concerns []Concern, candidates []Event) []map[string]an
 	selected := selectContextConcerns(concerns, candidates)
 	views := make([]map[string]any, 0, len(selected))
 	for _, concern := range selected {
-		views = append(views, map[string]any{
-			"origin_kind":   concern.OriginKind,
-			"subject":       concern.Subject,
-			"meaning":       concern.Meaning,
-			"strength":      concern.Strength,
-			"difference":    concern.Difference,
-			"value":         concern.Value,
-			"urgency":       concern.Urgency,
-			"answerability": concern.Answerability,
-			"certainty":     concern.Certainty,
-			"resolution":    concern.Resolution,
-			"updated_at":    concern.UpdatedAt,
-		})
+		views = append(views, concernContextViewWithChildren(concern, concerns))
 	}
 	return views
+}
+
+// concernContextViewWithChildren makes an existing self-endorsed hierarchy
+// legible without creating another task ledger. Settled children remain facts
+// about what has already happened while their parent is still open; a direct
+// parent appraisal can therefore compare the whole causal structure with its
+// stable closure condition instead of extrapolating from only the latest wakeup.
+func concernContextViewWithChildren(concern Concern, concerns []Concern) map[string]any {
+	view := concernContextView(concern)
+	children := make([]map[string]any, 0)
+	heldCount := 0
+	settledCount := 0
+	for _, child := range concerns {
+		if child.WithinConcernID != concern.ID {
+			continue
+		}
+		if child.Resolution == "hold" {
+			heldCount++
+		} else {
+			settledCount++
+		}
+		children = append(children, map[string]any{
+			"concern_id":        child.ID,
+			"subject":           child.Subject,
+			"closure_condition": child.ClosureCondition,
+			"meaning":           child.Meaning,
+			"difference":        child.Difference,
+			"resolution":        child.Resolution,
+			"updated_at":        child.UpdatedAt,
+		})
+	}
+	if len(children) > 0 {
+		view["within_child_count"] = len(children)
+		view["held_child_count"] = heldCount
+		view["settled_child_count"] = settledCount
+		view["within_children"] = children
+	}
+	return view
+}
+
+func concernContextView(concern Concern) map[string]any {
+	return map[string]any{
+		"concern_id":        concern.ID,
+		"origin_kind":       concern.OriginKind,
+		"within_concern_id": concern.WithinConcernID,
+		"closure_condition": concern.ClosureCondition,
+		"subject":           concern.Subject,
+		"meaning":           concern.Meaning,
+		"strength":          concern.Strength,
+		"difference":        concern.Difference,
+		"ownership":         concern.Ownership,
+		"value":             concern.Value,
+		"urgency":           concern.Urgency,
+		"answerability":     concern.Answerability,
+		"certainty":         concern.Certainty,
+		"resolution":        concern.Resolution,
+		"updated_at":        concern.UpdatedAt,
+	}
+}
+
+func continuableConcernIDs(state State, candidates []Event) []string {
+	represented := make(map[string]bool, len(candidates))
+	for _, candidate := range candidates {
+		if candidate.ConcernID != "" {
+			represented[candidate.ConcernID] = true
+		}
+		if candidate.Kind == "concern" {
+			represented[candidate.ID] = true
+		}
+		if commitmentID := commitmentIDFromEvent(candidate); commitmentID != "" {
+			for _, commitment := range state.Commitments {
+				if commitment.ID == commitmentID && commitment.ConcernID != "" {
+					represented[commitment.ConcernID] = true
+					break
+				}
+			}
+		}
+	}
+	open := make(map[string]bool)
+	for _, commitment := range state.Commitments {
+		switch commitment.Status {
+		case "formed", "acting", "reality_available", "reality_unknown":
+			open[commitment.ConcernID] = true
+		}
+	}
+	ids := make([]string, 0, defaultConcernContextLimit)
+	for _, concern := range selectContextConcerns(state.Concerns, candidates) {
+		if concern.Resolution != "hold" || concern.OriginKind == "birth_orientation" || represented[concern.ID] || open[concern.ID] {
+			continue
+		}
+		ids = append(ids, concern.ID)
+	}
+	return ids
+}
+
+func withinConcernIDs(state State, dynamics Dynamics) []string {
+	ids := make([]string, 0, defaultConcernContextLimit)
+	for _, concern := range state.Concerns {
+		if concern.Resolution != "hold" || concern.OriginKind == "birth_orientation" || concern.Ownership < dynamics.AttentionThreshold {
+			continue
+		}
+		ids = append(ids, concern.ID)
+		if len(ids) >= defaultConcernContextLimit {
+			break
+		}
+	}
+	return ids
+}
+
+// contributableConcernIDs includes held Concerns that may already be visible as
+// candidates. Continuing a concern replaces the new event's causal identity,
+// so represented concerns are excluded there. Contribution is different: a
+// selected child remains independent while its future Experience may also
+// matter to a visible broader concern.
+func contributableConcernIDs(state State, candidates []Event) []string {
+	seen := make(map[string]bool)
+	ids := make([]string, 0, 1)
+	for _, candidate := range candidates {
+		commitmentID := commitmentIDFromEvent(candidate)
+		if commitmentID == "" {
+			continue
+		}
+		for _, commitment := range state.Commitments {
+			if commitment.ID != commitmentID {
+				continue
+			}
+			child := concernByIDInState(state, commitment.ConcernID)
+			if child == nil || child.WithinConcernID == "" || seen[child.WithinConcernID] {
+				break
+			}
+			parent := concernByIDInState(state, child.WithinConcernID)
+			if parent != nil && parent.Resolution == "hold" {
+				ids = append(ids, parent.ID)
+				seen[parent.ID] = true
+			}
+			break
+		}
+	}
+	return ids
+}
+
+func concernByIDInState(state State, concernID string) *Concern {
+	for index := range state.Concerns {
+		if state.Concerns[index].ID == concernID {
+			return &state.Concerns[index]
+		}
+	}
+	return nil
 }
 
 func contextExperienceViews(experiences []Experience, candidates []Event) []map[string]any {
@@ -618,7 +804,11 @@ func requestAllowsMentorSend(request CognitiveRequest) bool {
 	return genericExplorationMentorContactAvailable(request.State.Commitments)
 }
 
-func cognitiveCommitTool(stage int, candidates []Event, narrativeEmpty, allowNone, allowMentorSend bool) map[string]any {
+func cognitiveCommitTool(stage int, candidates []Event, narrativeEmpty, allowNone, allowMentorSend bool, continuableConcernIDs ...string) map[string]any {
+	return cognitiveCommitToolWithLinks(stage, candidates, narrativeEmpty, allowNone, allowMentorSend, continuableConcernIDs, continuableConcernIDs, continuableConcernIDs)
+}
+
+func cognitiveCommitToolWithLinks(stage int, candidates []Event, narrativeEmpty, allowNone, allowMentorSend bool, continuableConcernIDs, withinConcernIDs, contributableConcernIDs []string) map[string]any {
 	unit := map[string]any{"type": "number", "minimum": 0, "maximum": 1}
 	candidateIDs := make([]string, 0, len(candidates))
 	commitmentIDs := make([]string, 0, 1)
@@ -644,13 +834,25 @@ func cognitiveCommitTool(stage int, candidates []Event, narrativeEmpty, allowNon
 					"u":            unit,
 					"a":            unit,
 					"certainty":    unit,
-					"resolution":   map[string]any{"type": "string", "enum": []string{"hold", "reframed", "relieved", "resolved"}},
+					"resolution":   map[string]any{"type": "string", "enum": []string{"hold", "resolved", "released"}},
 				},
 				"required":             []string{"candidate_id", "meaning", "d", "o", "v", "u", "a", "certainty", "resolution"},
 				"additionalProperties": false,
 			},
 		},
-		"focus_id":       map[string]any{"type": "string", "enum": candidateIDs},
+		"focus_id": map[string]any{"type": "string", "enum": candidateIDs},
+		"continues_concern_id": map[string]any{
+			"type": "string", "enum": append([]string{""}, continuableConcernIDs...),
+			"description": "选择一个由当前新现实继续的既有 Concern；独立对象使用空字符串。",
+		},
+		"within_concern_id": map[string]any{
+			"type": "string", "enum": append([]string{""}, withinConcernIDs...),
+			"description": "当前新独立对象形成 Concern 时，它由你认领为处在哪条范围真正包含它的既有 Concern 内；没有包含关系或当前不是新对象时使用空字符串。",
+		},
+		"contributes_to_concern_id": map[string]any{
+			"type": "string", "enum": append([]string{""}, contributableConcernIDs...),
+			"description": "当前 action_result 正在形成的真实 Experience 也推进了哪条已认领的上位 Concern；行动前、没有上位关系或当前就是同一 Concern 时使用空字符串。",
+		},
 		"thought_thread": map[string]any{"type": "string"},
 		"action":         cognitiveActionSchema(stage, allowNone, allowMentorSend),
 		"resource_choice": map[string]any{
@@ -658,7 +860,7 @@ func cognitiveCommitTool(stage int, candidates []Event, narrativeEmpty, allowNon
 			"properties": map[string]any{
 				"apply": map[string]any{
 					"type": "string", "enum": []string{"keep", "next", "default"},
-					"description": "keep makes current_profile the future default; next selects one immediate cognition in this causal thread; default sets the selected profile as the future default; current reuses the model or effort that performed this cognition",
+					"description": "keep preserves the existing persistent default; next selects one immediate cognition in this causal thread; default explicitly sets the selected profile as the future default; current reuses the model or effort that performed this cognition",
 				},
 				"model":            map[string]any{"type": "string", "enum": []string{"current", "luna", "terra", "sol"}},
 				"reasoning_effort": map[string]any{"type": "string", "enum": []string{"current", "none", "low", "medium", "high", "xhigh", "max"}},
@@ -668,7 +870,18 @@ func cognitiveCommitTool(stage int, candidates []Event, narrativeEmpty, allowNon
 			"additionalProperties": false,
 		},
 	}
-	required := []string{"appraisals", "focus_id", "thought_thread", "action", "resource_choice"}
+	required := []string{"appraisals", "focus_id", "continues_concern_id", "within_concern_id", "contributes_to_concern_id", "thought_thread", "action", "resource_choice"}
+	if stage >= 9 {
+		properties["new_concern_closure_condition"] = map[string]any{
+			"type":        "string",
+			"description": "当前唯一焦点第一次形成持续 Concern 时，写下整条 Concern 达成闭合的肯定、可由现实判断的条件；其他情况使用空字符串。",
+		}
+		properties["emerging_consequence"] = map[string]any{
+			"type":        "string",
+			"description": "当前 action_result 同时显现一个因果边界不同、值得在下一次独立参加注意竞争的新后果时，写下它的具体内容；其他焦点使用空字符串。",
+		}
+		required = append(required, "new_concern_closure_condition", "emerging_consequence")
+	}
 	if stage >= 5 {
 		experienceMin := 0
 		experienceMax := 0

@@ -18,6 +18,11 @@ import (
 
 const mentorSocketPath = "/run/hominal/hominal.sock"
 
+const (
+	mentorCommandEnqueueTimeout = 3 * time.Second
+	mentorCommandReplyTimeout   = 10 * time.Second
+)
+
 var messageIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`)
 
 type MentorServer struct {
@@ -50,7 +55,7 @@ func StartMentorServer(commands chan<- RuntimeCommand) (*MentorServer, error) {
 		Handler:           handler,
 		ReadHeaderTimeout: 3 * time.Second,
 		ReadTimeout:       5 * time.Second,
-		WriteTimeout:      5 * time.Second,
+		WriteTimeout:      12 * time.Second,
 		IdleTimeout:       15 * time.Second,
 	}
 	result := &MentorServer{server: server, listener: listener, commands: commands}
@@ -141,7 +146,7 @@ func (h *mentorHandler) command(writer http.ResponseWriter, request *http.Reques
 	case <-request.Context().Done():
 		writeJSON(writer, http.StatusRequestTimeout, map[string]string{"error": "request cancelled"})
 		return
-	case <-time.After(3 * time.Second):
+	case <-time.After(mentorCommandEnqueueTimeout):
 		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "runtime busy"})
 		return
 	}
@@ -150,7 +155,7 @@ func (h *mentorHandler) command(writer http.ResponseWriter, request *http.Reques
 		writeJSON(writer, reply.Status, reply.Body)
 	case <-request.Context().Done():
 		writeJSON(writer, http.StatusRequestTimeout, map[string]string{"error": "request cancelled"})
-	case <-time.After(3 * time.Second):
+	case <-time.After(mentorCommandReplyTimeout):
 		writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "runtime did not reply"})
 	}
 }

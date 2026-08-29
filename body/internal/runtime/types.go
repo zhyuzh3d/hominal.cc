@@ -189,6 +189,7 @@ type Lease struct {
 	Profile          CognitiveProfile `json:"profile"`
 	ProfileSource    string           `json:"profile_source"`
 	ProfilePurpose   string           `json:"profile_purpose,omitempty"`
+	RecoveryForModel string           `json:"recovery_for_model,omitempty"`
 	ReservedMicrousd int64            `json:"reserved_microusd,omitempty"`
 	VariationBias    string           `json:"variation_bias,omitempty"`
 	VariationSeed    string           `json:"variation_seed,omitempty"`
@@ -298,6 +299,8 @@ type AffectiveState struct {
 type Concern struct {
 	ID                string  `json:"id"`
 	OriginKind        string  `json:"origin_kind,omitempty"`
+	WithinConcernID   string  `json:"within_concern_id,omitempty"`
+	ClosureCondition  string  `json:"closure_condition,omitempty"`
 	CommitmentID      string  `json:"commitment_id,omitempty"`
 	Subject           string  `json:"subject"`
 	Meaning           string  `json:"meaning"`
@@ -398,13 +401,18 @@ type CognitiveAction struct {
 }
 
 type CognitiveCommit struct {
-	Appraisals        []CandidateAppraisal    `json:"appraisals"`
-	FocusID           string                  `json:"focus_id"`
-	ThoughtThread     string                  `json:"thought_thread"`
-	Action            CognitiveAction         `json:"action"`
-	ResourceChoice    CognitiveResourceChoice `json:"resource_choice"`
-	ExperienceUpdates []ExperienceUpdate      `json:"experience_updates"`
-	NarrativeUpdate   string                  `json:"narrative_update"`
+	Appraisals                 []CandidateAppraisal    `json:"appraisals"`
+	FocusID                    string                  `json:"focus_id"`
+	ContinuesConcernID         string                  `json:"continues_concern_id"`
+	WithinConcernID            string                  `json:"within_concern_id"`
+	ContributesToConcernID     string                  `json:"contributes_to_concern_id"`
+	NewConcernClosureCondition string                  `json:"new_concern_closure_condition"`
+	EmergingConsequence        string                  `json:"emerging_consequence"`
+	ThoughtThread              string                  `json:"thought_thread"`
+	Action                     CognitiveAction         `json:"action"`
+	ResourceChoice             CognitiveResourceChoice `json:"resource_choice"`
+	ExperienceUpdates          []ExperienceUpdate      `json:"experience_updates"`
+	NarrativeUpdate            string                  `json:"narrative_update"`
 }
 
 type ActionCommitment struct {

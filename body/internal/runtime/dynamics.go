@@ -139,6 +139,7 @@ func (r *Runtime) attentionCandidateActive() bool {
 }
 
 func (r *Runtime) nextStage4Request() (CognitiveRequest, bool) {
+	r.retireSettledConcernContributions()
 	if r.state.PendingAction != nil {
 		return CognitiveRequest{}, false
 	}
@@ -224,7 +225,18 @@ func (r *Runtime) nextStage4Request() (CognitiveRequest, bool) {
 			LastCommitErr:     concern.LastCommitErr,
 			CognitionAttempts: concern.CognitionAttempts,
 		}
-		if r.candidateScore(candidate) < r.config.Dynamics.AttentionThreshold {
+		// A new event and an already-owned Concern live on different numerical
+		// scales. The former receives novelty and is gated by the full attention
+		// threshold; the latter has already passed Alice's ownership/value filter
+		// and normally accumulates only ConcernBaseDrive-sized strength. Requiring
+		// 0.45 again here made a clearly held Concern (typically 0.07-0.25) vanish
+		// from consciousness after one Reality, even when Alice explicitly said it
+		// remained unfinished. Give each still-salient Concern one due revisit after
+		// fresh Reality. selfRevisitWithoutReality above still prevents thought-only
+		// loops, while exploration pressure retains its existing revival path.
+		minimumConcernSalience := r.config.Dynamics.AttentionThreshold * r.config.Dynamics.ConcernBaseDrive
+		if !ownsExplorationDrive && !r.concernAwaitsRealityRevisit(concern) &&
+			maxFloat(concern.Strength, concern.Activation) < minimumConcernSalience {
 			continue
 		}
 		if !attentionDue(concern.LastFocusedAt, now, r.config.Dynamics.AttentionRevisitSeconds) {
@@ -504,10 +516,31 @@ func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldA
 	if _, exists := r.activeCandidates[commit.FocusID]; !exists {
 		return fmt.Errorf("focus %q is not an active candidate", commit.FocusID)
 	}
+	continuedConcernID, err := r.validateConcernContinuation(commit)
+	if err != nil {
+		return err
+	}
+	effectiveConcernID := r.focusConcernID(commit.FocusID)
+	if continuedConcernID != "" {
+		effectiveConcernID = continuedConcernID
+	}
+	withinConcernID, err := r.validateConcernContext(commit, effectiveConcernID)
+	if err != nil {
+		return err
+	}
+	commit.WithinConcernID = withinConcernID
+	contributesToConcernID, err := r.validateConcernContribution(commit, effectiveConcernID)
+	if err != nil {
+		return err
+	}
+	commit.ContributesToConcernID = contributesToConcernID
 	if len([]rune(strings.TrimSpace(commit.ThoughtThread))) > 2000 {
 		return errors.New("thought thread is too large for a single attention pulse")
 	}
 	if err := validateCognitiveAction(commit.Action, r.state.Stage); err != nil {
+		return err
+	}
+	if err := r.validateActionObjectFocus(commit, effectiveConcernID); err != nil {
 		return err
 	}
 	matureExplorationDrive := r.explorationHasMatureDrive(commit.FocusID)
@@ -515,10 +548,12 @@ func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldA
 		return errors.New("general exploration has already made mentor contact; continue the relationship from a mentor message or a concrete experience, or let another part of reality introduce new difference")
 	}
 	if commit.Action.Kind != "none" {
-		if concernID := r.focusConcernID(commit.FocusID); concernID != "" && r.openCommitmentForConcern(concernID) != nil {
-			return fmt.Errorf("concern %q already has an unassimilated action commitment", concernID)
+		if effectiveConcernID != "" {
+			if open := r.openCommitmentForConcern(effectiveConcernID); open != nil && !commitAssimilates(commit, open.ID) {
+				return fmt.Errorf("concern %q already has an unassimilated action commitment", effectiveConcernID)
+			}
 		}
-		if err := r.validateActionProgress(commit.FocusID, commit.Action); err != nil {
+		if err := r.validateActionProgress(commit.FocusID, commit.Action, effectiveConcernID); err != nil {
 			return err
 		}
 	}
@@ -544,12 +579,62 @@ func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldA
 		if err := validateAppraisal(appraisal); err != nil {
 			return err
 		}
+		candidate := r.activeCandidates[appraisal.CandidateID]
+		backgroundExistingConcern := r.state.Stage >= 8 && appraisal.CandidateID != commit.FocusID && r.concernForCandidate(candidate) != nil
+		if !backgroundExistingConcern {
+			if err := validateAppraisalLifecycle(appraisal, r.config.Dynamics.AttentionThreshold); err != nil {
+				return err
+			}
+		}
 	}
 	if len(seen) != len(r.activeCandidates) {
 		return errors.New("every active candidate must receive one appraisal")
 	}
 	if !seen[commit.FocusID] {
 		return errors.New("the selected focus must also be appraised")
+	}
+	closureCondition, err := r.validateNewConcernClosureCondition(commit, effectiveConcernID)
+	if err != nil {
+		return err
+	}
+	commit.NewConcernClosureCondition = closureCondition
+	emergingConsequence, err := r.validateEmergingConsequence(commit)
+	if err != nil {
+		return err
+	}
+	commit.EmergingConsequence = emergingConsequence
+	focusCandidate := r.activeCandidates[commit.FocusID]
+	focusOriginKind := focusCandidate.Kind
+	if concernID := r.focusConcernID(commit.FocusID); concernID != "" {
+		if concern := r.concernByID(concernID); concern != nil {
+			focusOriginKind = concern.OriginKind
+		}
+	}
+	if err := validateFocusedEnactment(commit, focusCandidate, focusOriginKind, r.config.Dynamics.AttentionThreshold, r.hasOwnedAlternativeCandidate(commit, effectiveConcernID)); err != nil {
+		return err
+	}
+	normalizedCompositeDisposition := r.normalizeCompositeProgressDisposition(&commit, effectiveConcernID)
+	minimumConcernSalience := r.config.Dynamics.AttentionThreshold * r.config.Dynamics.ConcernBaseDrive
+	for _, appraisal := range commit.Appraisals {
+		candidate := r.activeCandidates[appraisal.CandidateID]
+		concern := r.concernForCandidate(candidate)
+		if concern == nil {
+			continue
+		}
+		enactsFocusedConcern := appraisal.CandidateID == commit.FocusID && commit.Action.Kind != "none"
+		isFocus := appraisal.CandidateID == commit.FocusID
+		if !isFocus && r.state.Stage >= 8 {
+			continue
+		}
+		if err := validateExistingConcernDisposition(appraisal, *concern, candidate, minimumConcernSalience, enactsFocusedConcern, r.state.Stage); err != nil {
+			return err
+		}
+	}
+	if err := r.validateConcernHierarchyDisposition(commit, effectiveConcernID); err != nil {
+		return err
+	}
+	if continuedConcernID != "" {
+		r.bindConcernContinuation(commit.FocusID, continuedConcernID)
 	}
 	now := nowUTC()
 	weightedValence := 0.0
@@ -572,8 +657,13 @@ func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldA
 			r.state.Concerns = append(r.state.Concerns, Concern{ID: "concern-" + randomID()})
 			concern = &r.state.Concerns[len(r.state.Concerns)-1]
 			created = true
+			if appraisal.CandidateID == commit.FocusID {
+				concern.WithinConcernID = withinConcernID
+				concern.ClosureCondition = closureCondition
+			}
 		}
-		if concern != nil {
+		persistConcernAppraisal := concern != nil && (r.state.Stage < 8 || appraisal.CandidateID == commit.FocusID)
+		if persistConcernAppraisal {
 			previousMeaning := concern.Meaning
 			previousResolution := concern.Resolution
 			previousDifference := concern.Difference
@@ -584,25 +674,15 @@ func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldA
 				// resolved remain the two ways Alice expresses release.
 				concernResolution = "hold"
 			}
-			if appraisal.CandidateID == commit.FocusID && commit.Action.Kind != "none" {
-				// The enacted commitment is the embodied fact that this difference
-				// remains owned until Reality returns, regardless of a looser verbal
-				// resolution label in the same cognitive commit.
-				concernResolution = "hold"
+			if concernResolution == "relieved" { // Compatibility with archived pre-G0.9 state.
+				concernResolution = "released"
 			}
-			releasedByOwnership := appraisal.Ownership < r.config.Dynamics.AttentionThreshold &&
-				!(appraisal.CandidateID == commit.FocusID && commit.Action.Kind != "none") &&
-				!concernAwaitsMentorReply(concern.ID, r.state.Commitments, r.state.Mentor)
-			if releasedByOwnership {
-				// Ownership is the boundary between noticing a fact and agreeing to
-				// let it remain part of one's active life.  A low-O appraisal may be
-				// remembered as Experience, but it cannot remain a held Concern just
-				// because the language model also emitted "hold".  This is a semantic
-				// consistency rule, not an experimenter choice about which object
-				// Alice ought to care about.
-				concernResolution = "relieved"
+			// Subject is the stable factual anchor Alice originally chose to own.
+			// Later Reality can change its meaning, difference and strength without
+			// silently replacing what the continuing Concern is about.
+			if strings.TrimSpace(concern.Subject) == "" {
+				concern.Subject = stableConcernSubject(candidate)
 			}
-			concern.Subject = truncate(candidate.Summary, 512)
 			if concern.OriginKind == "" {
 				concern.OriginKind = candidate.Kind
 			}
@@ -635,7 +715,7 @@ func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldA
 				concernResolution,
 				realityProgress,
 			)
-			if releasedByOwnership {
+			if concernResolution == "resolved" || concernResolution == "released" {
 				concern.Strength = 0
 			}
 			if appraisal.CandidateID == commit.FocusID {
@@ -662,7 +742,21 @@ func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldA
 			}
 		}
 		if candidate.Kind != "concern" && appraisal.CandidateID != commit.FocusID {
-			markEvent(&r.state, appraisal.CandidateID, "background")
+			if r.state.Stage >= 9 && candidate.Kind == "concern_contribution" {
+				// A contribution that lost this attention competition is still a new
+				// factual wake-up for an already-owned parent. Keep the single merged
+				// signal pending until it receives its own focus; the background
+				// appraisal remains affective context and does not settle the parent.
+				markEvent(&r.state, appraisal.CandidateID, "pending")
+			} else if r.state.Stage >= 8 && appraisal.Resolution == "hold" && appraisal.Ownership >= r.config.Dynamics.AttentionThreshold {
+				// Single-focus consciousness means "not now", not "never". A
+				// non-focused event that Alice explicitly wants to keep affecting
+				// her stays pending for a later pulse. It does not become a parallel
+				// Concern until it is itself selected as the one focus.
+				markEvent(&r.state, appraisal.CandidateID, "pending")
+			} else {
+				markEvent(&r.state, appraisal.CandidateID, "background")
+			}
 		}
 		if candidate.Kind == "self_model_difference" {
 			r.state.SelfModelTension = clamp01(
@@ -719,6 +813,10 @@ func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldA
 		r.state.ExplorationPressure + r.config.Dynamics.ExplorationUnknownGrowth*(uncertaintyTotal/float64(len(commit.Appraisals))),
 	)
 	r.state.LastAttentionAt = now
+	// A contribution exists only to wake its still-open parent Concern. Once the
+	// parent has directly settled its own closure condition, keeping that wake-up
+	// pending would turn completed progress into a new, content-free thought loop.
+	r.retireSettledConcernContributions()
 	r.pruneInactiveConcerns()
 	if err := r.applyResourceChoice(commit.ResourceChoice, profile, commit.FocusID); err != nil {
 		return err
@@ -729,6 +827,12 @@ func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldA
 	if err := r.applyNarrativeUpdate(commit); err != nil {
 		return err
 	}
+	if err := r.addMentorContentCandidate(commit); err != nil {
+		return err
+	}
+	if err := r.addEmergingConsequence(commit); err != nil {
+		return err
+	}
 	variationBias := ""
 	variationSeed := ""
 	if r.state.Lease != nil {
@@ -736,19 +840,253 @@ func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldA
 		variationSeed = r.state.Lease.VariationSeed
 	}
 	payload := map[string]any{
-		"focus_id":        commit.FocusID,
-		"thought_thread":  truncate(strings.TrimSpace(commit.ThoughtThread), 2000),
-		"appraisals":      commit.Appraisals,
-		"affective_state": r.state.AffectiveState,
-		"action_kind":     commit.Action.Kind,
-		"resource_choice": commit.ResourceChoice,
-		"variation_bias":  variationBias,
-		"variation_seed":  variationSeed,
+		"focus_id":                      commit.FocusID,
+		"continues_concern_id":          continuedConcernID,
+		"within_concern_id":             withinConcernID,
+		"contributes_to_concern_id":     contributesToConcernID,
+		"new_concern_closure_condition": closureCondition,
+		"emerging_consequence":          emergingConsequence,
+		"thought_thread":                truncate(strings.TrimSpace(commit.ThoughtThread), 2000),
+		"appraisals":                    commit.Appraisals,
+		"affective_state":               r.state.AffectiveState,
+		"action_kind":                   commit.Action.Kind,
+		"resource_choice":               commit.ResourceChoice,
+		"variation_bias":                variationBias,
+		"variation_seed":                variationSeed,
 	}
 	if withheldActionKind != "" {
 		payload["withheld_action_kind"] = withheldActionKind
 	}
+	if normalizedCompositeDisposition != "" {
+		payload["normalized_composite_disposition"] = normalizedCompositeDisposition
+	}
 	return r.journal("aip_commit", commit.FocusID, payload)
+}
+
+func (r *Runtime) retireSettledConcernContributions() {
+	for index := range r.state.Background {
+		event := &r.state.Background[index]
+		if event.Kind != "concern_contribution" {
+			continue
+		}
+		parentID, _ := concernContributionRelation(*event)
+		if parentID == "" {
+			parentID = strings.TrimSpace(event.ConcernID)
+		}
+		parent := r.concernByID(parentID)
+		if parent != nil && parent.Resolution == "hold" {
+			continue
+		}
+		event.Status = "processed"
+		event.LastCommitErr = ""
+		event.CognitionAttempts = 0
+	}
+}
+
+func commitAssimilates(commit CognitiveCommit, commitmentID string) bool {
+	return len(commit.ExperienceUpdates) == 1 && commit.ExperienceUpdates[0].CommitmentID == commitmentID
+}
+
+func validateAppraisalLifecycle(appraisal CandidateAppraisal, ownershipThreshold float64) error {
+	if appraisal.Resolution == "hold" && appraisal.Ownership < ownershipThreshold {
+		return fmt.Errorf("candidate %q cannot be held with ownership %.3f below the concern threshold %.3f; either own its future consequence or resolve it", appraisal.CandidateID, appraisal.Ownership, ownershipThreshold)
+	}
+	if appraisal.Resolution == "released" && appraisal.Ownership >= ownershipThreshold {
+		return fmt.Errorf("candidate %q cannot be released with ownership %.3f at or above the concern threshold %.3f; lower ownership only after deciding this difference no longer belongs to your future", appraisal.CandidateID, appraisal.Ownership, ownershipThreshold)
+	}
+	return nil
+}
+
+func validateExistingConcernDisposition(appraisal CandidateAppraisal, concern Concern, candidate Event, closureThreshold float64, enacts bool, stage int) error {
+	if concern.Resolution != "hold" {
+		return nil
+	}
+	if stage >= 9 && candidate.Kind == "concern_contribution" && appraisal.Resolution != "hold" {
+		return fmt.Errorf("concern %q received one child contribution; contribution records progress, while ending the whole concern requires a later direct focus on its stable closure condition", concern.ID)
+	}
+	if enacts && appraisal.Resolution != "hold" {
+		return fmt.Errorf("concern %q is being enacted and must remain held until Reality returns", concern.ID)
+	}
+	if appraisal.Resolution == "resolved" && appraisal.Difference > closureThreshold {
+		return fmt.Errorf("concern %q cannot be resolved with remaining difference %.3f above the closure threshold %.3f; keep it held, or use released with low ownership and a reality-grounded reason for withdrawing responsibility", concern.ID, appraisal.Difference, closureThreshold)
+	}
+	return nil
+}
+
+// validateConcernHierarchyDisposition keeps the lifecycle of a self-endorsed
+// whole consistent with the lifecycles of the concrete consequences Alice put
+// inside it. A parent may integrate a child's Experience, but it cannot declare
+// the whole settled while that child still says its own closure condition is
+// unfinished. This does not decide either lifecycle; it only makes Alice bring
+// the remaining child to its own focus before settling the parent.
+func (r *Runtime) validateConcernHierarchyDisposition(commit CognitiveCommit, effectiveConcernID string) error {
+	if r.state.Stage < 9 || effectiveConcernID == "" {
+		return nil
+	}
+	disposition := ""
+	for _, appraisal := range commit.Appraisals {
+		if appraisal.CandidateID == commit.FocusID {
+			disposition = appraisal.Resolution
+			break
+		}
+	}
+	if disposition == "" || disposition == "hold" {
+		return nil
+	}
+	parent := r.concernByID(effectiveConcernID)
+	if parent == nil {
+		return nil
+	}
+	for _, child := range r.state.Concerns {
+		if child.ID == parent.ID || child.WithinConcernID != parent.ID || child.Resolution != "hold" {
+			continue
+		}
+		return fmt.Errorf("concern %q cannot be %s while child concern %q remains held within it; first let the child reach its own closure condition, then settle the whole", parent.ID, disposition, child.ID)
+	}
+	return nil
+}
+
+// normalizeCompositeProgressDisposition separates completion of local progress
+// from completion of a self-endorsed whole without spending another model call
+// merely to restate that structural boundary. The generated meaning and values
+// remain Alice's; only an impossible lifecycle transition is kept open until a
+// later direct whole-concern appraisal receives the complete child ledger.
+func (r *Runtime) normalizeCompositeProgressDisposition(commit *CognitiveCommit, effectiveConcernID string) string {
+	if r.state.Stage < 9 || effectiveConcernID == "" {
+		return ""
+	}
+	candidate, exists := r.activeCandidates[commit.FocusID]
+	if !exists || (candidate.Kind != "action_result" && candidate.Kind != "concern_contribution") {
+		return ""
+	}
+	hasChild := false
+	for _, child := range r.state.Concerns {
+		if child.WithinConcernID == effectiveConcernID {
+			hasChild = true
+			break
+		}
+	}
+	if !hasChild {
+		return ""
+	}
+	for index := range commit.Appraisals {
+		appraisal := &commit.Appraisals[index]
+		if appraisal.CandidateID != commit.FocusID || appraisal.Resolution == "" || appraisal.Resolution == "hold" {
+			continue
+		}
+		original := appraisal.Resolution
+		appraisal.Resolution = "hold"
+		return original
+	}
+	return ""
+}
+
+func validateFocusedEnactment(commit CognitiveCommit, candidate Event, originKind string, threshold float64, canHandOff bool) error {
+	if commit.Action.Kind != "none" || originKind == "endogenous_change" {
+		return nil
+	}
+	if candidate.Kind == "action_result" && canHandOff {
+		// Absorb the returning Reality in this single attention moment, while an
+		// independently owned concrete object remains pending to own the next
+		// action. Requiring the old result to enact the new object would conflict
+		// with causal focus validation and waste a model retry.
+		return nil
+	}
+	// A direct Concern and the Reality of its last action are the same causal
+	// foreground at two moments. Letting a highly answerable action_result say
+	// "hold" and stop made that thread disappear until its revisit timer, after
+	// which Alice could borrow an unrelated Concern as the identity of the next
+	// action. Fresh external events may be understood without immediate action;
+	// already-enacted Reality must instead continue, settle, or name a real wait.
+	if candidate.Kind != "concern" && candidate.Kind != "action_result" {
+		return nil
+	}
+	for _, appraisal := range commit.Appraisals {
+		if appraisal.CandidateID != commit.FocusID || appraisal.Resolution != "hold" {
+			continue
+		}
+		if appraisal.Difference >= threshold &&
+			appraisal.Ownership >= threshold &&
+			absFloat(appraisal.Value) >= threshold &&
+			appraisal.Answerability >= threshold {
+			return errors.New("a held concern cannot remain highly different, self-owned, valuable, and currently answerable while choosing unconditional non-action; take one bounded action, resolve the concern, or appraise the actual waiting condition")
+		}
+	}
+	return nil
+}
+
+func (r *Runtime) hasOwnedAlternativeCandidate(commit CognitiveCommit, effectiveConcernID string) bool {
+	threshold := r.config.Dynamics.AttentionThreshold
+	for _, appraisal := range commit.Appraisals {
+		if appraisal.CandidateID == commit.FocusID || appraisal.Resolution != "hold" || appraisal.Ownership < threshold || appraisal.Answerability < threshold {
+			continue
+		}
+		candidate, exists := r.activeCandidates[appraisal.CandidateID]
+		if !exists {
+			continue
+		}
+		alternativeConcernID := r.focusConcernID(candidate.ID)
+		if alternativeConcernID == "" || alternativeConcernID != effectiveConcernID {
+			return true
+		}
+	}
+	return false
+}
+
+// validateActionObjectFocus preserves causal identity at the boundary between
+// attention and bodily action. When a shell action names the exact path of a
+// different independent object that is still present in the attention field,
+// that object—not a broad parent Concern—must own the action and its returning
+// Reality. This does not choose an object or require action; it only prevents a
+// chosen action from being recorded as the life of something else.
+func (r *Runtime) validateActionObjectFocus(commit CognitiveCommit, effectiveConcernID string) error {
+	if r.state.Stage < 9 || commit.Action.Kind != "body_shell" {
+		return nil
+	}
+	command := strings.TrimSpace(commit.Action.Command)
+	if command == "" {
+		return nil
+	}
+	candidates := make(map[string]Event, len(r.state.Background)+len(r.activeCandidates))
+	for _, candidate := range r.state.Background {
+		candidates[candidate.ID] = candidate
+	}
+	for candidateID, candidate := range r.activeCandidates {
+		candidates[candidateID] = candidate
+	}
+	for candidateID, candidate := range candidates {
+		if candidateID == commit.FocusID || candidate.Kind != "environment_change" {
+			continue
+		}
+		if concern := r.concernForCandidate(candidate); concern != nil {
+			if concern.ID == effectiveConcernID || concern.Resolution != "hold" {
+				continue
+			}
+		}
+		path := eventObjectPath(candidate)
+		if path == "" || !strings.Contains(command, path) {
+			continue
+		}
+		return fmt.Errorf("body action explicitly targets independent candidate %q at %q; select that object as the single focus so its Reality keeps its own causal identity", candidateID, path)
+	}
+	return nil
+}
+
+func eventObjectPath(candidate Event) string {
+	if len(candidate.Payload) == 0 {
+		return ""
+	}
+	var payload struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(candidate.Payload, &payload); err != nil {
+		return ""
+	}
+	path := strings.TrimSpace(payload.Path)
+	if !strings.HasPrefix(path, "/") {
+		return ""
+	}
+	return path
 }
 
 func (r *Runtime) applyPerceptualSaturation(candidate Event, appraisal CandidateAppraisal, commit CognitiveCommit) {
@@ -871,8 +1209,151 @@ func (r *Runtime) shouldPersistNewConcern(commit CognitiveCommit, appraisal Cand
 	if r.state.Stage < 8 {
 		return appraisal.Resolution == "hold" && activation > 0
 	}
-	minimumActivation := r.config.Dynamics.AttentionThreshold * r.config.Dynamics.ConcernBaseDrive
-	return appraisal.Resolution == "hold" && activation >= minimumActivation
+	// Once Alice has selected the one focus, explicitly says hold, and assigns
+	// self-ownership above the threshold, the kernel must preserve that choice as
+	// a Concern even when its present activation is quiet. Activation determines
+	// strength and later competition; it cannot erase an adopted responsibility
+	// merely because its next Reality has not arrived yet. The endogenous-drive
+	// and low-yield-perception exceptions above still prevent empty exploration
+	// pressure and passive noticing from multiplying into Concerns.
+	return appraisal.Resolution == "hold"
+}
+
+// validateNewConcernClosureCondition gives every Stage 9 Concern one stable,
+// self-authored reality boundary at formation. Meaning and Difference may
+// evolve as Alice learns, while a successful sub-action cannot silently shrink
+// the whole Concern into whatever just happened. Existing Concerns inherit the
+// condition they already own; release remains available when values change.
+func (r *Runtime) validateNewConcernClosureCondition(commit CognitiveCommit, effectiveConcernID string) (string, error) {
+	if r.state.Stage < 9 || effectiveConcernID != "" {
+		return "", nil
+	}
+	var focusAppraisal *CandidateAppraisal
+	for index := range commit.Appraisals {
+		if commit.Appraisals[index].CandidateID == commit.FocusID {
+			focusAppraisal = &commit.Appraisals[index]
+			break
+		}
+	}
+	if focusAppraisal == nil {
+		return "", nil
+	}
+	activation := appraisalActivation(r.config.Dynamics, *focusAppraisal)
+	if r.concernForCandidate(r.activeCandidates[commit.FocusID]) != nil ||
+		!r.shouldPersistNewConcern(commit, *focusAppraisal, activation) {
+		return "", nil
+	}
+	condition := strings.TrimSpace(commit.NewConcernClosureCondition)
+	if condition == "" {
+		return "", errors.New("a new held concern needs one concise reality condition that would close its whole self-owned difference")
+	}
+	if len([]rune(condition)) > 512 {
+		return "", errors.New("new concern closure condition is too large")
+	}
+	return condition, nil
+}
+
+// validateEmergingConsequence preserves a second, causally distinct consequence
+// that Alice herself notices while absorbing one action Reality. It does not
+// create a Concern or a parallel focus: the consequence returns later as an
+// ordinary candidate and must pass the same appraisal and ownership rules as
+// every other object.
+func (r *Runtime) validateEmergingConsequence(commit CognitiveCommit) (string, error) {
+	consequence := strings.TrimSpace(commit.EmergingConsequence)
+	if consequence == "" {
+		return "", nil
+	}
+	if r.state.Stage < 9 {
+		return "", errors.New("emerging consequence becomes available in stage nine")
+	}
+	candidate, exists := r.activeCandidates[commit.FocusID]
+	if !exists {
+		return "", fmt.Errorf("focus %q is not an active candidate", commit.FocusID)
+	}
+	commitmentID := commitmentIDFromEvent(candidate)
+	if candidate.Kind != "action_result" || commitmentID == "" {
+		return "", errors.New("an emerging consequence must come from the focused action_result")
+	}
+	if !commitAssimilates(commit, commitmentID) {
+		return "", errors.New("the current action Reality must be absorbed before its emerging consequence can enter later attention")
+	}
+	if len([]rune(consequence)) > 512 {
+		return "", errors.New("emerging consequence is too large")
+	}
+	return consequence, nil
+}
+
+// addMentorContentCandidate separates the two factual roles of one linked
+// mentor reply without introducing parallel consciousness. The first pass has
+// just absorbed the reply as delayed Reality for Alice's earlier mentor_send;
+// the next candidate presents the same utterance as new incoming content. That
+// second pass may form or release a new Concern through ordinary AIP rules.
+func (r *Runtime) addMentorContentCandidate(commit CognitiveCommit) error {
+	if r.state.Stage < 9 {
+		return nil
+	}
+	source, exists := r.activeCandidates[commit.FocusID]
+	if !exists || source.Kind != "mentor_received" {
+		return nil
+	}
+	commitmentID := commitmentIDFromEvent(source)
+	if commitmentID == "" || !commitAssimilates(commit, commitmentID) {
+		return nil
+	}
+	body := strings.TrimSpace(source.Summary)
+	if body == "" {
+		return nil
+	}
+	payload, err := json.Marshal(map[string]any{
+		"source_event_id": source.ID,
+		"message_body":    truncate(body, 16*1024),
+	})
+	if err != nil {
+		return err
+	}
+	return r.addEvent(
+		"mentor_content",
+		"observed",
+		truncate(body, 16*1024),
+		source.ID,
+		payload,
+		true,
+	)
+}
+
+func (r *Runtime) addEmergingConsequence(commit CognitiveCommit) error {
+	consequence := strings.TrimSpace(commit.EmergingConsequence)
+	if consequence == "" {
+		return nil
+	}
+	source := r.activeCandidates[commit.FocusID]
+	payload := map[string]any{
+		"source_event_id":      source.ID,
+		"source_kind":          source.Kind,
+		"source_summary":       truncate(strings.TrimSpace(source.Summary), 4096),
+		"emerging_consequence": consequence,
+	}
+	// Keep a bounded copy of the factual Reality beside Alice's interpretation.
+	// Larger tool results remain available through the Experience and journal;
+	// duplicating them here would inflate every later cognitive context.
+	if len(source.Payload) > 0 && len(source.Payload) <= 16*1024 {
+		var sourcePayload any
+		if json.Unmarshal(source.Payload, &sourcePayload) == nil {
+			payload["source_payload"] = sourcePayload
+		}
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	return r.addEvent(
+		"reality_consequence",
+		"self_interpreted",
+		consequence,
+		source.ID,
+		encoded,
+		true,
+	)
 }
 
 func perceptualAppraisalAssumesConcern(appraisal CandidateAppraisal, threshold float64) bool {
@@ -887,13 +1368,152 @@ func (r *Runtime) focusConcernID(focusID string) string {
 	}
 	for _, event := range r.state.Background {
 		if event.ID == focusID {
-			return event.ConcernID
+			if concern := r.concernForCandidate(event); concern != nil {
+				return concern.ID
+			}
+			return ""
 		}
 	}
 	if candidate, ok := r.activeCandidates[focusID]; ok {
-		return candidate.ConcernID
+		if concern := r.concernForCandidate(candidate); concern != nil {
+			return concern.ID
+		}
 	}
 	return ""
+}
+
+func (r *Runtime) validateConcernContinuation(commit CognitiveCommit) (string, error) {
+	concernID := strings.TrimSpace(commit.ContinuesConcernID)
+	if concernID == "" {
+		return "", nil
+	}
+	candidate, exists := r.activeCandidates[commit.FocusID]
+	if !exists {
+		return "", fmt.Errorf("focus %q is not an active candidate", commit.FocusID)
+	}
+	if candidate.ConcernID != "" || candidate.Kind == "concern" || commitmentIDFromEvent(candidate) != "" {
+		// The strict tool schema cannot make continues_concern_id conditional on
+		// which candidate the model selects as focus. A Reality that already has
+		// causal identity always stays in that thread; an extra continuation value
+		// is therefore redundant input, not a reason to discard the cognition.
+		return "", nil
+	}
+	concern := r.concernByID(concernID)
+	if concern == nil || concern.Resolution != "hold" {
+		return "", fmt.Errorf("continued concern %q is not an active held concern", concernID)
+	}
+	if concern.OriginKind == "birth_orientation" {
+		return "", errors.New("a later independent event cannot overwrite the stable birth orientation; leave continues_concern_id empty so the new fact can keep its own causal identity")
+	}
+	if r.openCommitmentForConcern(concernID) != nil {
+		return "", fmt.Errorf("continued concern %q already has an unassimilated action commitment", concernID)
+	}
+	if independentFactKind(candidate.Kind) {
+		// Explicit replies and enacted results already carry causal identity from
+		// the body.  Every other external, bodily, perceptual, or self-model fact
+		// keeps its own possible consequence.  Sharing a speaker, topic, relation,
+		// or interpretation is not enough to overwrite an older Concern; Alice can
+		// relate real outcomes through contribution without losing either identity.
+		return "", nil
+	}
+	return concernID, nil
+}
+
+func independentFactKind(kind string) bool {
+	switch kind {
+	case "mentor_received", "mentor_content", "environment_change", "perceptual_change", "body_delta", "self_model_difference", "reality_consequence":
+		return true
+	default:
+		return false
+	}
+}
+
+func (r *Runtime) validateConcernContext(commit CognitiveCommit, effectiveConcernID string) (string, error) {
+	withinID := strings.TrimSpace(commit.WithinConcernID)
+	if withinID == "" {
+		return "", nil
+	}
+	candidate, exists := r.activeCandidates[commit.FocusID]
+	if !exists {
+		return "", fmt.Errorf("focus %q is not an active candidate", commit.FocusID)
+	}
+	if effectiveConcernID != "" || candidate.Kind == "concern" || commitmentIDFromEvent(candidate) != "" {
+		// Context is chosen once when an independent Concern first forms. Later
+		// cognition inherits that stable relation from the Concern itself.
+		return "", nil
+	}
+	if !independentFactKind(candidate.Kind) {
+		return "", nil
+	}
+	parent := r.concernByID(withinID)
+	if parent == nil || parent.Resolution != "hold" || parent.Ownership < r.config.Dynamics.AttentionThreshold {
+		return "", fmt.Errorf("within concern %q is not a currently held self-owned concern", withinID)
+	}
+	if parent.OriginKind == "birth_orientation" {
+		return "", errors.New("a concrete episode may shape Narrative without turning the stable birth orientation into its parent concern")
+	}
+	return withinID, nil
+}
+
+// validateConcernContribution keeps a concrete child episode distinct while
+// allowing Alice to decide, after Reality is available, that this actual
+// Experience matters to one broader Concern she already owns. Prediction,
+// intention, or task labels alone cannot manufacture contribution.
+func (r *Runtime) validateConcernContribution(commit CognitiveCommit, effectiveConcernID string) (string, error) {
+	concernID := strings.TrimSpace(commit.ContributesToConcernID)
+	if concernID == "" {
+		return "", nil
+	}
+	if concernID == effectiveConcernID {
+		// The focused Concern already receives this action's Reality.  Treating the
+		// same ID as an empty link preserves the selected action without creating a
+		// self-loop or spending another cognition on a losslessly removable
+		// redundancy.  A genuinely different parent remains Alice's explicit choice.
+		return "", nil
+	}
+	if len(commit.ExperienceUpdates) != 1 {
+		// Before Reality there is only a prediction of relevance.  The actual
+		// relationship is chosen in the cognition that forms Experience, so an
+		// early field value is a losslessly removable anticipation rather than a
+		// reason to reject the selected action.
+		return "", nil
+	}
+	child := r.concernByID(effectiveConcernID)
+	if child == nil || child.WithinConcernID == "" {
+		return "", fmt.Errorf("focused concern %q has no previously self-endorsed within relation; a new Experience cannot invent a parent from semantic similarity", effectiveConcernID)
+	}
+	if concernID != child.WithinConcernID {
+		return "", fmt.Errorf("contributed concern %q is not the focused concern's self-endorsed parent %q", concernID, child.WithinConcernID)
+	}
+	concern := r.concernByID(concernID)
+	if concern == nil || concern.Resolution != "hold" || concern.Ownership < r.config.Dynamics.AttentionThreshold {
+		return "", fmt.Errorf("contributed concern %q is not a currently held self-owned concern", concernID)
+	}
+	if concern.OriginKind == "birth_orientation" {
+		return "", errors.New("concrete episodes shape Narrative and Experience without repeatedly reactivating the stable birth orientation")
+	}
+	return concernID, nil
+}
+
+func stableConcernSubject(candidate Event) string {
+	subject := strings.TrimSpace(candidate.Summary)
+	payload := strings.TrimSpace(string(candidate.Payload))
+	if payload != "" && payload != "null" && payload != "{}" {
+		if subject != "" {
+			subject += "\n"
+		}
+		subject += "事实载荷：" + payload
+	}
+	return truncate(subject, 512)
+}
+
+func (r *Runtime) bindConcernContinuation(candidateID, concernID string) {
+	candidate, exists := r.activeCandidates[candidateID]
+	if exists {
+		candidate.ConcernID = concernID
+		r.activeCandidates[candidateID] = candidate
+	}
+	r.linkConcern(candidateID, concernID)
 }
 
 func (r *Runtime) openCommitmentForConcern(concernID string) *ActionCommitment {
@@ -912,6 +1532,25 @@ func (r *Runtime) openCommitmentForConcern(concernID string) *ActionCommitment {
 
 func commitmentFeedbackKind(kind string) bool {
 	return kind == "action_result" || kind == "mentor_received"
+}
+
+// concernAwaitsRealityRevisit preserves one bounded chance to act on a
+// self-endorsed "hold" after Reality has been assimilated. D and activation are
+// Alice's estimates, not mechanically infallible truth: a low estimate in the
+// same pulse must not erase her explicit judgment that a concrete consequence
+// remains. Once the Concern itself is focused, LastSourceID becomes its own ID;
+// the existing selfRevisitWithoutReality rule then prevents further reflection
+// without another fact.
+func (r *Runtime) concernAwaitsRealityRevisit(concern Concern) bool {
+	if concern.Resolution != "hold" || concern.LastSourceID == "" || concern.LastSourceID == concern.ID {
+		return false
+	}
+	for _, event := range r.state.Background {
+		if event.ID == concern.LastSourceID {
+			return commitmentFeedbackKind(event.Kind)
+		}
+	}
+	return false
 }
 
 func (r *Runtime) commitmentFeedbackAnswersExploration(candidate Event) bool {
@@ -966,6 +1605,10 @@ func (r *Runtime) validateResourceChoice(choice CognitiveResourceChoice, focusID
 	if err := validateProfile(r.config.CognitiveResource, profile); err != nil {
 		return CognitiveProfile{}, err
 	}
+	if choice.Apply == "default" && r.state.Body.CognitiveResourceBand == "open" &&
+		cognitiveProfileRank(profile) < cognitiveProfileRank(r.config.CognitiveResource.InitialDefaultProfile) {
+		return CognitiveProfile{}, errors.New("cognitive resources are open; keep the capability-first birth baseline as the persistent default and use next for one bounded lower-cost cognition")
+	}
 	if choice.Apply == "next" {
 		candidate := r.activeCandidates[focusID]
 		if strings.TrimSpace(choice.Purpose) == "" {
@@ -987,22 +1630,11 @@ func (r *Runtime) validateResourceChoice(choice CognitiveResourceChoice, focusID
 func (r *Runtime) applyResourceChoice(choice CognitiveResourceChoice, profile CognitiveProfile, focusID string) error {
 	switch choice.Apply {
 	case "keep":
-		// "keep" follows the profile that performed this cognition. This matches
-		// the lived meaning of keeping one's current cognitive mode: a one-use
-		// next profile remains one-use only when Alice explicitly selects another
-		// default afterward, rather than silently snapping back behind her back.
-		previousModel := r.state.CognitiveResource.DefaultProfile.Model
-		previousProfile := r.state.CognitiveResource.DefaultProfile
-		r.state.CognitiveResource.DefaultProfile = profile
-		if previousModel != "" && previousModel != profile.Model {
-			r.releaseModelWaits(previousModel)
-		}
-		if previousProfile == profile {
-			return nil
-		}
-		return r.journal("cognitive_profile_changed", focusID, map[string]any{
-			"profile": profile, "purpose": strings.TrimSpace(choice.Purpose), "source": "keep_current",
-		})
+		// Keep preserves the persistent default. A profile chosen with next is
+		// therefore genuinely one-use; persisting it requires an explicit default
+		// choice rather than a routine Reality absorption silently changing every
+		// future cognition.
+		return nil
 	case "default":
 		previousModel := r.state.CognitiveResource.DefaultProfile.Model
 		r.state.CognitiveResource.DefaultProfile = profile
@@ -1061,7 +1693,26 @@ func (r *Runtime) bindNextProfileToReality(concernID, realityEventID string) err
 func (r *Runtime) pruneInactiveConcerns() {
 	kept := r.state.Concerns[:0]
 	minimumConcernSalience := r.config.Dynamics.AttentionThreshold * r.config.Dynamics.ConcernBaseDrive
+	heldParents := make(map[string]bool)
 	for _, concern := range r.state.Concerns {
+		if concern.Resolution == "hold" {
+			heldParents[concern.ID] = true
+		}
+	}
+	for _, concern := range r.state.Concerns {
+		// A settled child is no longer an active tension, but while its parent is
+		// still held it remains the parent's causal evidence that this distinct
+		// consequence has already been handled. Reusing the Concern hierarchy as
+		// this compact ledger avoids both a second task system and the loss of early
+		// completions when a later sibling refreshes the parent's attention. Once
+		// the parent settles, ordinary pruning removes the whole completed branch.
+		settledChildOfHeldParent := concern.WithinConcernID != "" &&
+			heldParents[concern.WithinConcernID] &&
+			(concern.Resolution == "resolved" || concern.Resolution == "released")
+		if settledChildOfHeldParent {
+			kept = append(kept, concern)
+			continue
+		}
 		// Sending and receiving are two different pieces of Reality.  AIP may
 		// correctly say that the immediate send difference was relieved, while
 		// the body still knows that the same causal thread has an unanswered
@@ -1080,6 +1731,19 @@ func (r *Runtime) pruneInactiveConcerns() {
 		}
 		if concernOwnsExplorationDrive(concern, r.state.Commitments, r.state.Mentor, r.config.Dynamics.AttentionThreshold) &&
 			r.state.ExplorationPressure >= r.config.Dynamics.AttentionThreshold {
+			kept = append(kept, concern)
+			continue
+		}
+		if r.concernAwaitsRealityRevisit(concern) {
+			kept = append(kept, concern)
+			continue
+		}
+		// "hold" is Alice's explicit decision that a difference still belongs
+		// to her. Natural decay may make it quiet and keep it out of attention,
+		// but the kernel must not convert silence into release. Alice releases a
+		// Concern by reappraising its ownership or resolution; fresh Reality can
+		// later reconnect to this dormant identity.
+		if concern.Resolution == "hold" && concern.Ownership >= r.config.Dynamics.AttentionThreshold {
 			kept = append(kept, concern)
 			continue
 		}
@@ -1151,7 +1815,7 @@ func validateAppraisal(appraisal CandidateAppraisal) error {
 		return fmt.Errorf("candidate %q has value outside -1..1", appraisal.CandidateID)
 	}
 	switch appraisal.Resolution {
-	case "hold", "reframed", "relieved", "resolved":
+	case "hold", "reframed", "relieved", "resolved", "released":
 		return nil
 	default:
 		return fmt.Errorf("candidate %q has unknown resolution %q", appraisal.CandidateID, appraisal.Resolution)
@@ -1266,7 +1930,7 @@ func resolutionRelief(resolution string) float64 {
 		return 0.25
 	case "relieved":
 		return 0.60
-	case "resolved":
+	case "resolved", "released":
 		return 1
 	default:
 		return 0

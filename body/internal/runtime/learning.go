@@ -253,14 +253,89 @@ func (r *Runtime) applyExperienceUpdates(commit CognitiveCommit) error {
 	if err := r.accrueSelfModelTension(experience, strings.TrimSpace(commit.NarrativeUpdate) != ""); err != nil {
 		return err
 	}
-	return r.journal("experience_assimilated", experience.ID, map[string]any{
+	if err := r.journal("experience_assimilated", experience.ID, map[string]any{
 		"experience":       experience,
 		"integrity_before": previousDebt,
 		"integrity_after":  r.state.IntegrityDebt,
 		"reality_repair":   realityRepair,
 		"reality_fit":      realityFit,
 		"interpretive_gap": gap,
+	}); err != nil {
+		return err
+	}
+	return r.enqueueConcernContribution(strings.TrimSpace(commit.ContributesToConcernID), *commitment, experience)
+}
+
+// enqueueConcernContribution gives a real child Experience one bounded route
+// back into a broader Concern that Alice selected while assimilating the
+// result. It creates no
+// meaning, reward, priority, or prescribed response: the new candidate merely
+// makes the factual relationship available to the next single attention pulse.
+func (r *Runtime) enqueueConcernContribution(parentID string, commitment ActionCommitment, experience Experience) error {
+	parentID = strings.TrimSpace(parentID)
+	if parentID == "" {
+		return nil
+	}
+	parent := r.concernByID(parentID)
+	if parent == nil || parent.Resolution != "hold" || parent.Ownership < r.config.Dynamics.AttentionThreshold {
+		return nil
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"experience_id":     experience.ID,
+		"commitment_id":     commitment.ID,
+		"child_concern_id":  commitment.ConcernID,
+		"parent_concern_id": parentID,
 	})
+	for index := range r.state.Background {
+		existing := &r.state.Background[index]
+		if existing.Kind != "concern_contribution" {
+			continue
+		}
+		existingParentID, _ := concernContributionRelation(*existing)
+		if existingParentID != parentID {
+			continue
+		}
+		// A contribution is only a wake-up surface for the parent Concern. The
+		// Experiences remain separate durable facts, while one parent needs only
+		// one current signal regardless of how many children advanced. Reusing even
+		// a previously processed signal prevents several candidates from mapping to
+		// the same Concern in one single-focus pulse.
+		existing.CorrelationID = experience.ID
+		existing.Payload = payload
+		existing.ObservedAt = nowUTC()
+		if existing.Status != "in_focus" && existing.Status != "model_wait" {
+			existing.Status = "pending"
+			existing.LastCommitErr = ""
+			existing.CognitionAttempts = 0
+		}
+		return r.journal("concern_contribution_refreshed", existing.ID, map[string]any{
+			"experience_id":     experience.ID,
+			"commitment_id":     commitment.ID,
+			"child_concern_id":  commitment.ConcernID,
+			"parent_concern_id": parentID,
+		})
+	}
+	return r.addEvent(
+		"concern_contribution",
+		"experience",
+		"一项或多项由你自主关联的独立行动已经产生真实 Experience；最新后果现在可以重新参与同一上位 Concern 的判断。",
+		experience.ID,
+		payload,
+		true,
+		parentID,
+	)
+}
+
+func concernContributionRelation(candidate Event) (string, string) {
+	if candidate.Kind != "concern_contribution" || len(candidate.Payload) == 0 {
+		return "", ""
+	}
+	var payload struct {
+		ParentConcernID string `json:"parent_concern_id"`
+		ChildConcernID  string `json:"child_concern_id"`
+	}
+	_ = json.Unmarshal(candidate.Payload, &payload)
+	return payload.ParentConcernID, payload.ChildConcernID
 }
 
 func (r *Runtime) validateNarrativeUpdate(commit CognitiveCommit) error {
@@ -405,7 +480,7 @@ func (r *Runtime) selfModelDifferenceActive() bool {
 		}
 	}
 	for _, concern := range r.state.Concerns {
-		if concern.OriginKind == "self_model_difference" && concern.Resolution != "resolved" {
+		if concern.OriginKind == "self_model_difference" && concern.Resolution == "hold" {
 			return true
 		}
 	}
@@ -457,8 +532,11 @@ func (r *Runtime) formActionCommitment(leaseID string, profile CognitiveProfile,
 // an unchanged concern, and an exactly repeated deterministic shell failure is
 // not a new experiment merely because a different concern names it. Alice still
 // chooses the next substantive action and may use any genuinely changed request.
-func (r *Runtime) validateActionProgress(focusID string, action CognitiveAction) error {
+func (r *Runtime) validateActionProgress(focusID string, action CognitiveAction, effectiveConcernIDs ...string) error {
 	concernID := r.focusConcernID(focusID)
+	if len(effectiveConcernIDs) > 0 && strings.TrimSpace(effectiveConcernIDs[0]) != "" {
+		concernID = strings.TrimSpace(effectiveConcernIDs[0])
+	}
 	kind, request := cognitiveActionRequest(action)
 	if request == "" {
 		return nil
@@ -696,32 +774,52 @@ func commitmentIDFromEvent(candidate Event) string {
 	if len(candidate.Payload) == 0 {
 		return ""
 	}
-	var action ActionState
-	if err := json.Unmarshal(candidate.Payload, &action); err == nil && action.CommitmentID != "" {
-		return action.CommitmentID
+	switch candidate.Kind {
+	case "action_result":
+		var action ActionState
+		if err := json.Unmarshal(candidate.Payload, &action); err == nil {
+			return action.CommitmentID
+		}
+	case "mentor_received":
+		var payload struct {
+			CommitmentID string `json:"commitment_id"`
+		}
+		_ = json.Unmarshal(candidate.Payload, &payload)
+		return payload.CommitmentID
+	}
+	return ""
+}
+
+func contributedExperienceIDFromEvent(candidate Event) string {
+	if candidate.Kind != "concern_contribution" || len(candidate.Payload) == 0 {
+		return ""
 	}
 	var payload struct {
-		CommitmentID string `json:"commitment_id"`
+		ExperienceID string `json:"experience_id"`
 	}
 	_ = json.Unmarshal(candidate.Payload, &payload)
-	return payload.CommitmentID
+	return payload.ExperienceID
 }
 
 func selectContextExperiences(experiences []Experience, candidates []Event) []Experience {
 	if len(experiences) <= maxExperienceContext {
 		return append([]Experience(nil), experiences...)
 	}
-	wanted := make(map[string]bool)
+	wantedCommitments := make(map[string]bool)
+	wantedExperiences := make(map[string]bool)
 	for _, candidate := range candidates {
 		if commitmentID := commitmentIDFromEvent(candidate); commitmentID != "" {
-			wanted[commitmentID] = true
+			wantedCommitments[commitmentID] = true
+		}
+		if experienceID := contributedExperienceIDFromEvent(candidate); experienceID != "" {
+			wantedExperiences[experienceID] = true
 		}
 	}
 	selected := make([]Experience, 0, maxExperienceContext)
 	seen := make(map[string]bool)
 	for index := len(experiences) - 1; index >= 0; index-- {
 		experience := experiences[index]
-		if wanted[experience.CommitmentID] && !seen[experience.ID] {
+		if (wantedCommitments[experience.CommitmentID] || wantedExperiences[experience.ID]) && !seen[experience.ID] {
 			selected = append(selected, experience)
 			seen[experience.ID] = true
 		}

@@ -81,6 +81,20 @@ func rehearsalConfig() Config {
 	return config
 }
 
+func TestStageNineReusesTheFrozenStageEightCognitionCore(t *testing.T) {
+	config := testConfig(9)
+	config.GenerationKind = "rehearsal"
+	config.GenerationWindowSeconds = 1200
+	config.BirthBrief = "alice，你正在自己的 Ubuntu 身体中醒来。"
+	runtime, err := New(t.TempDir(), "stage-nine-instance", config, &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.state.Stage != 9 {
+		t.Fatalf("runtime stage = %d, want 9", runtime.state.Stage)
+	}
+}
+
 func TestBirthOrientationEntersAttentionExactlyOnce(t *testing.T) {
 	root := t.TempDir()
 	runtime, err := New(root, "instance", rehearsalConfig(), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
@@ -954,6 +968,962 @@ func TestUnderlyingPressureDefersThenRevivesWeakExplorationConcern(t *testing.T)
 	}
 }
 
+func TestHeldConcernGetsOneRevisitAfterFreshReality(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(9), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.config.Dynamics.AttentionRevisitSeconds = 10
+	lastFocus := time.Now().UTC().Add(-11 * time.Second).Format(time.RFC3339Nano)
+	runtime.state.Concerns = []Concern{{
+		ID: "external-object", OriginKind: "environment_change", Meaning: "结构已经确认，内容仍待读取",
+		Strength: 0.01, Activation: 0.04, Difference: 0.18, Ownership: 0.9, Value: 0.62,
+		Urgency: 0.58, Answerability: 0.96, Resolution: "hold", LastSourceID: "fresh-reality", LastFocusedAt: lastFocus,
+	}}
+	runtime.state.Background = []Event{{ID: "fresh-reality", Kind: "action_result", Status: "processed", ConcernID: "external-object"}}
+	probe := Event{ID: "external-object", Kind: "concern", ConcernID: "external-object"}
+	if runtime.candidateScore(probe) >= runtime.config.Dynamics.AttentionThreshold {
+		t.Fatal("test setup no longer represents the observed scale mismatch")
+	}
+	runtime.pruneInactiveConcerns()
+	if len(runtime.state.Concerns) != 1 {
+		t.Fatal("a held concern was pruned before its one post-reality revisit")
+	}
+
+	request, ok := runtime.nextStage4Request()
+	if !ok || request.Focus.ID != "external-object" || request.Focus.Kind != "concern" {
+		t.Fatalf("a held concern could not return once after fresh reality: %#v", request)
+	}
+
+	// A direct revisit that produced no action has no new causal material. It
+	// remains dormant background but cannot re-enter as an empty reflection loop.
+	runtime.state.Concerns[0].LastSourceID = runtime.state.Concerns[0].ID
+	runtime.state.Concerns[0].LastFocusedAt = lastFocus
+	if request, ok := runtime.nextStage4Request(); ok {
+		t.Fatalf("thought-only concern revisit looped without new reality: %#v", request)
+	}
+	runtime.pruneInactiveConcerns()
+	if len(runtime.state.Concerns) != 1 {
+		t.Fatalf("a self-owned held concern was silently released after its bounded revisit: %#v", runtime.state.Concerns)
+	}
+}
+
+func TestOneInternalCausalDevelopmentCanContinueOneSelfChosenConcernIdentity(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(9), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	responsibility := Concern{
+		ID: "shared-experiment", OriginKind: "mentor_received", Subject: "完成共同核验并报告结论", Meaning: "完成共同核验并报告结论",
+		Strength: 0.2, Difference: 0.7, Ownership: 0.9, Value: 0.8, Answerability: 0.8,
+		Resolution: "hold", LastSourceID: "shared-experiment",
+	}
+	object := Event{ID: "same-drive-development", Kind: "endogenous_change", Summary: "同一内生探索张力产生了具体下一步", Status: "in_focus"}
+	runtime.state.Concerns = []Concern{responsibility}
+	runtime.state.Background = []Event{object}
+	runtime.activeCandidates = map[string]Event{object.ID: object}
+	commit := CognitiveCommit{
+		FocusID: object.ID, ContinuesConcernID: responsibility.ID,
+		Appraisals: []CandidateAppraisal{{
+			CandidateID: object.ID, Meaning: "这个物件是共同核验的下一步", Difference: 0.62,
+			Ownership: 0.92, Value: 0.82, Urgency: 0.55, Answerability: 0.95, Certainty: 0.99, Resolution: "hold",
+		}},
+		ThoughtThread:  "我主动把新物件认作已承担责任的具体下一步。",
+		Action:         CognitiveAction{Kind: "none"},
+		ResourceChoice: CognitiveResourceChoice{Apply: "keep", Model: "current", ReasoningEffort: "current"},
+	}
+	if err := runtime.applyCognitiveCommit(commit); err != nil {
+		t.Fatal(err)
+	}
+	if len(runtime.state.Concerns) != 1 || runtime.state.Concerns[0].ID != responsibility.ID {
+		t.Fatalf("continuation split one responsibility into parallel concerns: %#v", runtime.state.Concerns)
+	}
+	if runtime.state.Concerns[0].Subject != "完成共同核验并报告结论" {
+		t.Fatalf("continued reality overwrote the responsibility's stable subject: %#v", runtime.state.Concerns[0])
+	}
+	if runtime.state.Concerns[0].LastSourceID != object.ID || runtime.state.Background[0].ConcernID != responsibility.ID {
+		t.Fatalf("new reality was not causally bound to the continued concern: concern=%#v event=%#v", runtime.state.Concerns[0], runtime.state.Background[0])
+	}
+
+	badCandidate := Event{ID: "another-development", Kind: "endogenous_change", Summary: "另一项内生发展", Status: "in_focus"}
+	runtime.activeCandidates = map[string]Event{badCandidate.ID: badCandidate}
+	bad := commit
+	bad.FocusID = badCandidate.ID
+	bad.Appraisals[0].CandidateID = badCandidate.ID
+	bad.ContinuesConcernID = "missing-concern"
+	if err := runtime.applyCognitiveCommit(bad); err == nil {
+		t.Fatal("a model-invented concern identity was accepted")
+	}
+}
+
+func TestIndependentEpisodeKeepsItsOwnConcernBesideBroaderResponsibility(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(9), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	responsibility := Concern{
+		ID: "shared-experiment", OriginKind: "mentor_received", Subject: "共同完成实验并交流结论",
+		Meaning: "我愿意继续承担这段合作", Strength: 0.2, Difference: 0.7,
+		Ownership: 0.9, Value: 0.8, Answerability: 0.8, Resolution: "hold",
+	}
+	object := Event{ID: "independent-object", Kind: "environment_change", Summary: "一个有自己事实边界的新物件", Status: "in_focus"}
+	runtime.state.Concerns = []Concern{responsibility}
+	runtime.state.Background = []Event{object}
+	runtime.activeCandidates = map[string]Event{object.ID: object}
+	commit := CognitiveCommit{
+		FocusID:                    object.ID,
+		NewConcernClosureCondition: "这个物件的声明已经与直接观察到的现实完成比较",
+		Appraisals: []CandidateAppraisal{{
+			CandidateID: object.ID, Meaning: "这个对象服务于共同实验，但有独立的未完核验",
+			Difference: 0.65, Ownership: 0.85, Value: 0.7, Urgency: 0.5,
+			Answerability: 0.95, Certainty: 0.99, Resolution: "hold",
+		}},
+		ThoughtThread:  "我保留总体责任，也让这个对象自己的后果独立存在。",
+		Action:         CognitiveAction{Kind: "none"},
+		ResourceChoice: CognitiveResourceChoice{Apply: "keep", Model: "current", ReasoningEffort: "current"},
+	}
+	if err := runtime.applyCognitiveCommit(commit); err != nil {
+		t.Fatal(err)
+	}
+	if len(runtime.state.Concerns) != 2 {
+		t.Fatalf("an independent episode overwrote its broader responsibility: %#v", runtime.state.Concerns)
+	}
+	if runtime.state.Concerns[0].ID != responsibility.ID || runtime.state.Concerns[0].Subject != responsibility.Subject {
+		t.Fatalf("the broader responsibility changed while a separate episode formed: %#v", runtime.state.Concerns[0])
+	}
+	if runtime.state.Concerns[1].ID == responsibility.ID || runtime.state.Concerns[1].Subject != object.Summary {
+		t.Fatalf("the independent episode did not receive its own causal identity: %#v", runtime.state.Concerns[1])
+	}
+	if runtime.state.Concerns[1].ClosureCondition != commit.NewConcernClosureCondition {
+		t.Fatalf("the new concern lost its stable self-authored closure condition: %#v", runtime.state.Concerns[1])
+	}
+}
+
+func TestNewExternalFactCannotOverwriteAConcernBySemanticSimilarity(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(9), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := Concern{
+		ID: "shared-experiment", OriginKind: "mentor_received", Subject: "共同实验",
+		Meaning: "等待独立物件", Difference: 0.7, Ownership: 0.9, Resolution: "hold",
+	}
+	for _, kind := range []string{"environment_change", "perceptual_change", "body_delta", "self_model_difference"} {
+		event := Event{ID: "new-" + kind, Kind: kind, Summary: "与共同实验有关的新事实", Status: "in_focus"}
+		runtime.state.Concerns = []Concern{parent}
+		runtime.activeCandidates = map[string]Event{event.ID: event}
+		continued, err := runtime.validateConcernContinuation(CognitiveCommit{FocusID: event.ID, ContinuesConcernID: parent.ID})
+		if err != nil || continued != "" {
+			t.Fatalf("%s overwrote a parent by semantic similarity: id=%q err=%v", kind, continued, err)
+		}
+	}
+}
+
+func TestIndependentEpisodeExperienceCanReopenOneSelfChosenBroaderConcern(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(9), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := Concern{
+		ID: "shared-experiment", OriginKind: "mentor_received", Subject: "共同完成实验并交流结论",
+		Meaning: "我愿意承接共同实验", Strength: 0.2, Difference: 0.7,
+		Ownership: 0.9, Value: 0.8, Answerability: 0.7, Resolution: "hold",
+	}
+	child := Concern{
+		ID: "independent-object", OriginKind: "environment_change", Subject: "独立物件 A",
+		WithinConcernID: parent.ID,
+		Meaning:         "这个物件有自己的事实边界", Strength: 0.2, Difference: 0.6,
+		Ownership: 0.85, Value: 0.7, Answerability: 0.95, Resolution: "hold",
+	}
+	runtime.state.Concerns = []Concern{parent, child}
+	childEvent := Event{ID: "child-event", Kind: "concern", ConcernID: child.ID, Status: "in_focus"}
+	runtime.activeCandidates = map[string]Event{childEvent.ID: childEvent}
+	commit := CognitiveCommit{
+		FocusID: childEvent.ID, ContributesToConcernID: parent.ID,
+		ExperienceUpdates: []ExperienceUpdate{{CommitmentID: "child-action", Meaning: "子物件取得了真实结果", Significance: "ordinary"}},
+	}
+	if got, err := runtime.validateConcernContribution(commit, child.ID); err != nil || got != parent.ID {
+		t.Fatalf("valid parent contribution was rejected: id=%q err=%v", got, err)
+	}
+	early := commit
+	early.ExperienceUpdates = nil
+	early.Action = CognitiveAction{Kind: "body_shell", Command: "printf fact"}
+	if got, err := runtime.validateConcernContribution(early, child.ID); err != nil || got != "" {
+		t.Fatalf("an action prediction manufactured contribution before Experience: id=%q err=%v", got, err)
+	}
+	same := commit
+	same.ContributesToConcernID = child.ID
+	if got, err := runtime.validateConcernContribution(same, child.ID); err != nil || got != "" {
+		t.Fatalf("a redundant self-contribution was not normalized away: id=%q err=%v", got, err)
+	}
+	commitment := ActionCommitment{
+		ID: "child-action", ConcernID: child.ID, ActionKind: "body_shell", Status: "assimilated",
+	}
+	experience := Experience{ID: "child-experience", CommitmentID: commitment.ID, Meaning: "子物件取得了真实结果"}
+	before := runtime.state.Concerns[0]
+	if err := runtime.enqueueConcernContribution(parent.ID, commitment, experience); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.state.Concerns[0] != before {
+		t.Fatalf("kernel rewrote the parent before Alice appraised the result: before=%#v after=%#v", before, runtime.state.Concerns[0])
+	}
+	if len(runtime.state.Background) != 1 {
+		t.Fatalf("real child experience did not create one bounded parent contribution: %#v", runtime.state.Background)
+	}
+	contribution := runtime.state.Background[0]
+	if contribution.Kind != "concern_contribution" || contribution.ConcernID != parent.ID || contribution.CorrelationID != experience.ID || contribution.Status != "pending" {
+		t.Fatalf("contribution lost its factual parent-child identity: %#v", contribution)
+	}
+	if commitmentIDFromEvent(contribution) != "" {
+		t.Fatalf("a concern contribution became a second assimilable action result: %#v", contribution)
+	}
+	if contributedExperienceIDFromEvent(contribution) != experience.ID {
+		t.Fatalf("the contribution no longer exposes its source experience: %#v", contribution)
+	}
+	newerCommitment := commitment
+	newerCommitment.ID = "child-action-newer"
+	newerExperience := Experience{ID: "child-experience-newer", CommitmentID: newerCommitment.ID, Meaning: "子物件取得了更新的真实结果"}
+	if err := runtime.enqueueConcernContribution(parent.ID, newerCommitment, newerExperience); err != nil {
+		t.Fatal(err)
+	}
+	if len(runtime.state.Background) != 1 {
+		t.Fatalf("one child-parent relation multiplied into parallel contribution candidates: %#v", runtime.state.Background)
+	}
+	contribution = runtime.state.Background[0]
+	if contribution.CorrelationID != newerExperience.ID || contributedExperienceIDFromEvent(contribution) != newerExperience.ID {
+		t.Fatalf("the pending contribution did not advance to the latest real Experience: %#v", contribution)
+	}
+	differentChildCommitment := commitment
+	differentChildCommitment.ID = "different-child-action"
+	differentChildCommitment.ConcernID = "different-child"
+	differentChildExperience := Experience{ID: "different-child-experience", CommitmentID: differentChildCommitment.ID, Meaning: "另一子物件也取得了真实结果"}
+	if err := runtime.enqueueConcernContribution(parent.ID, differentChildCommitment, differentChildExperience); err != nil {
+		t.Fatal(err)
+	}
+	if len(runtime.state.Background) != 1 {
+		t.Fatalf("several children created duplicate wake-up candidates for one parent concern: %#v", runtime.state.Background)
+	}
+	contribution = runtime.state.Background[0]
+	if contribution.CorrelationID != differentChildExperience.ID || contributedExperienceIDFromEvent(contribution) != differentChildExperience.ID {
+		t.Fatalf("the parent wake-up did not advance to the latest child Experience: %#v", contribution)
+	}
+	runtime.activeCandidates = map[string]Event{contribution.ID: contribution}
+	if err := runtime.validateExperienceUpdates(CognitiveCommit{FocusID: contribution.ID}); err != nil {
+		t.Fatalf("a parent contribution demanded a duplicate Experience: %v", err)
+	}
+	older := []Experience{{ID: "old-0", Meaning: "older"}, newerExperience, differentChildExperience}
+	for index := 0; index < maxExperienceContext; index++ {
+		older = append(older, Experience{ID: fmt.Sprintf("recent-contribution-%d", index), Meaning: "unrelated recent experience"})
+	}
+	context := selectContextExperiences(older, []Event{contribution})
+	foundSource := false
+	for _, candidate := range context {
+		foundSource = foundSource || candidate.ID == differentChildExperience.ID
+	}
+	if !foundSource {
+		t.Fatalf("the parent appraisal could not see the actual contributing Experience: %#v", context)
+	}
+	if err := runtime.enqueueConcernContribution("", ActionCommitment{ID: "unrelated"}, Experience{ID: "other"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(runtime.state.Background) != 1 {
+		t.Fatalf("an unrelated experience invented a parent contribution: %#v", runtime.state.Background)
+	}
+}
+
+func TestIndependentConcernPersistsItsSelfChosenBroaderContext(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(9), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := Concern{
+		ID: "shared-experiment", OriginKind: "mentor_received", Subject: "共同实验",
+		Meaning: "等待多个独立对象", Difference: 0.7, Ownership: 0.9, Value: 0.8, Resolution: "hold",
+	}
+	event := Event{ID: "new-object", Kind: "environment_change", Summary: "一个独立物件到达", Status: "in_focus"}
+	runtime.state.Concerns = []Concern{parent}
+	runtime.state.Background = []Event{event}
+	runtime.activeCandidates = map[string]Event{event.ID: event}
+	commit := CognitiveCommit{
+		FocusID: event.ID, WithinConcernID: parent.ID,
+		NewConcernClosureCondition: "这个独立物件的可检验声明已经取得直接现实结果",
+		Appraisals: []CandidateAppraisal{{
+			CandidateID: event.ID, Meaning: "我在共同实验中承接这个独立物件", Difference: 0.8,
+			Ownership: 0.9, Value: 0.8, Urgency: 0.7, Answerability: 0.9, Certainty: 0.98, Resolution: "hold",
+		}},
+		ThoughtThread:  "对象独立存在，也处在我已经承接的共同实验中。",
+		Action:         CognitiveAction{Kind: "none"},
+		ResourceChoice: CognitiveResourceChoice{Apply: "keep", Model: "current", ReasoningEffort: "current"},
+	}
+	if err := runtime.applyCognitiveCommit(commit); err != nil {
+		t.Fatal(err)
+	}
+	if len(runtime.state.Concerns) != 2 || runtime.state.Concerns[1].WithinConcernID != parent.ID {
+		t.Fatalf("the independent concern lost Alice's chosen broader context: %#v", runtime.state.Concerns)
+	}
+}
+
+func TestStageNineRejectsAChangingOrMissingClosureBoundaryForNewConcern(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(9), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := Event{ID: "new-relation", Kind: "mentor_received", Summary: "共同理解几个外部物件", Status: "in_focus"}
+	runtime.state.Background = []Event{event}
+	runtime.activeCandidates = map[string]Event{event.ID: event}
+	commit := CognitiveCommit{
+		FocusID: event.ID,
+		Appraisals: []CandidateAppraisal{{
+			CandidateID: event.ID, Meaning: "我愿意参与这次共同理解", Difference: 0.8,
+			Ownership: 0.9, Value: 0.8, Urgency: 0.4, Answerability: 0.9, Certainty: 0.95, Resolution: "hold",
+		}},
+		ThoughtThread:  "这项共同理解值得继续影响我的选择。",
+		Action:         CognitiveAction{Kind: "none"},
+		ResourceChoice: CognitiveResourceChoice{Apply: "keep", Model: "current", ReasoningEffort: "current"},
+	}
+	if err := runtime.applyCognitiveCommit(commit); err == nil || !strings.Contains(err.Error(), "reality condition") {
+		t.Fatalf("new Stage 9 concern accepted without a stable closure condition: %v", err)
+	}
+	commit.NewConcernClosureCondition = "几个物件都获得直接现实结果，并把共同实验的结论带回导师关系"
+	if err := runtime.applyCognitiveCommit(commit); err != nil {
+		t.Fatal(err)
+	}
+	if len(runtime.state.Concerns) != 1 || runtime.state.Concerns[0].ClosureCondition != commit.NewConcernClosureCondition {
+		t.Fatalf("self-authored closure condition was not stored exactly once: %#v", runtime.state.Concerns)
+	}
+
+	concern := runtime.state.Concerns[0]
+	revisit := Event{ID: concern.ID, Kind: "concern", ConcernID: concern.ID, Status: "in_focus"}
+	runtime.state.Background = append(runtime.state.Background, revisit)
+	runtime.activeCandidates = map[string]Event{revisit.ID: revisit}
+	reappraisal := commit
+	reappraisal.FocusID = revisit.ID
+	reappraisal.Appraisals[0].CandidateID = revisit.ID
+	reappraisal.Appraisals[0].Meaning = "我正在等待下一个外部物件进入，当前没有可提前取得的内容"
+	reappraisal.Appraisals[0].Answerability = 0.1
+	reappraisal.NewConcernClosureCondition = "换成刚刚完成一个局部步骤"
+	if err := runtime.applyCognitiveCommit(reappraisal); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.state.Concerns[0].ClosureCondition != commit.NewConcernClosureCondition {
+		t.Fatalf("later cognition rewrote a concern's closure boundary: %#v", runtime.state.Concerns[0])
+	}
+}
+
+func TestBackgroundAppraisalCannotRewriteAnOwnedConcern(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(9), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	focusConcern := Concern{ID: "current", Meaning: "当前焦点", Difference: 0.3, Ownership: 0.8, Value: 0.5, Resolution: "hold"}
+	backgroundConcern := Concern{ID: "whole-experiment", Meaning: "多个物件仍未全部完成", Difference: 0.7, Ownership: 0.9, Value: 0.8, Resolution: "hold"}
+	before := backgroundConcern
+	focus := Event{ID: focusConcern.ID, Kind: "concern", ConcernID: focusConcern.ID, Status: "in_focus"}
+	background := Event{ID: "one-progress", Kind: "concern_contribution", ConcernID: backgroundConcern.ID, Status: "pending"}
+	runtime.state.Concerns = []Concern{focusConcern, backgroundConcern}
+	runtime.state.Background = []Event{focus, background}
+	runtime.activeCandidates = map[string]Event{focus.ID: focus, background.ID: background}
+	commit := CognitiveCommit{
+		FocusID: focus.ID,
+		Appraisals: []CandidateAppraisal{
+			{CandidateID: focus.ID, Meaning: "当前没有可提前取得的现实", Difference: 0.3, Ownership: 0.8, Value: 0.5, Urgency: 0.2, Answerability: 0.1, Certainty: 0.9, Resolution: "hold"},
+			{CandidateID: background.ID, Meaning: "一个局部结果看起来已经完成", Difference: 0.01, Ownership: 0.1, Value: 0.1, Urgency: 0.1, Answerability: 0.9, Certainty: 0.9, Resolution: "resolved"},
+		},
+		ThoughtThread:  "我只改变当前唯一焦点。",
+		Action:         CognitiveAction{Kind: "none"},
+		ResourceChoice: CognitiveResourceChoice{Apply: "keep", Model: "current", ReasoningEffort: "current"},
+	}
+	if err := runtime.applyCognitiveCommit(commit); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.state.Concerns[1] != before {
+		t.Fatalf("a background appraisal rewrote persistent concern state: before=%#v after=%#v", before, runtime.state.Concerns[1])
+	}
+	for _, event := range runtime.state.Background {
+		if event.ID == background.ID && event.Status != "pending" {
+			t.Fatalf("an unfocused parent contribution was lost instead of awaiting its own focus: %#v", event)
+		}
+	}
+}
+
+func TestChildContributionCannotEndTheWholeConcernInTheSameAppraisal(t *testing.T) {
+	concern := Concern{ID: "whole-experiment", ClosureCondition: "多个独立对象都已核验并形成共同结论", Resolution: "hold"}
+	candidate := Event{ID: "one-progress", Kind: "concern_contribution", ConcernID: concern.ID}
+	appraisal := CandidateAppraisal{CandidateID: candidate.ID, Difference: 0.01, Ownership: 0.8, Resolution: "resolved"}
+	if err := validateExistingConcernDisposition(appraisal, concern, candidate, 0.1, false, 9); err == nil || !strings.Contains(err.Error(), "child contribution") {
+		t.Fatalf("one child contribution ended the whole concern: %v", err)
+	}
+	appraisal.Resolution = "hold"
+	if err := validateExistingConcernDisposition(appraisal, concern, candidate, 0.1, false, 9); err != nil {
+		t.Fatalf("real progress could not update a still-held parent concern: %v", err)
+	}
+}
+
+func TestParentCannotSettleWhileASelfEndorsedChildRemainsHeld(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(9), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := Concern{
+		ID: "whole", OriginKind: "mentor_received", Subject: "共同实验",
+		ClosureCondition: "三个独立对象均已闭合", Difference: 0.3,
+		Ownership: 0.9, Value: 0.8, Resolution: "hold",
+	}
+	child := Concern{
+		ID: "object-b", OriginKind: "environment_change", Subject: "独立对象 B",
+		WithinConcernID: parent.ID, ClosureCondition: "B 已核验并反馈", Difference: 0.2,
+		Ownership: 0.9, Value: 0.7, Resolution: "hold",
+	}
+	focus := Event{ID: parent.ID, Kind: "concern", ConcernID: parent.ID, Status: "in_focus"}
+	runtime.state.Concerns = []Concern{parent, child}
+	runtime.activeCandidates = map[string]Event{focus.ID: focus}
+	commit := CognitiveCommit{
+		FocusID: focus.ID,
+		Appraisals: []CandidateAppraisal{{
+			CandidateID: focus.ID, Meaning: "整体看起来已经完成", Difference: 0.01,
+			Ownership: 0.9, Value: 0.8, Urgency: 0.1, Answerability: 0.9,
+			Certainty: 0.99, Resolution: "resolved",
+		}},
+		ThoughtThread: "我准备结束整体。",
+		Action:        CognitiveAction{Kind: "none"},
+		ResourceChoice: CognitiveResourceChoice{
+			Apply: "keep", Model: "current", ReasoningEffort: "current",
+		},
+	}
+	if err := runtime.applyCognitiveCommit(commit); err == nil || !strings.Contains(err.Error(), "child concern") {
+		t.Fatalf("a parent settled while its child remained held: %v", err)
+	}
+	if runtime.state.Concerns[0].Resolution != "hold" || runtime.state.Concerns[1].Resolution != "hold" {
+		t.Fatalf("a rejected hierarchy disposition mutated concern state: %#v", runtime.state.Concerns)
+	}
+	runtime.state.Concerns[1].Resolution = "resolved"
+	if err := runtime.applyCognitiveCommit(commit); err != nil {
+		t.Fatalf("a parent could not settle after its child reached closure: %v", err)
+	}
+}
+
+func TestSettledParentRetiresItsMergedContributionWakeup(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(9), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := Concern{
+		ID: "whole-experiment", OriginKind: "mentor_received", Subject: "共同实验",
+		Meaning: "三个对象仍需整体判断", ClosureCondition: "三个对象都已核验并反馈",
+		Difference: 0.4, Ownership: 0.9, Value: 0.8, Strength: 0.2, Resolution: "hold",
+	}
+	focus := Event{ID: parent.ID, Kind: "concern", ConcernID: parent.ID, Status: "in_focus"}
+	payload, _ := json.Marshal(map[string]any{
+		"experience_id": "latest-experience", "parent_concern_id": parent.ID, "child_concern_id": "third-object",
+	})
+	contribution := Event{ID: "merged-progress", Kind: "concern_contribution", ConcernID: parent.ID, Payload: payload, Status: "pending"}
+	runtime.state.Concerns = []Concern{parent}
+	runtime.state.Background = []Event{focus, contribution}
+	runtime.activeCandidates = map[string]Event{focus.ID: focus, contribution.ID: contribution}
+	commit := CognitiveCommit{
+		FocusID: focus.ID,
+		Appraisals: []CandidateAppraisal{
+			{CandidateID: focus.ID, Meaning: "三个对象都已核验并反馈，整体边界闭合", Difference: 0.01, Ownership: 0.9, Value: 0.8, Urgency: 0.1, Answerability: 0.9, Certainty: 0.99, Resolution: "resolved"},
+			{CandidateID: contribution.ID, Meaning: "最后一项局部进展已经进入整体判断", Difference: 0.1, Ownership: 0.8, Value: 0.7, Urgency: 0.1, Answerability: 0.8, Certainty: 0.99, Resolution: "hold"},
+		},
+		ThoughtThread: "我依据稳定的闭合条件整体结束这项实验。",
+		Action:        CognitiveAction{Kind: "none"},
+		ResourceChoice: CognitiveResourceChoice{
+			Apply: "keep", Model: "current", ReasoningEffort: "current",
+		},
+	}
+	if err := runtime.applyCognitiveCommit(commit); err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range runtime.state.Background {
+		if event.ID == contribution.ID && event.Status != "processed" {
+			t.Fatalf("a settled parent left its merged contribution in attention: %#v", event)
+		}
+	}
+}
+
+func TestRuntimeBuffersMentorSignalsDuringOneCognitionTurn(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(9), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cap(runtime.commands) < 8 {
+		t.Fatalf("mentor channel cannot absorb a short cognition burst: capacity=%d", cap(runtime.commands))
+	}
+}
+
+func TestContributionIsChosenWhenRealityBecomesExperience(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(9), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := Concern{
+		ID: "parent", OriginKind: "mentor_received", Subject: "共同实验", Meaning: "等待真实结果",
+		Difference: 0.7, Ownership: 0.9, Value: 0.8, Resolution: "hold",
+	}
+	child := Concern{
+		ID: "child", OriginKind: "environment_change", Subject: "独立物件", Meaning: "核验对象",
+		WithinConcernID: parent.ID,
+		Difference:      0.6, Ownership: 0.85, Value: 0.7, Resolution: "hold",
+	}
+	commitment := ActionCommitment{
+		ID: "child-action", FocusID: "child-source", ConcernID: child.ID, ActionKind: "body_shell",
+		Intent: "核验对象", Prediction: "返回可比较事实", InitialDifference: 0.6, Status: "reality_available",
+	}
+	payload, _ := json.Marshal(ActionState{ID: "action", CommitmentID: commitment.ID, Kind: "body_shell", Status: "completed", Result: "actual=fact"})
+	reality := Event{ID: "child-reality", Kind: "action_result", ConcernID: child.ID, Payload: payload, Status: "in_focus"}
+	runtime.state.Concerns = []Concern{parent, child}
+	runtime.state.Commitments = []ActionCommitment{commitment}
+	runtime.state.Background = []Event{reality}
+	runtime.activeCandidates = map[string]Event{reality.ID: reality}
+	commit := CognitiveCommit{
+		FocusID: reality.ID, ContributesToConcernID: parent.ID,
+		Appraisals: []CandidateAppraisal{{
+			CandidateID: reality.ID, Meaning: "实际结果推进了独立对象，也影响共同实验", Difference: 0.2,
+			Ownership: 0.82, Value: 0.7, Urgency: 0.3, Answerability: 0.9, Certainty: 0.99, Resolution: "hold",
+		}},
+		ThoughtThread: "看到真实结果后，我现在判断它也推进了共同实验。",
+		Action:        CognitiveAction{Kind: "none"},
+		ResourceChoice: CognitiveResourceChoice{
+			Apply: "keep", Model: "current", ReasoningEffort: "current",
+		},
+		ExperienceUpdates: []ExperienceUpdate{{
+			CommitmentID: commitment.ID, PredictionDifference: 0.05,
+			Meaning: "实际结果已经形成", Significance: "ordinary",
+		}},
+	}
+	if err := runtime.applyCognitiveCommit(commit); err != nil {
+		t.Fatal(err)
+	}
+	contributions := 0
+	for _, event := range runtime.state.Background {
+		if event.Kind == "concern_contribution" && event.ConcernID == parent.ID {
+			contributions++
+		}
+	}
+	if contributions != 1 {
+		t.Fatalf("Experience-time contribution did not create exactly one parent fact: %#v", runtime.state.Background)
+	}
+}
+
+func TestActionRealityRecoversItsConcernThroughThePersistedCommitment(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(9), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	concern := Concern{ID: "child", Resolution: "hold"}
+	commitment := ActionCommitment{ID: "action-commitment", ConcernID: concern.ID, Status: "reality_available"}
+	payload, _ := json.Marshal(ActionState{CommitmentID: commitment.ID, Status: "completed"})
+	reality := Event{ID: "reality", Kind: "action_result", Payload: payload, Status: "in_focus"}
+	runtime.state.Concerns = []Concern{concern}
+	runtime.state.Commitments = []ActionCommitment{commitment}
+	runtime.state.Background = []Event{reality}
+	runtime.activeCandidates = map[string]Event{reality.ID: reality}
+	if got := runtime.focusConcernID(reality.ID); got != concern.ID {
+		t.Fatalf("action Reality lost its causal Concern: got %q want %q", got, concern.ID)
+	}
+}
+
+func TestRealityMayAssimilateOneCommitmentAndFormTheNextSerialAction(t *testing.T) {
+	commit := CognitiveCommit{ExperienceUpdates: []ExperienceUpdate{{CommitmentID: "current"}}, Action: CognitiveAction{Kind: "body_shell"}}
+	if !commitAssimilates(commit, "current") {
+		t.Fatal("the Reality cognition could not close its current commitment before forming the next serial action")
+	}
+	if commitAssimilates(commit, "different") {
+		t.Fatal("an unrelated open commitment was treated as assimilated")
+	}
+}
+
+func TestLaterIndependentEventCannotOverwriteBirthOrientation(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(9), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	birth := Concern{
+		ID: "birth", OriginKind: "birth_orientation", Subject: "我在 Ubuntu 身体中醒来",
+		Meaning: "这是我的出生定位", Difference: 0.5, Ownership: 0.8, Resolution: "hold",
+	}
+	message := Event{ID: "new-message", Kind: "mentor_received", Summary: "一项新的合作邀请", Status: "in_focus"}
+	runtime.state.Concerns = []Concern{birth}
+	runtime.state.Background = []Event{message}
+	runtime.activeCandidates = map[string]Event{message.ID: message}
+	commit := CognitiveCommit{FocusID: message.ID, ContinuesConcernID: birth.ID}
+	if _, err := runtime.validateConcernContinuation(commit); err == nil {
+		t.Fatal("a later independent message could overwrite the stable birth orientation")
+	}
+	commit.ContinuesConcernID = ""
+	if concernID, err := runtime.validateConcernContinuation(commit); err != nil || concernID != "" {
+		t.Fatalf("an independent message could not keep its own causal identity: id=%q err=%v", concernID, err)
+	}
+}
+
+func TestUnlinkedMentorInvitationKeepsIdentitySeparateFromExistingRelationship(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(9), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	relationship := Concern{
+		ID: "initial-relationship", OriginKind: "mentor_received", Subject: "导师欢迎我醒来",
+		Meaning: "我们已经建立初次联系", Difference: 0.3, Ownership: 0.7, Resolution: "hold",
+	}
+	invitation := Event{ID: "new-invitation", Kind: "mentor_received", Summary: "导师提出一项新的共同实验", Status: "in_focus"}
+	runtime.state.Concerns = []Concern{relationship}
+	runtime.activeCandidates = map[string]Event{invitation.ID: invitation}
+	commit := CognitiveCommit{FocusID: invitation.ID, ContinuesConcernID: relationship.ID}
+	continued, err := runtime.validateConcernContinuation(commit)
+	if err != nil || continued != "" {
+		t.Fatalf("an unlinked mentor invitation overwrote an older relationship Concern: id=%q err=%v", continued, err)
+	}
+
+	// A true reply is linked by the mentor channel before cognition and therefore
+	// already stays in the original thread without a model-chosen continuation.
+	invitation.ConcernID = relationship.ID
+	runtime.activeCandidates[invitation.ID] = invitation
+	continued, err = runtime.validateConcernContinuation(commit)
+	if err != nil || continued != "" || runtime.focusConcernID(invitation.ID) != relationship.ID {
+		t.Fatalf("an explicitly linked mentor reply lost its causal identity: continued=%q focus=%q err=%v", continued, runtime.focusConcernID(invitation.ID), err)
+	}
+}
+
+func TestMentorReplyCanCloseOldConcernAndReturnItsContentToSerialAttention(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(9), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitment := ActionCommitment{
+		ID: "commitment-greeting", ConcernID: "initial-relationship", InitialDifference: 0.7,
+		ActionKind: "mentor_send", Status: "assimilated", ExperienceID: "experience-send",
+	}
+	runtime.state.Commitments = []ActionCommitment{commitment}
+	runtime.state.Experiences = []Experience{{
+		ID: "experience-send", CommitmentID: commitment.ID, FocusID: "send-result",
+		SourceKind: "action_result", ActionKind: "mentor_send",
+	}}
+	runtime.state.Concerns = []Concern{{
+		ID: commitment.ConcernID, OriginKind: "mentor_received", Subject: "与导师完成初次联系",
+		Meaning: "等待导师回应", Difference: 0.7, Ownership: 0.9, Strength: 0.4,
+		Resolution: "hold", ClosureCondition: "导师回应已经到达并被我理解",
+	}}
+	payload, _ := json.Marshal(struct {
+		CommitmentID string `json:"commitment_id"`
+		Body         string `json:"body"`
+	}{CommitmentID: commitment.ID, Body: "我回应你的问候，也邀请你共同完成一次物件核验实验。"})
+	reality := Event{
+		ID: "mentor-reply", Kind: "mentor_received", Source: "observed", Status: "in_focus",
+		ConcernID: commitment.ConcernID, Summary: "导师回应问候并提出一项新的共同实验", Payload: payload,
+	}
+	runtime.state.Background = []Event{reality}
+	runtime.activeCandidates = map[string]Event{reality.ID: reality}
+	commit := CognitiveCommit{
+		FocusID: reality.ID,
+		Appraisals: []CandidateAppraisal{{
+			CandidateID: reality.ID, Meaning: "导师回应已经完成初次联系；共同实验是刚显现的另一项可能责任。",
+			Difference: 0, Ownership: 0.9, Value: 0.8, Urgency: 0.4, Answerability: 0.9, Certainty: 0.98, Resolution: "resolved",
+		}},
+		ThoughtThread:  "我先完整吸收回应；来信正文随后会获得自己的判断。",
+		Action:         CognitiveAction{Kind: "none"},
+		ResourceChoice: CognitiveResourceChoice{Apply: "keep", Model: "current", ReasoningEffort: "current"},
+		ExperienceUpdates: []ExperienceUpdate{{
+			CommitmentID: commitment.ID, PredictionDifference: 0.1,
+			Meaning:         "导师回应已到达，初次联系形成真实闭环。",
+			Values:          EndogenousValues{Relatedness: 0.8, SelfEndorsed: 0.8},
+			ExperiencedCost: 0.01, Lesson: "回应也可能带来新的共同后果。", Significance: "ordinary", MethodSlot: -1,
+		}},
+	}
+	if err := runtime.applyCognitiveCommit(commit); err != nil {
+		t.Fatal(err)
+	}
+	if len(runtime.state.Concerns) != 0 {
+		t.Fatalf("the completed greeting concern stayed active: %#v", runtime.state.Concerns)
+	}
+	var content *Event
+	for index := range runtime.state.Background {
+		if runtime.state.Background[index].Kind == "mentor_content" {
+			content = &runtime.state.Background[index]
+			break
+		}
+	}
+	if content == nil || content.Status != "pending" || content.ConcernID != "" {
+		t.Fatalf("the reply body was not preserved as an unowned serial candidate: %#v", content)
+	}
+	if content.CorrelationID != reality.ID || !strings.Contains(content.Summary, "共同实验") {
+		t.Fatalf("the reply content lost its factual source or body: %#v", content)
+	}
+	markEvent(&runtime.state, reality.ID, "processed")
+	request, ok := runtime.nextStage4Request()
+	if !ok || request.Focus.ID != content.ID {
+		t.Fatalf("the reply content did not receive a later independent attention opportunity: %#v", request)
+	}
+
+	runtime.activeCandidates = map[string]Event{content.ID: *content}
+	recursive := CognitiveCommit{
+		FocusID: content.ID, EmergingConsequence: "继续复制同一解释",
+		ExperienceUpdates: []ExperienceUpdate{{CommitmentID: commitment.ID}},
+	}
+	if _, err := runtime.validateEmergingConsequence(recursive); err == nil {
+		t.Fatal("a self-interpreted consequence could recursively manufacture another consequence")
+	}
+}
+
+func TestActionResultCanPreserveOneSelfRecognizedEmergingConsequence(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(9), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitment := ActionCommitment{
+		ID: "commitment-observe", ConcernID: "object-concern", InitialDifference: 0.6,
+		ActionKind: "body_shell", Status: "reality_available",
+	}
+	runtime.state.Commitments = []ActionCommitment{commitment}
+	runtime.state.Concerns = []Concern{{
+		ID: commitment.ConcernID, OriginKind: "environment_change", Subject: "核验物件结构",
+		Meaning: "等待目录结构", Difference: 0.6, Ownership: 0.9, Strength: 0.4,
+		Resolution: "hold", ClosureCondition: "目录结构已经被直接观察",
+	}}
+	payload, _ := json.Marshal(ActionState{
+		ID: "action-observe", CommitmentID: commitment.ID, Kind: "body_shell", Status: "completed",
+		Result: "manifest.json and note.md are present",
+	})
+	reality := Event{ID: "action-reality", Kind: "action_result", Status: "in_focus", ConcernID: commitment.ConcernID, Payload: payload}
+	runtime.state.Background = []Event{reality}
+	runtime.activeCandidates = map[string]Event{reality.ID: reality}
+	commit := CognitiveCommit{
+		FocusID: reality.ID,
+		Appraisals: []CandidateAppraisal{{
+			CandidateID: reality.ID, Meaning: "目录结构已经看清，原关切闭合。", Difference: 0,
+			Ownership: 0.9, Value: 0.6, Urgency: 0.1, Answerability: 1, Certainty: 1, Resolution: "resolved",
+		}},
+		EmergingConsequence: "manifest.json 中的明确声明值得作为新的事实对象单独判断。",
+		ThoughtThread:       "结构已经回答，同时一个新的可检验后果显现。",
+		Action:              CognitiveAction{Kind: "none"},
+		ResourceChoice:      CognitiveResourceChoice{Apply: "keep", Model: "current", ReasoningEffort: "current"},
+		ExperienceUpdates: []ExperienceUpdate{{
+			CommitmentID: commitment.ID, Meaning: "目录结构已经直接返回。",
+			Values:          EndogenousValues{Expansion: 0.5, SelfEndorsed: 0.8},
+			ExperiencedCost: 0.01, Lesson: "一次观察可以闭合原问题并显现另一个事实问题。", Significance: "ordinary", MethodSlot: -1,
+		}},
+	}
+	if err := runtime.applyCognitiveCommit(commit); err != nil {
+		t.Fatal(err)
+	}
+	var found int
+	for _, event := range runtime.state.Background {
+		if event.Kind == "reality_consequence" {
+			found++
+			if event.Status != "pending" || !strings.Contains(event.Summary, "明确声明") {
+				t.Fatalf("invalid emerging consequence event: %#v", event)
+			}
+		}
+		if event.Kind == "mentor_content" {
+			t.Fatalf("an action result was decomposed as mentor content: %#v", event)
+		}
+	}
+	if found != 1 {
+		t.Fatalf("action Reality produced %d emerging consequences, want one", found)
+	}
+}
+
+func TestStableConcernSubjectKeepsCompactFactualPayload(t *testing.T) {
+	payload, err := json.Marshal(map[string]string{"path": "/life/inbox/encounter-a", "kind": "external_object"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	subject := stableConcernSubject(Event{Summary: "一个新的外部物件进入了生活空间", Payload: payload})
+	if !strings.Contains(subject, "/life/inbox/encounter-a") || !strings.Contains(subject, "一个新的外部物件") {
+		t.Fatalf("the stable subject lost the event's factual identity: %q", subject)
+	}
+}
+
+func TestPartialReliefCannotResolveAStillOpenConcern(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(9), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	concern := Concern{
+		ID: "shared-work", Subject: "共同完成一次现实核验", Meaning: "我已主动承接",
+		Strength: 0.2, Difference: 0.5, Ownership: 0.9, Resolution: "hold",
+	}
+	runtime.state.Concerns = []Concern{concern}
+	candidate := Event{ID: concern.ID, Kind: "concern", ConcernID: concern.ID, Status: "in_focus"}
+	runtime.activeCandidates = map[string]Event{candidate.ID: candidate}
+	commit := CognitiveCommit{
+		FocusID: candidate.ID,
+		Appraisals: []CandidateAppraisal{{
+			CandidateID: candidate.ID, Meaning: "本步已经推进，但共同核验仍在等待后续现实",
+			Difference: 0.2, Ownership: 0.86, Value: 0.72, Urgency: 0.2,
+			Answerability: 0.9, Certainty: 0.99, Resolution: "resolved",
+		}},
+		ThoughtThread:  "局部完成不等于整体结束。",
+		Action:         CognitiveAction{Kind: "none"},
+		ResourceChoice: CognitiveResourceChoice{Apply: "keep", Model: "current", ReasoningEffort: "current"},
+	}
+	if err := runtime.applyCognitiveCommit(commit); err == nil {
+		t.Fatal("a still-open concern was accepted as resolved")
+	}
+	if runtime.state.Concerns[0].Resolution != "hold" {
+		t.Fatalf("a rejected disposition mutated the concern: %#v", runtime.state.Concerns)
+	}
+}
+
+func TestHeldLifecycleRequiresMinimumSelfOwnership(t *testing.T) {
+	appraisal := CandidateAppraisal{
+		CandidateID: "shared-work", Difference: 0.6, Ownership: 0.42,
+		Value: 0.4, Urgency: 0.2, Answerability: 0.9, Certainty: 0.99,
+		Resolution: "hold",
+	}
+	if err := validateAppraisalLifecycle(appraisal, 0.45); err == nil {
+		t.Fatal("a low-ownership appraisal could claim to hold a future concern")
+	}
+	appraisal.Ownership = 0.45
+	if err := validateAppraisalLifecycle(appraisal, 0.45); err != nil {
+		t.Fatalf("a threshold-owned held appraisal was rejected: %v", err)
+	}
+	appraisal.Ownership = 0.1
+	appraisal.Resolution = "resolved"
+	if err := validateAppraisalLifecycle(appraisal, 0.45); err != nil {
+		t.Fatalf("a low-ownership resolved appraisal was rejected: %v", err)
+	}
+	appraisal.Resolution = "released"
+	if err := validateAppraisalLifecycle(appraisal, 0.45); err != nil {
+		t.Fatalf("a low-ownership explicit release was rejected: %v", err)
+	}
+	appraisal.Ownership = 0.45
+	if err := validateAppraisalLifecycle(appraisal, 0.45); err == nil {
+		t.Fatal("a still-owned concern could be marked released")
+	}
+}
+
+func TestFocusedAnswerableConcernRequiresAConsistentDecision(t *testing.T) {
+	candidate := Event{ID: "held", Kind: "concern", ConcernID: "held"}
+	commit := CognitiveCommit{
+		FocusID: candidate.ID,
+		Appraisals: []CandidateAppraisal{{
+			CandidateID: candidate.ID, Difference: 0.8, Ownership: 0.9, Value: 0.7,
+			Urgency: 0.2, Answerability: 0.9, Resolution: "hold",
+		}},
+		Action: CognitiveAction{Kind: "none"},
+	}
+	if err := validateFocusedEnactment(commit, candidate, "environment_change", 0.45, false); err == nil {
+		t.Fatal("a fully actionable held concern could choose unconditional non-action")
+	}
+	candidate.Kind = "action_result"
+	if err := validateFocusedEnactment(commit, candidate, "environment_change", 0.45, false); err == nil {
+		t.Fatal("a fully actionable Reality could abandon its own causal thread")
+	}
+	candidate.Kind = "concern"
+	commit.Appraisals[0].Answerability = 0.2
+	if err := validateFocusedEnactment(commit, candidate, "environment_change", 0.45, false); err != nil {
+		t.Fatalf("a real waiting condition was rejected: %v", err)
+	}
+	commit.Appraisals[0].Answerability = 0.9
+	commit.Action = CognitiveAction{Kind: "body_shell", Command: "date -Is"}
+	if err := validateFocusedEnactment(commit, candidate, "environment_change", 0.45, false); err != nil {
+		t.Fatalf("a bounded reality action was rejected: %v", err)
+	}
+}
+
+func TestReturningRealityCanYieldOnePulseToAnOwnedIndependentObject(t *testing.T) {
+	candidate := Event{ID: "parent-result", Kind: "action_result", ConcernID: "parent"}
+	runtime, err := New(t.TempDir(), "instance", testConfig(9), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.state.Concerns = []Concern{{ID: "parent", Resolution: "hold"}}
+	runtime.activeCandidates = map[string]Event{
+		candidate.ID: candidate,
+		"new-object": {ID: "new-object", Kind: "environment_change"},
+	}
+	commit := CognitiveCommit{
+		FocusID: candidate.ID,
+		Appraisals: []CandidateAppraisal{
+			{CandidateID: candidate.ID, Difference: 0.8, Ownership: 0.9, Value: 0.7, Answerability: 0.9, Resolution: "hold"},
+			{CandidateID: "new-object", Difference: 0.7, Ownership: 0.85, Value: 0.8, Answerability: 0.95, Resolution: "hold"},
+		},
+		Action: CognitiveAction{Kind: "none"},
+	}
+	canHandOff := runtime.hasOwnedAlternativeCandidate(commit, "parent")
+	if !canHandOff {
+		t.Fatal("an owned independent object was not recognized as the next causal focus")
+	}
+	if err := validateFocusedEnactment(commit, candidate, "environment_change", 0.45, canHandOff); err != nil {
+		t.Fatalf("returning Reality could not hand attention to an owned independent object: %v", err)
+	}
+}
+
+func TestBodyActionMustFocusTheIndependentObjectItExplicitlyTargets(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(9), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := Concern{ID: "whole-experiment", Resolution: "hold"}
+	parentFocus := Event{ID: parent.ID, Kind: "concern", ConcernID: parent.ID, Status: "in_focus"}
+	payload, _ := json.Marshal(map[string]string{"path": "/life/inbox/encounter-b"})
+	object := Event{ID: "object-b", Kind: "environment_change", Payload: payload, Status: "pending"}
+	runtime.state.Concerns = []Concern{parent}
+	runtime.activeCandidates = map[string]Event{parentFocus.ID: parentFocus, object.ID: object}
+
+	commit := CognitiveCommit{
+		FocusID: parentFocus.ID,
+		Action: CognitiveAction{
+			Kind:    "body_shell",
+			Command: "find /life/inbox/encounter-b -maxdepth 2 -type f -print",
+		},
+	}
+	if err := runtime.validateActionObjectFocus(commit, parent.ID); err == nil {
+		t.Fatal("a parent concern borrowed the bodily action of a visible independent object")
+	}
+
+	delete(runtime.activeCandidates, object.ID)
+	runtime.state.Background = []Event{parentFocus, object}
+	if err := runtime.validateActionObjectFocus(commit, parent.ID); err == nil {
+		t.Fatal("a parent concern borrowed an unfinished independent object while it was outside the current candidate limit")
+	}
+	runtime.activeCandidates[object.ID] = object
+
+	commit.FocusID = object.ID
+	if err := runtime.validateActionObjectFocus(commit, ""); err != nil {
+		t.Fatalf("the independent object could not own an action on its own body path: %v", err)
+	}
+
+	commit.FocusID = parentFocus.ID
+	commit.Action.Command = "date -Is"
+	if err := runtime.validateActionObjectFocus(commit, parent.ID); err != nil {
+		t.Fatalf("an unrelated parent action was rejected: %v", err)
+	}
+}
+
+func TestCausallyBoundRealityDoesNotOfferAnotherConcernContinuation(t *testing.T) {
+	state := State{
+		Concerns:    []Concern{{ID: "current", Resolution: "hold"}, {ID: "other", Resolution: "hold"}},
+		Commitments: []ActionCommitment{{ID: "action-thread", ConcernID: "current", Status: "reality_available"}},
+	}
+	payload, _ := json.Marshal(ActionState{CommitmentID: "action-thread", Kind: "body_shell", Status: "completed"})
+	ids := continuableConcernIDs(state, []Event{{ID: "reality", Kind: "action_result", Payload: payload}})
+	if len(ids) != 1 || ids[0] != "other" {
+		t.Fatalf("causally bound reality could be rebound to another concern: %#v", ids)
+	}
+}
+
+func TestRedundantContinuationCannotRebindCausallyBoundReality(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(9), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.state.Concerns = []Concern{
+		{ID: "current", Resolution: "hold"},
+		{ID: "other", Resolution: "hold"},
+	}
+	runtime.state.Commitments = []ActionCommitment{{ID: "action-thread", ConcernID: "current", Status: "reality_available"}}
+	payload, _ := json.Marshal(ActionState{CommitmentID: "action-thread", Kind: "body_shell", Status: "completed"})
+	candidate := Event{ID: "reality", Kind: "action_result", Payload: payload, Status: "in_focus"}
+	runtime.activeCandidates = map[string]Event{candidate.ID: candidate}
+	commit := CognitiveCommit{FocusID: candidate.ID, ContinuesConcernID: "other"}
+	continued, err := runtime.validateConcernContinuation(commit)
+	if err != nil || continued != "" {
+		t.Fatalf("redundant continuation rejected or rebound an existing reality: continued=%q err=%v", continued, err)
+	}
+}
+
 func TestSelfRevisitedExplorationConcernWaitsQuietlyForRealityOrActionThreshold(t *testing.T) {
 	runtime, err := New(t.TempDir(), "instance", testConfig(8), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
 	if err != nil {
@@ -1046,6 +2016,89 @@ func TestExplorationModelWaitDoesNotMultiplyCandidates(t *testing.T) {
 	}
 	if len(runtime.state.Background) != 1 {
 		t.Fatalf("one model-waiting tension became an event flood: %#v", runtime.state.Background)
+	}
+}
+
+func TestProtectedActionRealityUsesOneAlternateBeforeWaiting(t *testing.T) {
+	cognizer := &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})}
+	runtime, err := New(t.TempDir(), "instance", testConfig(9), cognizer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.state.BirthBriefEnteredAt = nowUTC()
+	runtime.state.Body.NetworkAvailable = true
+	runtime.state.Background = []Event{{ID: "reality", Kind: "action_result", Status: "in_focus"}}
+	runtime.state.Commitments = []ActionCommitment{{ID: "commitment", Status: "reality_available"}}
+	runtime.state.Lease = &Lease{
+		ID: "failed-lease", FocusID: "reality",
+		Profile: CognitiveProfile{Model: "terra", ReasoningEffort: "medium"},
+	}
+	for index := 0; index < runtime.config.CognitiveResource.PaidFailureThreshold; index++ {
+		runtime.state.Usage = append(runtime.state.Usage, UsageRecord{
+			Time:           time.Now().UTC().Add(-time.Duration(index) * time.Second).Format(time.RFC3339Nano),
+			RequestedModel: "terra", Status: "failure_cost_unconfirmed", FailureCategory: "rate_limited",
+		})
+	}
+
+	result := CognitiveResult{
+		LeaseID: "failed-lease", FocusID: "reality",
+		Error: &ModelCallError{Fact: ModelFailureFact{Model: "terra", Category: "rate_limited", HTTPStatus: 429}},
+	}
+	if err := runtime.handleCognitiveResult(context.Background(), result); err != nil {
+		t.Fatal(err)
+	}
+	defer close(cognizer.release)
+	select {
+	case request := <-cognizer.started:
+		if request.Focus.ID != "reality" || request.Profile.Model != "luna" || request.Lease.ProfileSource != "resource_recovery" {
+			t.Fatalf("protected Reality did not continue once through an alternate model: %#v", request)
+		}
+		if request.Lease.RecoveryForModel != "terra" {
+			t.Fatalf("recovery lease lost the failed primary model: %#v", request.Lease)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("protected Reality entered model_wait before the bounded alternate-model recovery")
+	}
+	protected := runtime.state.CognitiveResource.ProtectedModels["terra"]
+	if !protected.RecoveryOffered {
+		t.Fatalf("the bounded recovery was not recorded: %#v", protected)
+	}
+}
+
+func TestFailedAlternateModelBacksOffTheOriginalReality(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(9), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now().UTC()
+	runtime.state.Background = []Event{{ID: "reality", Kind: "action_result", Status: "in_focus"}}
+	runtime.state.Commitments = []ActionCommitment{{ID: "commitment", Status: "reality_available"}}
+	runtime.state.CognitiveResource.ProtectedModels["terra"] = ProtectedModel{
+		Until: start.Add(time.Minute).Format(time.RFC3339Nano), Reason: "repeated model failures", RecoveryOffered: true,
+	}
+	runtime.state.Lease = &Lease{
+		ID: "recovery-lease", FocusID: "reality",
+		Profile:       CognitiveProfile{Model: "luna", ReasoningEffort: "low"},
+		ProfileSource: "resource_recovery", RecoveryForModel: "terra",
+	}
+	result := CognitiveResult{
+		LeaseID: "recovery-lease", FocusID: "reality",
+		Error: &ModelCallError{Fact: ModelFailureFact{Model: "luna", Category: "rate_limited", HTTPStatus: 429}},
+	}
+	if err := runtime.handleCognitiveResult(context.Background(), result); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.state.Background[0].Status != "model_wait" || runtime.state.Background[0].WaitModel != "terra" {
+		t.Fatalf("failed alternate did not preserve the original Reality in model_wait: %#v", runtime.state.Background[0])
+	}
+	protected := runtime.state.CognitiveResource.ProtectedModels["terra"]
+	until, err := time.Parse(time.RFC3339Nano, protected.Until)
+	if err != nil {
+		t.Fatal(err)
+	}
+	minimum := start.Add(time.Duration(runtime.config.CognitiveResource.ModelProtectionMinutes)*time.Minute - time.Second)
+	if until.Before(minimum) || !protected.RecoveryOffered {
+		t.Fatalf("failed alternate did not apply the full bounded backoff: %#v", protected)
 	}
 }
 
@@ -1704,18 +2757,134 @@ func TestTerminalZeroStrengthConcernLeavesActiveSet(t *testing.T) {
 	}
 }
 
-func TestDormantConcernLeavesActiveSetWithoutDeletingExperience(t *testing.T) {
+func TestSettledChildRemainsAsEvidenceUntilParentSettles(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(9), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.state.Concerns = []Concern{
+		{ID: "parent", Strength: 0.4, Ownership: 0.9, Resolution: "hold"},
+		{ID: "completed-child", WithinConcernID: "parent", Resolution: "resolved"},
+		{ID: "released-child", WithinConcernID: "parent", Resolution: "released"},
+		{ID: "unrelated-completed", Resolution: "resolved"},
+	}
+	runtime.pruneInactiveConcerns()
+	if len(runtime.state.Concerns) != 3 {
+		t.Fatalf("settled child evidence did not follow its held parent: %#v", runtime.state.Concerns)
+	}
+	for index := range runtime.state.Concerns {
+		if runtime.state.Concerns[index].ID == "parent" {
+			runtime.state.Concerns[index].Resolution = "resolved"
+		}
+	}
+	runtime.pruneInactiveConcerns()
+	if len(runtime.state.Concerns) != 0 {
+		t.Fatalf("completed branch remained after its parent settled: %#v", runtime.state.Concerns)
+	}
+}
+
+func TestCompositeParentLocalProgressIsNormalizedWithoutRetry(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(9), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.state.Concerns = []Concern{
+		{ID: "parent", Resolution: "hold", ClosureCondition: "所有独立后果都已完成"},
+		{ID: "first-child", WithinConcernID: "parent", Resolution: "resolved"},
+	}
+	runtime.activeCandidates = map[string]Event{
+		"parent-action-result": {ID: "parent-action-result", Kind: "action_result", ConcernID: "parent"},
+		"parent":               {ID: "parent", Kind: "concern", ConcernID: "parent"},
+	}
+	localResult := CognitiveCommit{
+		FocusID: "parent-action-result",
+		Appraisals: []CandidateAppraisal{{
+			CandidateID: "parent-action-result", Difference: 0.01, Ownership: 0.8, Resolution: "resolved",
+		}},
+	}
+	if got := runtime.normalizeCompositeProgressDisposition(&localResult, "parent"); got != "resolved" {
+		t.Fatalf("local composite resolution was not exposed as normalized: %q", got)
+	}
+	if localResult.Appraisals[0].Resolution != "hold" {
+		t.Fatalf("one local result closed a composite parent without a whole-concern revisit: %#v", localResult.Appraisals[0])
+	}
+	directRevisit := CognitiveCommit{
+		FocusID: "parent",
+		Appraisals: []CandidateAppraisal{{
+			CandidateID: "parent", Difference: 0.01, Ownership: 0.8, Resolution: "resolved",
+		}},
+	}
+	if got := runtime.normalizeCompositeProgressDisposition(&directRevisit, "parent"); got != "" || directRevisit.Appraisals[0].Resolution != "resolved" {
+		t.Fatalf("direct whole-concern appraisal was changed: got=%q appraisal=%#v", got, directRevisit.Appraisals[0])
+	}
+}
+
+func TestCompositeParentContributionIsNormalizedWithoutRetry(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(9), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.state.Concerns = []Concern{
+		{ID: "parent", Resolution: "hold", ClosureCondition: "所有独立后果都已完成"},
+		{ID: "child", WithinConcernID: "parent", Resolution: "hold"},
+	}
+	runtime.activeCandidates = map[string]Event{
+		"progress": {ID: "progress", Kind: "concern_contribution", ConcernID: "parent"},
+	}
+	commit := CognitiveCommit{
+		FocusID: "progress",
+		Appraisals: []CandidateAppraisal{{
+			CandidateID: "progress", Difference: 0.01, Ownership: 0.8, Resolution: "resolved",
+		}},
+	}
+	if got := runtime.normalizeCompositeProgressDisposition(&commit, "parent"); got != "resolved" || commit.Appraisals[0].Resolution != "hold" {
+		t.Fatalf("one contribution was not kept as local progress: got=%q appraisal=%#v", got, commit.Appraisals[0])
+	}
+}
+
+func TestParentConcernContextShowsEveryDirectChildDisposition(t *testing.T) {
+	concerns := []Concern{
+		{ID: "parent", Resolution: "hold", ClosureCondition: "三个组成后果均已闭合"},
+		{ID: "child-a", WithinConcernID: "parent", Subject: "A", Meaning: "A 已完成", Resolution: "resolved"},
+		{ID: "child-b", WithinConcernID: "parent", Subject: "B", Meaning: "B 仍待处理", Resolution: "hold"},
+		{ID: "child-c", WithinConcernID: "parent", Subject: "C", Meaning: "C 已明确放下", Resolution: "released"},
+	}
+	views := contextConcernViews(concerns, []Event{{ID: "parent", Kind: "concern", ConcernID: "parent"}})
+	var parent map[string]any
+	for _, view := range views {
+		if view["concern_id"] == "parent" {
+			parent = view
+			break
+		}
+	}
+	if parent == nil {
+		t.Fatal("parent was omitted from context")
+	}
+	if parent["within_child_count"] != 3 || parent["held_child_count"] != 1 || parent["settled_child_count"] != 2 {
+		t.Fatalf("parent child ledger is incomplete: %#v", parent)
+	}
+	children, ok := parent["within_children"].([]map[string]any)
+	if !ok || len(children) != 3 {
+		t.Fatalf("parent child facts are unavailable: %#v", parent["within_children"])
+	}
+}
+
+func TestDormantHeldConcernRetainsIdentityWithoutDemandingAttention(t *testing.T) {
 	runtime, err := New(t.TempDir(), "instance", testConfig(8), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
 	if err != nil {
 		t.Fatal(err)
 	}
 	runtime.state.Concerns = []Concern{{
 		ID: "dormant", Strength: 0.05, Activation: 0.02, Ownership: 0.9, Resolution: "hold",
+		LastSourceID: "dormant", LastFocusedAt: time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano),
 	}}
 	runtime.state.Experiences = []Experience{{ID: "experience-kept", Meaning: "这段事实仍属于我的经历"}}
 	runtime.pruneInactiveConcerns()
-	if len(runtime.state.Concerns) != 0 {
-		t.Fatalf("a concern below the common salience floor remained active: %#v", runtime.state.Concerns)
+	if len(runtime.state.Concerns) != 1 || runtime.state.Concerns[0].ID != "dormant" {
+		t.Fatalf("a self-owned held concern lost its dormant identity: %#v", runtime.state.Concerns)
+	}
+	if request, ok := runtime.nextStage4Request(); ok {
+		t.Fatalf("a dormant concern demanded attention without new cause: %#v", request)
 	}
 	if len(runtime.state.Experiences) != 1 || runtime.state.Experiences[0].ID != "experience-kept" {
 		t.Fatalf("dormancy deleted lived experience: %#v", runtime.state.Experiences)
@@ -1998,7 +3167,7 @@ func TestStageEightSelfOwnedHoldBecomesConcern(t *testing.T) {
 	}
 }
 
-func TestStageEightLowActivationHoldRemainsAnImpression(t *testing.T) {
+func TestStageEightSelfOwnedLowActivationHoldStillBecomesConcern(t *testing.T) {
 	runtime, err := New(t.TempDir(), "instance", testConfig(8), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
 	if err != nil {
 		t.Fatal(err)
@@ -2017,8 +3186,41 @@ func TestStageEightLowActivationHoldRemainsAnImpression(t *testing.T) {
 	if err := runtime.applyCognitiveCommit(commit); err != nil {
 		t.Fatal(err)
 	}
-	if len(runtime.state.Concerns) != 0 {
-		t.Fatalf("a low-activation impression became a durable concern: %#v", runtime.state.Concerns)
+	if len(runtime.state.Concerns) != 1 || runtime.state.Concerns[0].Resolution != "hold" {
+		t.Fatalf("explicit self-owned hold was erased by low present activation: %#v", runtime.state.Concerns)
+	}
+}
+
+func TestStageNineQuietInvitationCanBecomeAWaitingResponsibility(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(9), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := Event{ID: "mentor-invitation", Kind: "mentor_received", Summary: "三个物件稍后进入生活空间", Status: "in_focus"}
+	runtime.state.Background = []Event{event}
+	runtime.activeCandidates = map[string]Event{event.ID: event}
+	commit := CognitiveCommit{
+		FocusID: event.ID,
+		Appraisals: []CandidateAppraisal{{
+			CandidateID: event.ID,
+			Meaning:     "我愿意把这次邀请作为一项有边界的共同探索承接，并等待物件真实出现。",
+			Difference:  0.28, Ownership: 0.70, Value: 0.68, Urgency: 0.22,
+			Answerability: 0.62, Certainty: 0.90, Resolution: "hold",
+		}},
+		NewConcernClosureCondition: "我已自主判断三个物件，并把自己认领的重要结果带回共同关系。",
+		ThoughtThread:              "这项责任安静地等待现实，不等于它没有被我承担。",
+		Action:                     CognitiveAction{Kind: "none"},
+		ResourceChoice:             CognitiveResourceChoice{Apply: "keep", Model: "current", ReasoningEffort: "current"},
+	}
+	if err := runtime.applyCognitiveCommit(commit); err != nil {
+		t.Fatal(err)
+	}
+	if len(runtime.state.Concerns) != 1 {
+		t.Fatalf("a quiet self-owned responsibility failed to persist: %#v", runtime.state.Concerns)
+	}
+	concern := runtime.state.Concerns[0]
+	if concern.OriginKind != "mentor_received" || concern.ClosureCondition != commit.NewConcernClosureCondition || concern.Ownership != 0.70 {
+		t.Fatalf("the waiting responsibility lost its self-authored boundary: %#v", concern)
 	}
 }
 
@@ -2050,7 +3252,7 @@ func TestStageEightEnactedCommitmentIsEmbodiedHold(t *testing.T) {
 	}
 }
 
-func TestStageEightOnlyTheSelectedFocusCanBecomeANewConcern(t *testing.T) {
+func TestStageEightOnlyTheSelectedFocusCanBecomeANewConcernWhileOwnedBackgroundWaits(t *testing.T) {
 	runtime, err := New(t.TempDir(), "instance", testConfig(8), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
 	if err != nil {
 		t.Fatal(err)
@@ -2074,6 +3276,36 @@ func TestStageEightOnlyTheSelectedFocusCanBecomeANewConcern(t *testing.T) {
 	}
 	if len(runtime.state.Concerns) != 1 || runtime.state.Concerns[0].LastSourceID != focus.ID {
 		t.Fatalf("background noticing created a parallel concern: %#v", runtime.state.Concerns)
+	}
+	if runtime.state.Background[1].Status != "pending" {
+		t.Fatalf("a self-owned non-focus event was discarded instead of waiting for single-threaded attention: %#v", runtime.state.Background[1])
+	}
+}
+
+func TestStageEightUnownedBackgroundReturnsToStaticBackground(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(8), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	focus := Event{ID: "chosen", Kind: "environment_change", Summary: "当前焦点", Status: "in_focus"}
+	background := Event{ID: "noticed", Kind: "body_delta", Summary: "只需知道的背景", Status: "pending"}
+	runtime.state.Background = []Event{focus, background}
+	runtime.activeCandidates = map[string]Event{focus.ID: focus, background.ID: background}
+	commit := CognitiveCommit{
+		FocusID: focus.ID,
+		Appraisals: []CandidateAppraisal{
+			{CandidateID: focus.ID, Meaning: "我现在承接它", Difference: 0.6, Ownership: 0.8, Value: 0.7, Urgency: 0.4, Answerability: 0.8, Certainty: 0.9, Resolution: "hold"},
+			{CandidateID: background.ID, Meaning: "我已经了解，不让它支配未来", Difference: 0.05, Ownership: 0.2, Value: 0.2, Urgency: 0.1, Answerability: 0.9, Certainty: 0.9, Resolution: "resolved"},
+		},
+		ThoughtThread:  "一个焦点被承接，另一项只是被理解。",
+		Action:         CognitiveAction{Kind: "none"},
+		ResourceChoice: CognitiveResourceChoice{Apply: "keep", Model: "current", ReasoningEffort: "current"},
+	}
+	if err := runtime.applyCognitiveCommit(commit); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.state.Background[1].Status != "background" {
+		t.Fatalf("a released non-focus event remained in the attention queue: %#v", runtime.state.Background[1])
 	}
 }
 
@@ -2125,7 +3357,7 @@ func TestLowOwnershipReleasesAnExistingConcernButKeepsItsExperiencePossible(t *t
 		FocusID: candidate.ID,
 		Appraisals: []CandidateAppraisal{{
 			CandidateID: candidate.ID, Meaning: "我已经理解它，但不愿让它继续成为我的关切", Difference: 0.5,
-			Ownership: 0.2, Value: 0.05, Urgency: 0.05, Answerability: 0.2, Certainty: 0.98, Resolution: "hold",
+			Ownership: 0.2, Value: 0.05, Urgency: 0.05, Answerability: 0.2, Certainty: 0.98, Resolution: "released",
 		}},
 		ThoughtThread:  "注意和理解已经完成；我选择不再承接。",
 		Action:         CognitiveAction{Kind: "none"},
@@ -2271,7 +3503,7 @@ func TestOrdinaryLowOwnershipFocusWithholdsEnactmentWithoutRetry(t *testing.T) {
 	commit := CognitiveCommit{
 		Appraisals: []CandidateAppraisal{{
 			CandidateID: event.ID, Meaning: "我注意到一个普通变化", Difference: 0.1, Ownership: 0.2,
-			Value: 0.1, Urgency: 0.1, Answerability: 0.9, Certainty: 0.9, Resolution: "hold",
+			Value: 0.1, Urgency: 0.1, Answerability: 0.9, Certainty: 0.9, Resolution: "resolved",
 		}},
 		FocusID: event.ID, ThoughtThread: "我尚未愿意承接它。",
 		Action: CognitiveAction{

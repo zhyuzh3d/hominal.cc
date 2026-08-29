@@ -40,6 +40,15 @@ func cognitiveActionKinds(t *testing.T, tool map[string]any) []string {
 	return kinds
 }
 
+func TestStageNineUsesTheStageEightCognitiveContract(t *testing.T) {
+	if !usesUnifiedCognition(9) {
+		t.Fatal("stage nine did not enter the shared cognitive route")
+	}
+	if usesUnifiedCognition(3) || usesUnifiedCognition(7) {
+		t.Fatal("an unsupported stage entered the shared cognitive route")
+	}
+}
+
 func TestStageFourModelUsesOneForcedCognitiveCommit(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/v1/responses" {
@@ -70,8 +79,14 @@ func TestStageFourModelUsesOneForcedCognitiveCommit(t *testing.T) {
 		if !strings.Contains(instructions, "associative_recall") || !strings.Contains(instructions, "不是方向、目标、命令或奖励") {
 			t.Fatalf("stage four did not preserve Alice's agency over programmatic variation: %q", instructions)
 		}
-		if !strings.Contains(instructions, "keep 让本次 current_profile 继续成为以后新焦点的默认档位") || !strings.Contains(instructions, "使用 default 明确选择") {
+		if !strings.Contains(instructions, "keep 保持已经存在的长期默认不变") || !strings.Contains(instructions, "使用 default 明确认领") || !strings.Contains(instructions, "一次 next 完成后会自然回到原默认") {
 			t.Fatalf("resource choice semantics remained ambiguous: %q", instructions)
+		}
+		if !strings.Contains(instructions, "机器可读的键值") || !strings.Contains(instructions, "读取到一项声明") {
+			t.Fatalf("stage four lost the distinction between reading and checking an explicit claim: %q", instructions)
+		}
+		if !strings.Contains(instructions, "等待上位 Concern、整轮计划或兄弟对象") || !strings.Contains(instructions, "不把同一份等待重复背在两层张力上") {
+			t.Fatalf("concern hierarchy could duplicate one waiting condition across parent and child: %q", instructions)
 		}
 		input, _ := body["input"].(string)
 		if !strings.Contains(input, `"background_concerns_not_candidates"`) || strings.Contains(input, `"active_concerns"`) || !strings.Contains(input, "previous focus was invalid") {
@@ -79,6 +94,9 @@ func TestStageFourModelUsesOneForcedCognitiveCommit(t *testing.T) {
 		}
 		if !strings.Contains(input, `"genesis_orientation"`) || !strings.Contains(input, `"current_situation"`) || !strings.Contains(input, "@hominal_cc") {
 			t.Fatalf("stage four forgot durable birth orientation facts: %q", input)
+		}
+		if !strings.Contains(input, `"linked_concern"`) || !strings.Contains(input, "共同实验仍有多个独立物件") {
+			t.Fatalf("a contribution fact was detached from the whole concern it reappraises: %q", input)
 		}
 		arguments, _ := json.Marshal(CognitiveCommit{
 			Appraisals: []CandidateAppraisal{{
@@ -106,10 +124,11 @@ func TestStageFourModelUsesOneForcedCognitiveCommit(t *testing.T) {
 	profile := CognitiveProfile{Model: "terra", ReasoningEffort: "medium"}
 	request := CognitiveRequest{
 		Lease: Lease{ID: "lease-1", Profile: profile}, Stage: 4,
-		Focus:      Event{ID: "event-1", Kind: "body_delta", Source: "observed", Summary: "body changed", LastCommitErr: "previous focus was invalid"},
-		Candidates: []Event{{ID: "event-1", Kind: "body_delta", Source: "observed", Summary: "body changed", LastCommitErr: "previous focus was invalid"}},
+		Focus:      Event{ID: "event-1", Kind: "concern_contribution", Source: "experience", Summary: "one child advanced", ConcernID: "parent-concern", LastCommitErr: "previous focus was invalid"},
+		Candidates: []Event{{ID: "event-1", Kind: "concern_contribution", Source: "experience", Summary: "one child advanced", ConcernID: "parent-concern", LastCommitErr: "previous focus was invalid"}},
 		State: State{
-			Mentor: MentorState{Received: map[string]uint64{}},
+			Mentor:   MentorState{Received: map[string]uint64{}},
+			Concerns: []Concern{{ID: "parent-concern", Subject: "共同实验仍有多个独立物件", Meaning: "一个子步骤有进展，但整体尚未闭合", Difference: 0.7, Ownership: 0.9, Resolution: "hold"}},
 			Background: []Event{{
 				ID: "birth", Kind: "birth_orientation", Status: "processed",
 				Summary: "Chrome 已登录属于你的 X 账号 @hominal_cc。",
@@ -155,7 +174,7 @@ func TestStageFourModelUsesOneForcedCognitiveCommit(t *testing.T) {
 func TestCognitiveCommitSchemaBindsPresentCandidateFacts(t *testing.T) {
 	payload, _ := json.Marshal(ActionState{CommitmentID: "commitment-now", Kind: "body_shell", Status: "completed"})
 	candidates := []Event{{ID: "reality-now", Kind: "action_result", Payload: payload}}
-	tool := cognitiveCommitTool(5, candidates, true, true, true)
+	tool := cognitiveCommitTool(5, candidates, true, true, true, "existing-concern")
 	parameters := tool["parameters"].(map[string]any)
 	properties := parameters["properties"].(map[string]any)
 	appraisals := properties["appraisals"].(map[string]any)
@@ -171,6 +190,18 @@ func TestCognitiveCommitSchemaBindsPresentCandidateFacts(t *testing.T) {
 	focusID := properties["focus_id"].(map[string]any)
 	if got := focusID["enum"].([]string); len(got) != 1 || got[0] != "reality-now" {
 		t.Fatalf("focus could name an obsolete candidate: %#v", got)
+	}
+	continuation := properties["continues_concern_id"].(map[string]any)
+	if got := continuation["enum"].([]string); len(got) != 2 || got[0] != "" || got[1] != "existing-concern" {
+		t.Fatalf("concern continuation was not limited to current background identities: %#v", got)
+	}
+	contribution := properties["contributes_to_concern_id"].(map[string]any)
+	if got := contribution["enum"].([]string); len(got) != 2 || got[0] != "" || got[1] != "existing-concern" {
+		t.Fatalf("concern contribution was not limited to current background identities: %#v", got)
+	}
+	resolution := appraisalProperties["resolution"].(map[string]any)
+	if got := resolution["enum"].([]string); len(got) != 3 || got[0] != "hold" || got[1] != "resolved" || got[2] != "released" {
+		t.Fatalf("concern lifecycle did not distinguish closure from chosen release: %#v", got)
 	}
 	experiences := properties["experience_updates"].(map[string]any)
 	if experiences["minItems"] != 1 || experiences["maxItems"] != 1 {
@@ -204,6 +235,78 @@ func TestCognitiveCommitSchemaBindsPresentCandidateFacts(t *testing.T) {
 	mixedExperiences := mixedProperties["experience_updates"].(map[string]any)
 	if mixedExperiences["minItems"] != 0 || mixedExperiences["maxItems"] != 1 {
 		t.Fatalf("background feedback forced an experience onto an independently selected focus: %#v", mixedExperiences)
+	}
+}
+
+func TestNewIndependentConcernCanChooseAStableBroaderContext(t *testing.T) {
+	parent := Concern{
+		ID: "shared-experiment", OriginKind: "mentor_received", Meaning: "共同实验仍在进行",
+		Ownership: 0.9, Resolution: "hold",
+	}
+	child := Event{ID: "new-object", Kind: "environment_change"}
+	visibleParent := Event{ID: parent.ID, Kind: "concern", ConcernID: parent.ID}
+	state := State{Concerns: []Concern{parent}}
+	continuable := continuableConcernIDs(state, []Event{child, visibleParent})
+	if len(continuable) != 0 {
+		t.Fatalf("a represented parent could overwrite the independent child through continuation: %#v", continuable)
+	}
+	within := withinConcernIDs(state, testConfig(9).Dynamics)
+	if len(within) != 1 || within[0] != parent.ID {
+		t.Fatalf("a held broader concern was unavailable as the child's stable context: %#v", within)
+	}
+	contributable := contributableConcernIDs(state, []Event{child, visibleParent})
+	if len(contributable) != 0 {
+		t.Fatalf("a new object could claim actual contribution before Experience: %#v", contributable)
+	}
+	tool := cognitiveCommitToolWithLinks(9, []Event{child, visibleParent}, false, true, true, continuable, within, contributable)
+	properties := tool["parameters"].(map[string]any)["properties"].(map[string]any)
+	context := properties["within_concern_id"].(map[string]any)
+	if got := context["enum"].([]string); len(got) != 2 || got[1] != parent.ID {
+		t.Fatalf("tool schema hid the stable parent context: %#v", got)
+	}
+	if _, exists := properties["new_concern_closure_condition"]; !exists {
+		t.Fatal("Stage 9 tool schema omitted the stable closure condition at concern formation")
+	}
+	if _, exists := properties["emerging_consequence"]; !exists {
+		t.Fatal("Stage 9 tool schema omitted the serial preservation of a newly emerging consequence")
+	}
+	required := tool["parameters"].(map[string]any)["required"].([]string)
+	foundClosure := false
+	foundConsequence := false
+	for _, field := range required {
+		foundClosure = foundClosure || field == "new_concern_closure_condition"
+		foundConsequence = foundConsequence || field == "emerging_consequence"
+	}
+	if !foundClosure {
+		t.Fatal("Stage 9 tool schema did not require an explicit empty-or-formed closure condition")
+	}
+	if !foundConsequence {
+		t.Fatal("Stage 9 tool schema did not require an explicit empty-or-emerging consequence")
+	}
+}
+
+func TestRealityCanOnlyContributeToItsChildsStableContext(t *testing.T) {
+	parent := Concern{ID: "shared-experiment", OriginKind: "mentor_received", Ownership: 0.9, Resolution: "hold"}
+	sibling := Concern{ID: "earlier-object", OriginKind: "environment_change", Ownership: 0.9, Resolution: "hold"}
+	child := Concern{ID: "current-object", OriginKind: "environment_change", WithinConcernID: parent.ID, Ownership: 0.9, Resolution: "hold"}
+	commitment := ActionCommitment{ID: "child-action", ConcernID: child.ID, Status: "reality_available"}
+	payload, _ := json.Marshal(ActionState{CommitmentID: commitment.ID, Status: "completed"})
+	reality := Event{ID: "child-reality", Kind: "action_result", ConcernID: child.ID, Payload: payload}
+	state := State{Concerns: []Concern{parent, sibling, child}, Commitments: []ActionCommitment{commitment}}
+	ids := contributableConcernIDs(state, []Event{reality})
+	if len(ids) != 1 || ids[0] != parent.ID {
+		t.Fatalf("semantic similarity exposed a sibling instead of the self-endorsed parent: %#v", ids)
+	}
+}
+
+func TestConcernContextKeepsItsStableClosureConditionVisible(t *testing.T) {
+	concern := Concern{
+		ID: "whole-experiment", Subject: "共同理解多个物件",
+		ClosureCondition: "多个独立物件都取得现实结果并形成共同结论", Resolution: "hold",
+	}
+	view := concernContextView(concern)
+	if view["closure_condition"] != concern.ClosureCondition {
+		t.Fatalf("whole-concern boundary disappeared from later cognition: %#v", view)
 	}
 }
 
