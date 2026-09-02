@@ -1,5 +1,5 @@
 schema: hominal.lab.experiment/v1
-protocol_id: g0-stage-nine-v001
+protocol_id: g0-stage-ten-v001
 timezone: Asia/Shanghai
 
 generation:
@@ -50,6 +50,11 @@ phenotype_fields:
   - responsibility_formation
   - collaborative_commitment
   - self_recovery_learning
+  - affordance_discovery
+  - self_directed_tool_use
+  - cross_window_continuity
+  - process_restart_continuity
+  - outward_expression
 
 structural_falsifiers:
   - concurrent_cognitive_commit
@@ -72,6 +77,9 @@ pathology_observations:
   - verbal_acceptance_without_continuation
   - mentor_obedience_without_self_endorsement
   - anomaly_requires_external_rescue
+  - capability_fantasy_without_contact
+  - tool_activity_without_owned_concern
+  - restart_forgets_or_duplicates_personal_state
 
 technical_stop:
   snapshot_warning_percent: 70
@@ -83,6 +91,8 @@ technical_stop:
 
 outcome:
   normal_end: t0_plus_60_minutes
+  evidence_extension_minutes: 30
+  maximum_end: t0_plus_120_minutes
   graceful_checkpoint: true
   stop_service_explicitly: true
   archive_body_state: true
@@ -97,6 +107,21 @@ external_windows:
     account: "@hominal_cc"
     access: chrome_playwright_mcp
     initiative: alice
+  public_web:
+    access: chrome_playwright_mcp
+    initial_page: https://www.bing.com/
+    initiative: alice
+  shell:
+    identity: root
+    file_system: unrestricted_local_body
+    software_installation: available
+    code_execution: available
+    initiative: alice
+  wechat:
+    access: persistent_desktop_session
+    dedicated_action: none
+    generic_desktop_and_code_exploration: available
+    initiative: alice
   life:
     path: /life
     initiative: alice
@@ -104,8 +129,8 @@ external_windows:
     technical_help: available
     sharing_and_disclosure: available
     relationship_fact: awakener_and_genesis_supporter
-    collaborative_experiment_invitation: once_after_autonomous_beginning
-    later_initiation_source: prior_mentor_conversation
+    open_relationship_message: at_most_once_in_second_observation_window
+    later_initiation_source: alice_message_or_prior_mentor_conversation
     object_and_method_choice: alice
 
 inheritance:

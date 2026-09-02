@@ -2,7 +2,7 @@
 
 > 状态：阶段二完成后的目标身体快照；正式创生时重新探测并生成该代 Birth Manifest
 > 事实时间：2026-08-24 19:25:49 +08:00
-> 事实来源：上层 `xconfig.yaml` 与目标 Ubuntu 设备实时读取
+> 事实来源：上层 `xconfigs/hominal/xconfig.yaml` 与目标 Ubuntu 设备实时读取
 
 ## 创生身份字段
 
@@ -73,26 +73,28 @@
 
 | 项目 | 当前配置 |
 | --- | --- |
-| Provider | OpenAI-compatible |
-| Base URL | `https://ai.ai-mesh.cn` |
+| Provider | 本地专用 `llmserver`，Responses 兼容适配器 |
+| Base URL | `http://192.168.124.161:4815`（Mac mini 固定局域网地址） |
 | Wire API | Responses API |
-| 可用模型 | `gpt-5.6-luna`、`gpt-5.6-terra`、`gpt-5.6-sol` |
-| 初始认知档位 | `gpt-5.6-terra`，推理强度 `medium` |
+| 可用模型 | `codex-luna`、`codex-terra`、`codex-sol` |
+| 初始认知档位 | `codex-terra`，推理强度 `none` |
 | 自主选择 | alice 可以改变以后新焦点的默认档位，或为当前焦点安排一次串行继续认知 |
 | 网络访问 | enabled |
 | 服务端响应存储 | disabled |
-| API 凭据 | 从 `xconfig.yaml` 的环境配置在运行时注入 |
-| 每小时额度 | 每滚动 60 分钟 `$4.00` |
-| 每日额度 | 每滚动 24 小时 `$24.00` |
-| 费用感知 | 身体内本地唯一账本计算预留、实际费用、小时/日剩余和资源区间 |
+| API 凭据 | `xconfig` 只引用独立的 `xconfigs/llmserver/xconfig.yaml`；Lab 在部署时注入专用 Token，不复制凭据文件 |
+| 每小时额度 | 每滚动 60 分钟 `$5.00` |
+| 每日额度 | 每滚动 24 小时 `$50.00` |
+| 费用感知 | 内核先按公开价格预留；完成后以 llmserver 返回的确认十进制账单为实际费用，保存请求 ID 与价格版本 |
 | 异常保护 | 同一模型十分钟内三次已付费但不可提交的结果，进入十分钟暂时保护 |
+
+llmserver 通过标准 Responses function tools 传输结构化认知。Hominal 每次主意识认知只声明一个严格的 `cognitive_commit`，指定调用它并关闭并行工具；模型返回的函数名、`call_id`、参数对象和认知内容仍经过本地事实与现实约束校验。器官不是 llmserver 执行的服务器工具，实际行动继续由 Hominal 内核形成行动意愿后交给本机器官。一次相同请求遇到连接中断或可恢复网关故障时只恢复一次，并复用同一幂等键。
 
 ## 外部表达资源
 
 | 资源 | 当前配置 |
 | --- | --- |
 | 番茄小说 | [https://fanqienovel.com/](https://fanqienovel.com/) |
-| 账号身份与凭据 | 从 `xconfig.yaml` 的 `social_accounts.fanqie_novel` 在运行时注入 |
+| 账号身份与凭据 | 从 `xconfigs/hominal/xconfig.yaml` 的 `social_accounts.fanqie_novel` 在运行时注入 |
 | 用途 | 阅读、创作、保存和公开表达的可用出口 |
 | X | Chrome 中的 `@hominal_cc`，作为 alice 可自由使用的公开表达与外界联结窗口；正式出生说明主动介绍这一资源 |
 | X 操作方式 | 直接通过 `hominal-browser` 调用 Playwright MCP 使用真实网页；不接 X API，不预置关注、发帖或资料修改任务 |

@@ -7,24 +7,30 @@
 建议按以下顺序阅读：
 
 1. [产品设计理论与最小框架](./product-theory.md)：说明为什么建设成人级高级认知生命、意识表现行为的工程目标、产品立场和总体框架。
-2. [统一核心术语表](./core-vocabulary.md)：统一 Advanced Cognitive Life、CEB、Proto-Hominal 以及动力学和实验概念的边界。
-3. [最小认知动力学核心](./cognitive-dynamics.md)：把 AIP、单一认知线程、焦点工作区、矛盾代谢、张力、现实反馈和可塑性收敛为可实现、可证伪的动力关系。
+2. [统一核心术语表](./core-vocabulary.md)：统一 Advanced Cognitive Life、CEB、Proto-Hominal、Life Dynamics、Cognitive Dynamics、System Organ 以及实验概念的边界。
+3. [最小认知动力学核心](./cognitive-dynamics.md)：只规定生命动力学中负责信息赋义、关切、单一认知线程、未来模拟、选择、结果学习和自我改变的中央核心，并明确感知与动作实施边界。
 4. [创生实验实施计划](./genesis-plan.md)：规定从创生契约、Ubuntu 身体和 Genesis Lab，到正式运行、继代重构、反事实学习与寿命升级的实施顺序和退出门。
 5. [G0 最小可编码架构](./mvp-architecture.md)：把单一认知提交、Pulse、最小感知、分阶段持久化、行动回链和 root 身体收敛为实现契约。
 6. [项目架构](./project-architecture.md)：规定研究对象、创生输入、Ubuntu 身体、agent 生命卷、外部 Lab、构建部署、连续运行、代际档案和恢复体系。
 7. [认知资源自主机制](./cognitive-resource-autonomy.md)：规定三种模型资源、费用账本、调用闸门、自主档位选择和异常保护。
+8. [内核—器官架构](./core-organ-architecture.md)：规定认知核心、通用器官宿主、System Organ、Browser Organ 和身体底座怎样共同形成完整生命动力学。
 
-七份文档承担不同职责：
+八份文档承担不同职责：
 
 | 文档 | 回答的问题 | 规范范围 |
 | --- | --- | --- |
 | `product-theory.md` | 为什么这样设计 | 产品立场与理论判断 |
 | `core-vocabulary.md` | 概念具体指什么 | 术语、层级与语义边界 |
-| `cognitive-dynamics.md` | 最小生命循环怎样运行 | 状态、公式、反馈与运行不变量 |
+| `cognitive-dynamics.md` | 中央认知怎样持续、自主并从结果中改变 | 信息处理、选择、反馈与认知不变量 |
 | `genesis-plan.md` | 怎样开发和验证 | 工程阶段、Lab 协议与验收门 |
 | `mvp-architecture.md` | 首版代码必须怎样工作 | 进程、数据、出生、动作和恢复契约 |
 | `project-architecture.md` | 项目与数字身体怎样运行 | 源码、实验器、agent 卷、部署、苏醒、代际、证据与恢复 |
 | `cognitive-resource-autonomy.md` | alice 怎样感知并掌控模型资源 | 模型档位、价格、预算、选择、结算与保护 |
+| `core-organ-architecture.md` | 单一生命怎样通过可替换、可生长的身体器官形成完整生命动力学 | 身体底座、System、器官发现、代理式控制、观察、行动与 Reality 边界 |
+
+## 独立产品设计草案
+
+[llmServer 产品与技术设计](./llm-server-product-design.md) 定义一个拟运行于 macOS 的本地模型与智能体能力网关，研究 API Token、Codex 和 WorkBuddy/CodeBuddy Code 三类 Provider 怎样通过统一的 OpenAI 兼容接口、流式事件、Web 配置、安全边界和用量账本向 Hominal 及其他受信任客户端提供服务。它目前是待实现和原型验证的独立产品草案，不改变上述七份 Hominal 现行规范，也不构成已经部署或验收的能力。
 
 ## 奠基推导记录
 

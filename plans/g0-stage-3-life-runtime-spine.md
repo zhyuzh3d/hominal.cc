@@ -70,7 +70,7 @@ Difference Gate 只比较新旧事实、识别状态变化、越阈变化和首�
 
 ### 4. 两种最小外部动作
 
-接入当前 `xconfig.yaml` 已配置的 Responses API。工程焦点允许模型自由给出简短最终回应，并可选择调用一次 `body_shell` 或 `mentor_send`。每个焦点仍然至多形成一个新动作，不把导师回复作为隐藏的第二次输出。
+接入当前 `xconfigs/hominal/xconfig.yaml` 已配置的 Responses API。工程焦点允许模型自由给出简短最终回应，并可选择调用一次 `body_shell` 或 `mentor_send`。每个焦点仍然至多形成一个新动作，不把导师回复作为隐藏的第二次输出。
 
 `body_shell` 执行 root Shell，用于验证身体动作。若发生工具调用：
 

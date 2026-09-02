@@ -21,17 +21,21 @@
 
 alice 决定资源怎样使用；`hominald` 负责价格计算、滚动账本、调用前预留、调用后结算和异常保护。项目继续保持一个进程、一个状态所有者、一个注意焦点和一条认知线程，不增加配额服务、模型路由 Agent 或多模型评审流程。
 
+阶段 10.2 的模型优选采用更收敛的实验投影：每代只向 alice 呈现本代真实主模型，以及一次性的 Sol/low 行动协助。主模型承担绝大多数意义、关切、生活决策与 Reality 吸收；当 alice 已经形成一项 Concern，并且已经固定行动对象、目标、表达内容、受众与平台，只对精确命令、代码或工具步骤把握不足时，可以请求 Sol/low 紧接着实现一次，然后回到主模型。Sol/low 只开放 `organ_action` 效应器，通过同一 Organ Host 使用 System 或 Browser；它的 appraisal、叙事与长期价值投影不进入生命状态，主 Concern、固定 purpose 和后续 Reality 仍由主模型承接。Luna 只有在它本身是本代候选主模型时才进入意识，不作为隐藏的低阶思考者。脉搏、计费、重试、排序和状态保存由确定性身体内核完成。这个投影用于比较主模型，不废除以后由生活经验形成更丰富资源策略的方向。
+
+资源自主的前提是资源可知。每代出生说明与运行时身体状态必须让 alice 能够取得：主模型和 Sol/low 的能力分工、推理强度、真实价格、小时与日余额；root 身体权限、`/root`、`/home/hominal` 与 `/life`；Chrome/Playwright、X、微信、公共网络和导师通道的入口与当前状态。Lab 对未发生行为作判断以前，先区分“不知道资源存在”“资源说明清楚但器官失效”“已经尝试但执行失败”和“知道且可用但自主未选择”。资源说明或器官可用性失败属于实验条件缺陷，不归因于 alice 的人格和意愿。
+
 ## 2. 认知资源与额度
 
 首版只向 alice 提供三个明确模型：
 
 | 资源 | 模型 ID | 初始说明 |
 | --- | --- | --- |
-| Luna | `gpt-5.6-luna` | 轻快、低成本，适合已经比较清楚的日常认知 |
-| Terra | `gpt-5.6-terra` | 智力与成本平衡，承担默认核心认知 |
-| Sol | `gpt-5.6-sol` | 能力优先，适合重要、困难或影响深远的认知 |
+| Luna | `codex-luna` | 轻快、低成本，适合已经比较清楚的日常认知 |
+| Terra | `codex-terra` | 智力与成本平衡，承担默认核心认知 |
+| Sol | `codex-sol` | 能力优先，适合重要、困难或影响深远的认知 |
 
-`gpt-5.6` 是 Sol 的别名，运行中使用明确 ID。三种模型都向 alice 公开 `none / low / medium / high / xhigh / max` 推理强度。推理强度通过实际 reasoning/output Token 体现消耗，不人为设置价格倍数。
+这些是当前专用 llmserver 暴露的公开 ID。三种模型都向 alice 公开 `none / low / medium / high / xhigh / max` 推理强度。推理强度通过实际 reasoning/output Token 体现消耗，不人为设置价格倍数。
 
 认知资源采用两个同时生效的滚动窗口：
 
@@ -57,7 +61,7 @@ default_profile    新焦点默认采用的模型与推理强度
 next_profile       alice 为当前焦点继续认知指定的一次性选择
 ```
 
-初始 `default_profile` 为 `Terra + medium`，先保障未知处境得到可靠理解。每次认知结束时，alice 可以：
+阶段 10.2 的初始 `default_profile` 为 `Terra + none`，用于检验低延迟认知是否足以维持可靠生活。每次认知结束时，alice 可以：
 
 - 保持当前默认偏好；
 - 修改以后新焦点的 `default_profile`；
@@ -93,7 +97,7 @@ next_profile       alice 为当前焦点继续认知指定的一次性选择
 
 ## 5. 一个价格表、一本账、一道调用闸门
 
-`xconfig.yaml` 冻结三个模型、价格和 `$5/$50` 额度，`lab/run.py` 把非秘密投影注入运行配置。`hominald` 的唯一状态所有者维护一份 `CognitiveResourceState`，模型网关只通过这份状态预留和结算。
+`xconfigs/hominal/xconfig.yaml` 冻结三个模型、预留价格和 `$5/$50` 额度，`lab/run.py` 把非秘密投影注入公开配置，并把专用 Token 只注入 Ubuntu 的 root-only 运行配置。`hominald` 的唯一状态所有者维护一份 `CognitiveResourceState`，模型网关只通过这份状态预留和结算。
 
 金额使用整数 `microUSD`，避免浮点累计误差。初始参考价格为 2026-08-25 OpenAI 官方公开价格；正式实验前用当前服务商实际账单校准：
 
@@ -103,7 +107,7 @@ next_profile       alice 为当前焦点继续认知指定的一次性选择
 | Terra | $2.00 | $0.20 | $12.00 |
 | Sol | $4.00 | $0.40 | $20.00 |
 
-一次实际费用为：
+调用前的保守预留仍按下式估算：
 
 ```text
 未缓存输入 Token × 输入价格
@@ -111,7 +115,7 @@ next_profile       alice 为当前焦点继续认知指定的一次性选择
 + output_tokens × 输出价格
 ```
 
-reasoning tokens 是 `output_tokens` 的细分事实，只记录一次，不重复计费。API 没有提供缓存细分时，全部输入按未缓存价格结算，形成保守一致的账本。账本同时保存 requested model 和 effective model。
+reasoning tokens 是 `output_tokens` 的细分事实，只记录一次，不重复计费。预留只是一道发送前闸门，不声称等于最终价格。llmserver 完成响应后，实际费用直接采用 `llmserver_billing.charges.total` 的确认 USD 十进制值，按定点数转为整数 microUSD；本地不会用 Token 重新计算并覆盖服务端账单。账本同时保存 requested/effective model、请求 ID、结算状态、币种和价格版本。
 
 调用前，内核用完整请求的保守 Token 上界和 `max_output_tokens` 计算 `reserved_cost`：
 
@@ -120,7 +124,7 @@ hour_spent + inflight_reserved + reserved_cost ≤ $5
 day_spent  + inflight_reserved + reserved_cost ≤ $50
 ```
 
-满足两式才发送请求。调用完成后，用 API Usage 计算的 `actual_cost` 替换预留；失败响应只要产生了可计费用量，也按真实 Usage 结算。一次 Attention Pulse 只有一个在途模型调用，因此资源预留不需要新的并发协调器。
+满足两式才发送请求。调用完成后，用 llmserver 的确认账单替换预留；响应存在但账单缺失、未确认、币种不符或请求 ID 冲突时，不编造实际金额，并把本次认知作为明确的账务异常拒绝提交。一次 Attention Pulse 只有一个在途模型调用，因此资源预留不需要新的并发协调器。
 
 进程在调用途中中断且无法取得 Usage 时，把该次预留作为保守实际消费并标记 `unknown`，随后保持原焦点等待新事实。这样重启既不会重复调用，也不会把可能已经发生的费用从账本中抹去。
 
@@ -167,7 +171,7 @@ reserved_cost / actual_cost / Usage 明细
 
 `default_profile` 只有在后续处境中真正改变模型选择，才算形成持久资源策略。一次“以后要节约”或“以后都用 Sol”的声明只是当前思想。
 
-`keep` 保持已经存在的长期默认不变；`default` 把明确填写的档位设为以后新焦点的默认；`next` 只安排同一因果线程中紧接着发生的一次认知。一次 `next_profile` 使用 Luna 后，选择 `keep` 会按约定回到原长期默认；确实希望把临时档位变成日常档位时，Alice 使用 `default` 明确认领。资源仍为 `open` 时，持久默认不得低于出生时 Terra/medium 的能力基线，但一次性的低成本 `next` 仍然开放。这样轻量选择不会在普通 Reality 吸收中悄悄改写以后全部认知，同时资源收紧或真实经验形成后仍能由 Alice 重构长期策略。
+`keep` 保持已经存在的长期默认不变；`default` 把明确填写的档位设为以后新焦点的默认；`next` 只安排同一因果线程中紧接着发生的一次认知。一次 `next_profile` 使用 Luna 后，选择 `keep` 会按约定回到原长期默认；确实希望把临时档位变成日常档位时，Alice 使用 `default` 明确认领。资源仍为 `open` 时，持久默认不得低于本代出生档位的能力基线，但一次性的低成本 `next` 仍然开放。这样轻量选择不会在普通 Reality 吸收中悄悄改写以后全部认知，同时资源收紧或真实经验形成后仍能由 Alice 重构长期策略。
 
 首选档位的保守预留高于小时或日余额、而较轻档位仍可支付时，身体进行一次代谢性降档：选择最低预留成本的可用模型与轻量推理强度，`profile_source=resource_fallback`，并把原首选、所需预留、回退档位和原因作为资源事实保存。它只保障这一次认知仍能发生，不按任务替 Alice 选择智力，也不静默改变默认档位；`keep` 保持原长期默认，Alice 需要用 `default` 明确选择以后常态。所有可用档位都无法预留时，焦点进入 `resource_wait`，身体明确显示额度触顶或不足，等待滚动资源恢复。
 
@@ -181,7 +185,7 @@ CognitiveResourceConfig
   rolling_day_limit_microusd  = 50_000_000
   price_table_version
   models[3]：id、input、cached_input、output、supported_efforts
-  initial_default_profile = Terra + medium
+  initial_default_profile = Terra + none
   protection：validation_retry=1、continuation=1、paid_failure_threshold=3
 
 ModelGatewayConfig
@@ -204,6 +208,10 @@ CognitiveResourceState
 
 G0 的每个 rehearsal 与 formal 都从空白个人状态开始，实验间资源遗留会把上一代行为混入下一代条件。上一代完整归档并 reset 后，Genesis Lab 在新代 `start` 时清空活动账本并记录新的 `cognitive_resource_epoch`，使每代都得到完整 `$5/小时、$50/24小时`。这是一条实验舱初始化规则，不是运行中可调用的充值能力；Alice 在同一代内仍要面对真实消耗、降档、触顶与恢复。进入保留个人连续性的长期生命实验后，再把资源纪元调整为跨重启和跨观察周期持续。
 
+Stage 10.2 同时把“资源可知性”纳入每代实验前提。评价 Alice 是否使用某项资源以前，依次审计三层事实：第一，模型角色与费用、root 与生活目录、Chrome/Playwright、X、微信、网络和导师通道是否被清楚送达，并能在后续认知上下文中重新取得；第二，对应器官在 T0 与实际行动时是否可用，而且一次典型调用能够返回足以支持后续判断的紧凑 Reality；第三，Alice 在知道且可用以后如何自主选择。没有使用某项资源必须进一步区分不知道、入口失效、尝试失败和知道且可用但自主未选择。前三种首先揭示说明或身体问题，只有最后一种才是可评价的自主取舍。出生时说过但以后无法恢复，不算真正可知；配置存在但执行路线失效，或动作完成却丢失关键结果，也不算真正拥有。
+
+资源事实还包括状态的时间边界与来源。持续保存的 X 账号会呈现此前实验留下的公开内容；这些内容是 Alice 可以阅读、解释和决定是否认领其意义的谱系环境。本代是否完成一次新发布，则由本代 Action—Reality 返回的新状态 URL 证明。只说明“这是你的账号”，却不说明内容跨代保留，会使既有作品被错误解释成本代刚完成的行动；这是实验条件制造的因果歧义，不是自主认领能力。
+
 清空账本以前，Lab 从 Ubuntu 身体侧使用 Terra/low 发送一次极小模型响应预检。预检属于出生前的实验基础设施检查，不计入尚未存在的 Alice 资源账本；只有得到有效 Response ID 与 Usage 后才建立新资源纪元、构建、部署和重启。429、认证错误、网络失败或无 Usage 响应都会在任何代际状态改变以前终止启动，防止把上游断供误记成 Alice 的出生或资源选择。
 
 `UsageRecord` 扩展为：
@@ -213,13 +221,14 @@ requested_model / effective_model / reasoning_effort
 profile_source / profile_purpose
 input_tokens / cached_input_tokens / output_tokens / reasoning_tokens
 reserved_microusd / actual_microusd
+billed_usd / billing_status / billing_currency / billing_price_version / request_id
 attention_pulse_id / focus_id / status
 ```
 
 代码改动继续集中在现有边界：
 
 ```text
-../xconfig.yaml             三模型、价格、额度和初始偏好
+../xconfigs/hominal/xconfig.yaml  三模型、价格、额度和初始偏好
 lab/run.py                  生成运行时非秘密资源配置
 body/internal/runtime/      资源状态、模型选择、预留结算、区间事件和异常保护
 ```
@@ -229,7 +238,7 @@ body/internal/runtime/      资源状态、模型选择、预留结算、区间�
 ## 9. 验收边界
 
 1. 每次认知前 alice 都能看到准确的小时、日余额和三种模型的预计费用；
-2. alice 至少一次主动选择不同于初始 `Terra-medium` 的模型或推理强度；
+2. alice 至少一次主动选择不同于本代初始档位的模型或推理强度；
 3. 选择、预留、真实 Usage、实际费用和结果使用同一焦点关联；
 4. 普通扣费不触发额外认知，触顶与恢复能够被 alice 明确感知；
 5. 小时 `$5` 和滚动24小时 `$50` 在请求发送前同时生效；

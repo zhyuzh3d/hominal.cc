@@ -1,7 +1,7 @@
 .DS_Store
 
 # Local configuration and credentials must never enter this repository.
-# The canonical file currently lives outside the worktree at ../xconfig.yaml;
+# The canonical file lives outside the worktree at ../xconfigs/hominal/xconfig.yaml;
 # these rules also block accidental copies made anywhere inside the worktree.
 **/xconfig.yaml
 **/xconfig.yml

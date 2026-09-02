@@ -62,7 +62,7 @@
 - 重新创建 `hominal-cc1` 会话，目标改为 `/agent/app/hominal.cc`。
 - 建立 `/agent/app/current -> /agent/app/hominal.cc`。
 - 将兼容路径 `/home/hominal/hominal.cc` 指向 `/agent/app/hominal.cc`。
-- 更新项目上层 `xconfig.yaml` 中的远端项目路径和同步端点。
+- 更新项目上层 `xconfigs/hominal/xconfig.yaml` 中的远端项目路径和同步端点。
 - 配置 SSH 在 `agent.mount` 完成挂载尝试后再接受连接，避免重启期间 Mutagen 将未挂载路径误判为根删除；挂载失败不阻止 SSH 修复。
 
 验收：Mutagen 为 Watching、无冲突；本地与新远端关键文件哈希一致。
@@ -106,7 +106,7 @@
 
 Google Chrome `151.0.7922.173` 和微信 `4.1.1.8` 已安装。真实 Xorg 桌面验收确认 Chrome 能渲染中文和执行 JavaScript，CDP 仅监听 `127.0.0.1:9222`；微信登录窗口正常出现。Chrome 的异常关机残留锁和恢复气泡已由专用启动器处理。两者的用户状态均持久化到 `/agent/state/profiles`。
 
-Mutagen 会话 `hominal-cc1` 已迁移到 `/agent/app/hominal.cc`，状态为 Watching；`/agent/app/current` 与旧项目路径均指向新目录。项目上层 `xconfig.yaml` 的项目路径和同步端点已同步更新。旧远端目录保存在 `/agent/backup/migrations`，未直接删除。
+Mutagen 会话 `hominal-cc1` 已迁移到 `/agent/app/hominal.cc`，状态为 Watching；`/agent/app/current` 与旧项目路径均指向新目录。项目上层 `xconfigs/hominal/xconfig.yaml` 的项目路径和同步端点已同步更新。旧远端目录保存在 `/agent/backup/migrations`，未直接删除。
 
 根卷为 128 GiB，`/agent` 为 40 GiB，系统基线快照为 40 GiB，卷组剩余 12.52 GiB。已建立 10 代 Agent 备份。回滚机制经过两轮真实探针测试，其中完整自动测试确认根卷探针被恢复、`/agent` 探针保留、两阶段自动重启结束后同名基线快照自动重建；随后又以最终配置刷新了基线。快照通过 udev 规则对 XFCE/udisks 隐藏，创建脚本也会强制确认其未被挂载，避免桌面自动挂载污染 COW。当前快照使用率约 0.01%，`dpkg --audit` 为空，待升级软件包为 0。
 

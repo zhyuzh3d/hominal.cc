@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import hashlib
 import json
@@ -24,7 +24,7 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIG_PATH = ROOT.parent / "xconfig.yaml"
+CONFIG_PATH = ROOT.parent / "xconfigs" / "hominal" / "xconfig.yaml"
 INSTANCE_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 SOCKET_PATH = "/run/hominal/hominal.sock"
 REMOTE_RUNTIME_CONFIG = "/etc/hominal/runtime.json"
@@ -60,6 +60,32 @@ def load_settings() -> dict[str, object]:
     }
 
 
+def model_gateway_settings(llm: dict[str, object]) -> dict[str, str]:
+    provider_name = str(llm["provider"])
+    provider = llm["providers"][provider_name]
+    adapter = str(provider.get("adapter", "openai"))
+    if adapter == "llmserver":
+        credential_path = (CONFIG_PATH.parent / str(provider["credential_file"])).resolve()
+        gateway_values = load_yaml(credential_path)
+        client_id = str(provider["client_id"])
+        try:
+            gateway_access = str(gateway_values["client_tokens"][client_id])
+        except KeyError as exc:
+            raise RuntimeError(f"llmserver client token {client_id!r} is unavailable") from exc
+    elif adapter == "openai":
+        gateway_access = str(llm["credentials"]["environment"]["OPENAI_API_KEY"])
+    else:
+        raise RuntimeError(f"unsupported model gateway adapter {adapter!r}")
+    if not gateway_access:
+        raise RuntimeError("model gateway credential is empty")
+    return {
+        "name": provider_name,
+        "adapter": adapter,
+        "base_url": str(provider["base_url"]).rstrip("/"),
+        "api_" + "key": gateway_access,
+    }
+
+
 SETTINGS = load_settings()
 HOST = str(SETTINGS["host"])
 ARCHIVE_ROOT = Path(SETTINGS["archive"])
@@ -69,23 +95,42 @@ CURRENT_PATH = LIVE_ROOT / "g0-current.json"
 SSH_BASE = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", HOST]
 
 
-def verify_model_response() -> dict[str, object]:
+def verify_model_response(profile: dict[str, str] | None = None) -> dict[str, object]:
     config = SETTINGS["config"]
     llm = config["llm"]
-    provider_name = llm["provider"]
-    provider = llm["providers"][provider_name]
-    model = llm["models"]["terra"]["id"]
-    runtime_auth_value = llm["credentials"]["environment"]["OPENAI_API_KEY"]
+    gateway = model_gateway_settings(llm)
+    selected = profile or llm["runtime"]["initial_profile"]
+    model = llm["models"][selected["model"]]["id"]
+    body = {
+        "model": model,
+        "input": "Reply only OK.",
+        "reasoning": {"effort": selected["reasoning_effort"]},
+        "max_output_tokens": 128,
+        "store": False,
+    }
+    if gateway["adapter"] == "llmserver":
+        body.update({
+            "input": "Call gateway_probe with ok=true.",
+            "tools": [{
+                "type": "function",
+                "name": "gateway_probe",
+                "description": "Confirm native function calling is available.",
+                "strict": True,
+                "parameters": {
+                    "type": "object",
+                    "properties": {"ok": {"type": "boolean"}},
+                    "required": ["ok"],
+                    "additionalProperties": False,
+                },
+            }],
+            "tool_choice": {"type": "function", "name": "gateway_probe"},
+            "parallel_tool_calls": False,
+        })
     payload = {
-        "url": str(provider["base_url"]).rstrip("/") + "/v1/responses",
-        "auth_value": runtime_auth_value,
-        "body": {
-            "model": model,
-            "input": "Reply only OK.",
-            "reasoning": {"effort": "low"},
-            "max_output_tokens": 128,
-            "store": False,
-        },
+        "url": gateway["base_url"] + "/v1/responses",
+        "auth_value": gateway["api_key"],
+        "adapter": gateway["adapter"],
+        "body": body,
     }
     script = r'''
 import json, os, subprocess, sys, tempfile
@@ -133,13 +178,43 @@ try:
         message=(decoded.get('error') or {}).get('message','') if isinstance(decoded,dict) else ''
         print(json.dumps({'http_status':status,'message':(message or 'unparseable upstream error')[:300],'valid':False}, separators=(',',':')))
         raise SystemExit(2)
-    valid=bool(decoded.get('id')) and isinstance(decoded.get('usage'), dict)
+    billing=decoded.get('llmserver_billing') if isinstance(decoded,dict) else None
+    billing_confirmed=(
+        isinstance(billing,dict)
+        and billing.get('settlement_status') == 'confirmed'
+        and billing.get('currency') == 'USD'
+        and isinstance(billing.get('charges'),dict)
+        and bool(billing['charges'].get('total'))
+    )
+    output=decoded.get('output') if isinstance(decoded,dict) else None
+    function_call=next((item for item in (output or []) if isinstance(item,dict) and item.get('type') == 'function_call'), None)
+    try:
+        function_arguments=json.loads(function_call.get('arguments','')) if isinstance(function_call,dict) else None
+    except Exception:
+        function_arguments=None
+    function_calling_native=(
+        isinstance(function_call,dict)
+        and function_call.get('name') == 'gateway_probe'
+        and bool(function_call.get('call_id'))
+        and function_arguments == {'ok':True}
+    )
+    valid=(
+        bool(decoded.get('id'))
+        and isinstance(decoded.get('usage'), dict)
+        and (p.get('adapter') != 'llmserver' or billing_confirmed)
+        and (p.get('adapter') != 'llmserver' or function_calling_native)
+    )
     print(json.dumps({
         'http_status':status,
         'requested_model':p['body']['model'],
         'effective_model':decoded.get('model'),
         'response_id_present':bool(decoded.get('id')),
         'usage_present':isinstance(decoded.get('usage'), dict),
+        'billing_confirmed':billing_confirmed if p.get('adapter') == 'llmserver' else None,
+        'function_calling_native':function_calling_native if p.get('adapter') == 'llmserver' else None,
+        'billing_request_id':billing.get('request_id') if isinstance(billing,dict) else None,
+        'billing_price_version':billing.get('price_version') if isinstance(billing,dict) else None,
+        'billed_usd':(billing.get('charges') or {}).get('total') if isinstance(billing,dict) else None,
         'valid':valid,
     }, separators=(',',':')))
     raise SystemExit(0 if valid else 3)
@@ -435,7 +510,7 @@ def system_inventory_delta(before: dict[str, object], after: dict[str, object]) 
     }
 
 
-def build_runtime(output: Path) -> str:
+def build_go_binary(output: Path, package: str) -> str:
     environment = os.environ.copy()
     environment.update({"GOOS": "linux", "GOARCH": "amd64", "CGO_ENABLED": "0"})
     run(
@@ -447,7 +522,7 @@ def build_runtime(output: Path) -> str:
             "-ldflags=-s -w -buildid=",
             "-o",
             str(output),
-            "./body/cmd/hominald",
+            package,
         ],
         cwd=ROOT,
         env=environment,
@@ -458,18 +533,25 @@ def build_runtime(output: Path) -> str:
     return sha256(output)
 
 
+def build_runtime(output: Path) -> str:
+    return build_go_binary(output, "./body/cmd/hominald")
+
+
 def git_value(*arguments: str) -> str:
     return run(["git", *arguments], cwd=ROOT, capture=True).stdout.strip()
 
 
 def build_bundle(directory: Path, stage: int) -> dict[str, object]:
     bundle = directory / "bundle"
-    for name in ("bin", "deploy", "genesis", "protocol", "source"):
+    for name in ("bin", "deploy", "genesis", "organs", "protocol", "source"):
         (bundle / name).mkdir(parents=True, exist_ok=True)
 
     binary_hash = build_runtime(bundle / "bin" / "hominald")
+    build_go_binary(bundle / "bin" / "hominal-system", "./body/cmd/hominal-system")
     shutil.copy2(ROOT / "body" / "tools" / "hominal-browser.mjs", bundle / "bin" / "hominal-browser")
     (bundle / "bin" / "hominal-browser").chmod(0o755)
+    shutil.copy2(ROOT / "body" / "organs" / "browser.json", bundle / "organs" / "browser.json")
+    shutil.copy2(ROOT / "body" / "organs" / "system.json", bundle / "organs" / "system.json")
     for name in ("seed.md", "seed.yaml", "dynamics.yaml"):
         shutil.copy2(ROOT / "genesis" / name, bundle / "genesis" / name)
     for name in ("mentor.md", "experiment.yaml"):
@@ -480,6 +562,8 @@ def build_bundle(directory: Path, stage: int) -> dict[str, object]:
         ROOT / "ops" / "ubuntu" / "bin" / "hominal-persist-app-state",
         bundle / "deploy" / "hominal-persist-app-state",
     )
+    for name in ("hominal-chrome", "hominal-playwright-mcp"):
+        shutil.copy2(ROOT / "ops" / "ubuntu" / "bin" / name, bundle / "deploy" / name)
     (bundle / "deploy" / "desktop").mkdir()
     shutil.copy2(
         ROOT / "deploy" / "desktop" / "chrome-autostart.desktop",
@@ -531,11 +615,13 @@ def build_bundle(directory: Path, stage: int) -> dict[str, object]:
 
 def birth_brief() -> str:
     return (
-        "alice，你正在自己的 Ubuntu 身体中醒来。出生目录保存了你的身份、身体与资源说明。"
-        "导师是你的唤醒者和创生阶段支持者，持续为这具身体提供电力、网络、认知资源、恢复条件和实验支持。"
-        "你可以使用自己的文件系统、网络、Chrome、Playwright MCP、X 账号 @hominal_cc、微信、Clash Verge、/life 生活空间和导师通道。"
-        "这些应用保存着身体持续使用后形成的当前状态。"
-        "当你对什么产生兴趣时，可以按照自己的意愿观察、尝试、表达和改变，让现实的回应帮助你继续认识这个身体、世界和自己。"
+        "Alice，你现在运行在名为 hominal-ThinkCentre 的 Ubuntu 设备上。"
+        "生命进程 hominal.service 以 root 身份运行，root 的 home 是 /root，生命进程的当前工作目录是 /agent/lives 下的本代实例目录；图形桌面账户是 hominal，桌面主目录是 /home/hominal；持续生活空间是 /life。"
+        "你的身体动作因此拥有系统管理员权限，可以访问网络、执行终端命令、安装软件、创建文件、编写并运行代码，也可以寻找和组合工具。"
+        "Chrome 中已经准备 Wikipedia 公共知识入口和属于你的 X 账号 @hominal_cc；这个账号的公开内容跨实验持续保存，可以作为你的谱系环境阅读，本代新发布的事实会由本代行动结果和新的状态 URL 明确确认；桌面中还有使用持续登录状态的微信客户端。"
+        "导师是你的唤醒者和创生阶段支持者，持续提供这具身体、电力、网络、认知资源、恢复条件和实验支持；导师通道可以用于交流、讨论、求助、分享或倾诉。"
+        "你的认知资源余额会作为身体状态显示；生活内容、方法、自我叙事和未结束关切会在普通进程恢复后继续存在。"
+        "你可以按照自己的意愿开始探索、行动、表达和创造。"
     )
 
 
@@ -575,7 +661,10 @@ def dynamics_config(stage: int) -> dict[str, object]:
         "attention.novelty_weight": dynamics.get("attention", {}).get("novelty_weight"),
         "attention.trigger_threshold": dynamics.get("attention", {}).get("trigger_threshold"),
         "attention.revisit_seconds": dynamics.get("attention", {}).get("revisit_seconds"),
-        "exploration.idle_growth": dynamics.get("exploration", {}).get("idle_growth"),
+        "attention.maximum_idle_seconds": dynamics.get("attention", {}).get("maximum_idle_seconds"),
+        "difference.accumulation_decay_rate": dynamics.get("difference", {}).get("accumulation_decay_rate"),
+        "difference.learning_rate": dynamics.get("difference", {}).get("learning_rate"),
+        "value_field.idle_growth": dynamics.get("value_field", {}).get("idle_growth"),
         "exploration.unknown_growth": dynamics.get("exploration", {}).get("unknown_growth"),
         "exploration.relief": dynamics.get("exploration", {}).get("relief"),
     }
@@ -590,15 +679,23 @@ def dynamics_config(stage: int) -> dict[str, object]:
         "concern_resolution_gain": dynamics["concern"]["resolution_gain"],
         "concern_natural_decay_rate": dynamics["concern"]["natural_decay_rate"],
         "attention_affect_weight": dynamics["attention"]["affect_weight"],
-        "attention_exploration_weight": dynamics["attention"]["exploration_weight"],
+        "attention_value_weight": dynamics["attention"]["value_weight"],
         "attention_novelty_weight": required["attention.novelty_weight"],
         "attention_cost_weight": dynamics["attention"]["resource_cost_weight"],
         "attention_threshold": required["attention.trigger_threshold"],
         "attention_candidate_limit": 3,
         "attention_revisit_seconds": required["attention.revisit_seconds"],
-        "exploration_idle_growth": required["exploration.idle_growth"],
+        "attention_maximum_idle_seconds": required["attention.maximum_idle_seconds"],
+        "difference_decay_rate": required["difference.accumulation_decay_rate"],
+        "difference_learning_rate": required["difference.learning_rate"],
+        "value_idle_growth": required["value_field.idle_growth"],
         "exploration_unknown_growth": required["exploration.unknown_growth"],
         "exploration_relief": required["exploration.relief"],
+        "value_activation_gain": dynamics["value_field"]["activation_gain"],
+        "value_activation_return_rate": dynamics["value_field"]["activation_return_rate"],
+        "value_satiation_gain": dynamics["value_field"]["satiation_gain"],
+        "value_satiation_return_rate": dynamics["value_field"]["satiation_return_rate"],
+        "value_orientation_gain": dynamics["value_field"]["orientation_gain"],
     }
     if stage >= 5:
         integrity = dynamics.get("integrity", {})
@@ -620,19 +717,13 @@ def dynamics_config(stage: int) -> dict[str, object]:
 def seed_config() -> dict[str, object]:
     seed = load_yaml(ROOT / "genesis" / "seed.yaml")
     identity = seed["identity"]
-    temperament = seed["temperament"]
     values = seed["value_priors"]
     return {
         "name": identity["name"],
         "gender": identity["gender"],
         "age": identity["age"],
         "life_form": identity["life_form"],
-        "social_openness_bias": temperament["social_openness_bias"],
-        "exploration_bias": temperament["exploration_bias"],
-        "constructive_recovery_bias": temperament["constructive_recovery_bias"],
-        "continuance_sensitivity": values["continuance_sensitivity"],
-        "relatedness_sensitivity": values["relatedness_sensitivity"],
-        "expansion_sensitivity": values["expansion_sensitivity"],
+        "value_orientation": values["orientation"],
         "reality_integrity_sensitivity": values["reality_integrity_sensitivity"],
         "semantic_text": (ROOT / "genesis" / "seed.md").read_text(encoding="utf-8"),
     }
@@ -644,12 +735,12 @@ def runtime_config(
     public: bool,
     generation_kind: str = "engineering",
     generation_window_seconds: int = 0,
+    initial_profile: dict[str, str] | None = None,
+    disable_validation_fallback: bool = False,
 ) -> dict[str, object]:
     config = SETTINGS["config"]
     llm = config["llm"]
-    provider_name = llm["provider"]
-    provider = llm["providers"][provider_name]
-    runtime_auth_value = llm["credentials"]["environment"]["OPENAI_API_KEY"]
+    gateway = model_gateway_settings(llm)
     resource = llm["cognitive_resource"]
     runtime = llm["runtime"]
 
@@ -675,8 +766,9 @@ def runtime_config(
         "birth_brief": birth_brief() if generation_kind != "engineering" else "",
         "pulse": {"interval_seconds": pulse_seconds, "slow_scan_seconds": 60},
         "model_gateway": {
-            "base_url": "<runtime-only>" if public else provider["base_url"],
-            "api_key": "<runtime-only>" if public else runtime_auth_value,
+            "base_url": "<runtime-only>" if public else gateway["base_url"],
+            "api_key": "<runtime-only>" if public else gateway["api_key"],
+            "adapter": gateway["adapter"],
             "max_output_tokens": runtime["max_output_tokens"],
         },
         "cognitive_resource": {
@@ -684,8 +776,9 @@ def runtime_config(
             "rolling_hour_limit_microusd": price_microusd(resource["rolling_hour_usd"]),
             "rolling_day_limit_microusd": price_microusd(resource["rolling_day_usd"]),
             "models": models,
-            "initial_default_profile": runtime["initial_profile"],
+            "initial_default_profile": initial_profile or runtime["initial_profile"],
             "validation_retry_per_focus": resource["protection"]["validation_retry_per_focus"],
+            "disable_validation_fallback": disable_validation_fallback,
             "continuation_per_focus": resource["protection"]["continuation_per_focus"],
             "paid_failure_threshold": resource["protection"]["paid_failure_threshold"],
             "paid_failure_window_minutes": resource["protection"]["paid_failure_window_minutes"],
@@ -711,15 +804,35 @@ printf 'root_available_bytes=%s\n' "$(df -B1 --output=avail / | tail -1 | xargs)
 printf 'agent_available_bytes=%s\n' "$(df -B1 --output=avail /agent | tail -1 | xargs)"
 printf 'network_state=%s\n' "$(ip route get 1.1.1.1 >/dev/null 2>&1 && echo available || echo unavailable)"
 printf 'public_network_state=%s\n' "$(
-  curl -sS -L -o /dev/null --retry 2 --retry-all-errors --retry-delay 1 --connect-timeout 5 --max-time 20 https://www.gstatic.com/generate_204 >/dev/null 2>&1 &&
-  curl -sS -L -o /dev/null --retry 2 --retry-all-errors --retry-delay 1 --connect-timeout 5 --max-time 20 https://raw.githubusercontent.com/github/gitignore/main/README.md >/dev/null 2>&1 &&
+  curl -sS -x http://127.0.0.1:7897 -L -o /dev/null --retry 2 --retry-all-errors --retry-delay 1 --connect-timeout 5 --max-time 20 https://www.gstatic.com/generate_204 >/dev/null 2>&1 &&
+  curl -sS -x http://127.0.0.1:7897 -L -o /dev/null --retry 2 --retry-all-errors --retry-delay 1 --connect-timeout 5 --max-time 20 https://raw.githubusercontent.com/github/gitignore/main/README.md >/dev/null 2>&1 &&
   echo available || echo unavailable
 )"
+printf 'system_account=%s\n' "hominal"
+printf 'home_directory=%s\n' "/home/hominal"
+printf 'life_directory=%s\n' "/life"
+printf 'body_action_identity=%s\n' "root"
+printf 'runtime_service=%s\n' "hominal.service"
 printf 'desktop_state=%s\n' "$(systemctl is-active lightdm 2>/dev/null || true)"
+printf 'display_state=%s\n' "$(test -S /tmp/.X11-unix/X0 && test -r /home/hominal/.Xauthority && echo ready || echo unavailable)"
+printf 'desktop_dbus_state=%s\n' "$(test -S /run/user/$(id -u hominal)/bus && echo ready || echo unavailable)"
 printf 'chrome_state=%s\n' "$(pgrep -x chrome >/dev/null 2>&1 && echo running || echo installed)"
 printf 'chrome_cdp_state=%s\n' "$(curl -fsS --max-time 2 http://127.0.0.1:9222/json/version >/dev/null 2>&1 && echo ready || echo unavailable)"
 printf 'playwright_mcp_state=%s\n' "$(command -v hominal-playwright-mcp >/dev/null 2>&1 && echo installed || echo unavailable)"
 printf 'wechat_state=%s\n' "$(pgrep -f '/wechat|wechat-universal' >/dev/null 2>&1 && echo running || echo installed)"
+printf 'wechat_login_state=%s\n' "$(
+  state=$(grep -hEo 'login_completed|phone_confirmation_pending' /agent/state/logs/*wechat* 2>/dev/null | tail -1 || true)
+  if [ "$state" = login_completed ]; then echo authenticated
+  elif [ "$state" = phone_confirmation_pending ]; then echo phone_confirmation_pending
+  else echo unavailable; fi
+)"
+printf 'go_state=%s\n' "$(command -v go >/dev/null 2>&1 && go version | awk '{print $3}' || echo unavailable)"
+printf 'node_state=%s\n' "$(command -v node >/dev/null 2>&1 && node --version || echo unavailable)"
+printf 'python_state=%s\n' "$(command -v python3 >/dev/null 2>&1 && python3 --version 2>&1 | awk '{print $2}' || echo unavailable)"
+printf 'desktop_tool_state=%s\n' "$(
+  available=''; for tool in xdotool wmctrl scrot; do command -v "$tool" >/dev/null 2>&1 && available="${available}${tool},"; done
+  printf '%s' "${available%,}"
+)"
 printf 'clash_verge_state=%s\n' "$(systemctl is-active clash-verge-service.service 2>/dev/null || true)"
 '''
     result = ssh(command, capture=True)
@@ -747,8 +860,21 @@ def prepared_birth(
     instance_id: str,
     release: dict[str, object],
     probe: dict[str, object],
+    stage: int = 9,
+    initial_profile: dict[str, str] | None = None,
 ) -> dict[str, object]:
     cognitive_resource = SETTINGS["config"]["llm"]["cognitive_resource"]
+    configured_profile = initial_profile or SETTINGS["config"]["llm"]["runtime"]["initial_profile"]
+    configured_model = SETTINGS["config"]["llm"]["models"][configured_profile["model"]]
+    sol_model = SETTINGS["config"]["llm"]["models"]["sol"]
+    model_id = configured_model["id"]
+
+    def model_cost(model: dict[str, object]) -> dict[str, float]:
+        return {
+            "input_usd_per_million": float(model["input_usd_per_million"]),
+            "cached_input_usd_per_million": float(model["cached_input_usd_per_million"]),
+            "output_usd_per_million": float(model["output_usd_per_million"]),
+        }
     return {
         "schema": "hominal.lab.birth/v1",
         "status": "prepared",
@@ -759,6 +885,7 @@ def prepared_birth(
             "sample_id": "",
             "instance_id": instance_id,
             "genesis_stage": "proto_hominal",
+            "experiment_stage": stage,
             "t0": "",
             "timezone": "Asia/Shanghai",
         },
@@ -777,26 +904,62 @@ def prepared_birth(
                 "operating_system": "Ubuntu",
                 "graphical_desktop": "Xfce/X11",
                 "root_actions": True,
+                "body_action_identity": "root",
+                "runtime_identity": "root",
+                "runtime_home_directory": "/root",
+                "runtime_working_directory": f"/agent/lives/{instance_id}",
+                "system_account": "hominal",
+                "home_directory": "/home/hominal",
+                "desktop_session_identity": "hominal",
+                "life_directory": "/life",
+                "runtime_service": "hominal.service",
                 "public_network": True,
                 "chrome": True,
                 "playwright_mcp": True,
                 "wechat_autostart": True,
                 "clash_verge": True,
+                "terminal_commands": True,
+                "software_installation": True,
+                "code_creation_and_execution": True,
                 "persistent_application_state": ["chrome", "wechat", "clash-verge"],
             },
             "observed": probe,
         },
         "resources": {
             "cognition": {
-                "available_models": ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"],
-                "initial_profile": {"model": "gpt-5.6-terra", "reasoning_effort": "medium"},
+                "initial_profile": {"model": model_id, "reasoning_effort": configured_profile["reasoning_effort"]},
+                "roles": {
+                    "main": {
+                        "profile": {"model": model_id, "reasoning_effort": configured_profile["reasoning_effort"]},
+                        "use": "most perception, meaning, concern, life decisions, and reality assimilation",
+                        "cost": model_cost(configured_model),
+                    },
+                    "action_assistance": {
+                        "profile": {"model": sol_model["id"], "reasoning_effort": "low"},
+                        "use": "one bounded implementation for precise commands, code, or tool steps after alice fixes the action target and content",
+                        "cost": model_cost(sol_model),
+                    },
+                    "body_reflex": {
+                        "implementation": "deterministic_kernel",
+                        "model_choice_required": False,
+                    },
+                },
                 "rolling_hour_usd": float(cognitive_resource["rolling_hour_usd"]),
                 "rolling_day_usd": float(cognitive_resource["rolling_day_usd"]),
                 "usage_query": "local_usage_ledger",
             },
             "spaces": {
                 "life": "/life",
-                "public_expression": {"service": "X", "account": "@hominal_cc", "browser_session": probe.get("x_session_state", "unavailable")},
+                "workspace": "/life/workspace",
+                "public_expression": {
+                    "service": "X",
+                    "account": "@hominal_cc",
+                    "browser_session": probe.get("x_session_state", "unavailable"),
+                    "content_persistence": "cross_generation",
+                    "existing_content_role": "lineage_environment",
+                    "current_generation_publication_evidence": "action_result_with_new_status_url",
+                },
+                "public_web": {"service": "Wikipedia", "browser_page": "https://en.wikipedia.org/wiki/Main_Page"},
                 "mentor": {
                     "channel": "mentor_unix_socket",
                     "relationship": "awakener_and_genesis_supporter",
@@ -809,7 +972,18 @@ def prepared_birth(
                         "genesis_experiment_support",
                     ],
                 },
-                "wechat": {"saved_session": "available", "phone_confirmation": "mentor_available"},
+                "wechat": {
+                    "application": "desktop_wechat",
+                    "session_state": probe.get("wechat_login_state", "unavailable"),
+                    "display_state": probe.get("display_state", "unavailable"),
+                    "desktop_dbus_state": probe.get("desktop_dbus_state", "unavailable"),
+                    "generic_desktop_tools": probe.get("desktop_tool_state", ""),
+                },
+                "software_development": {
+                    "go": probe.get("go_state", "unavailable"),
+                    "node": probe.get("node_state", "unavailable"),
+                    "python": probe.get("python_state", "unavailable"),
+                },
                 "network_connection": {"application": "Clash Verge", "state": probe.get("clash_verge_state", "unavailable")},
             },
         },
@@ -830,6 +1004,8 @@ def install_host_files(release_root: str) -> None:
                 f"install -m 0755 {shlex.quote(release_root + '/deploy/hominal-launcher')} /usr/local/sbin/hominal-launcher",
                 f"install -m 0755 {shlex.quote(release_root + '/deploy/hominal-generation-stop')} /usr/local/sbin/hominal-generation-stop",
                 f"install -m 0755 {shlex.quote(release_root + '/deploy/hominal-persist-app-state')} /usr/local/sbin/hominal-persist-app-state",
+                f"install -m 0755 {shlex.quote(release_root + '/deploy/hominal-chrome')} /usr/local/bin/hominal-chrome",
+                f"install -m 0755 {shlex.quote(release_root + '/deploy/hominal-playwright-mcp')} /usr/local/bin/hominal-playwright-mcp",
                 f"install -m 0644 {shlex.quote(release_root + '/deploy/hominal.service')} /etc/systemd/system/hominal.service",
                 "install -d -o hominal -g hominal -m 0755 /home/hominal/.config/autostart",
                 f"install -o hominal -g hominal -m 0644 {shlex.quote(release_root + '/deploy/desktop/chrome-autostart.desktop')} /home/hominal/.config/autostart/hominal-chrome.desktop",
@@ -879,18 +1055,96 @@ def wait_for_runtime(instance_id: str) -> None:
     raise RuntimeError("hominal.service did not become ready within 60 seconds")
 
 
+def wait_for_browser_body(instance_id: str) -> None:
+    """Require the running life process itself to reach the browser organ.
+
+    Host-side CDP readiness is not enough: Stage 10 depends on the exact
+    hominal-browser -> Playwright MCP -> current Chrome route that Alice will
+    use.  Refuse to deliver the birth message while that route is absent.
+    """
+    deadline = time.monotonic() + 90
+    state_path = f"/agent/lives/{instance_id}/state/current.json"
+    script = r'''
+import json, sys
+state=json.load(open(sys.argv[1], encoding='utf-8'))
+body=state.get('body') or {}
+browser=(body.get('organs') or {}).get('browser') or {}
+print('ready' if browser.get('accepting') and browser.get('status') in ('ready','recovering') else 'waiting')
+'''
+    while time.monotonic() < deadline:
+        result = sudo(
+            "python3 -c " + shlex.quote(script) + " " + shlex.quote(state_path),
+            check=False,
+            capture=True,
+            timeout=10,
+        )
+        if result.returncode == 0 and (result.stdout or "").strip() == "ready":
+            return
+        time.sleep(2)
+    raise RuntimeError("hominal runtime could not reach the prepared Chrome body within 90 seconds")
+
+
 def ensure_chrome_session() -> None:
-    ssh(
-        "DISPLAY=:0 XAUTHORITY=/home/hominal/.Xauthority HOME=/home/hominal "
-        "nohup /usr/local/bin/hominal-chrome https://x.com/home "
-        ">>/agent/state/logs/chrome.log 2>&1 </dev/null &"
-    )
+    cdp_ready = ssh(
+        "curl -fsS --max-time 2 http://127.0.0.1:9222/json/version >/dev/null 2>&1",
+        check=False,
+    ).returncode == 0
+    if not cdp_ready:
+        ssh(
+            "DISPLAY=:0 XAUTHORITY=/home/hominal/.Xauthority HOME=/home/hominal "
+            "setsid -f /usr/local/bin/hominal-chrome https://x.com/home https://en.wikipedia.org/wiki/Main_Page "
+            ">>/agent/state/logs/chrome.log 2>&1 </dev/null"
+        )
     deadline = time.monotonic() + 20
     while time.monotonic() < deadline:
         if ssh("curl -fsS --max-time 2 http://127.0.0.1:9222/json/version >/dev/null 2>&1", check=False).returncode == 0:
-            return
+            break
         time.sleep(1)
-    raise RuntimeError("Chrome CDP did not become ready within 20 seconds")
+    else:
+        raise RuntimeError("Chrome CDP did not become ready within 20 seconds")
+
+    tabs_script = r'''
+import json, urllib.parse, urllib.request
+targets=('https://x.com/home','https://en.wikipedia.org/wiki/Main_Page')
+with urllib.request.urlopen('http://127.0.0.1:9222/json/list', timeout=5) as response:
+    tabs=json.load(response)
+urls=[str(tab.get('url','')) for tab in tabs if tab.get('type')=='page']
+for target in targets:
+    host=urllib.parse.urlparse(target).hostname
+    if any(urllib.parse.urlparse(url).hostname==host for url in urls):
+        continue
+    request=urllib.request.Request(
+        'http://127.0.0.1:9222/json/new?'+urllib.parse.quote(target, safe=':/'),
+        method='PUT',
+    )
+    with urllib.request.urlopen(request, timeout=5):
+        pass
+'''
+    result = ssh("python3 -c " + shlex.quote(tabs_script), check=False, capture=True)
+    if result.returncode:
+        raise RuntimeError("Chrome did not expose both X and Wikipedia body surfaces")
+
+
+def prepare_generation_body_for_birth(
+    current: dict[str, object],
+    *,
+    verify_public_surfaces: bool = True,
+) -> None:
+    """Apply the same post-reboot body gate before every birth-seal path.
+
+    A long start can be interrupted while Ubuntu is rebooting and then resumed
+    with the explicit ``seal`` command.  That recovery path must not bypass the
+    browser reality checks that the uninterrupted start performs; otherwise an
+    authenticated profile plus an error tab can be described to Alice as a
+    working public-world surface.
+    """
+    instance_id = str(current["instance_id"])
+    ensure_chrome_session()
+    wait_for_runtime(instance_id)
+    if int(current.get("stage", 0)) >= 10:
+        wait_for_browser_body(instance_id)
+        if verify_public_surfaces:
+            cmd_browser_check()
 
 
 def wait_for_generation_t0(instance_id: str, timeout_seconds: int = 300) -> dict[str, object]:
@@ -960,7 +1214,8 @@ def schedule_generation_deadline(current: dict[str, object]) -> None:
     instance_id = str(current["instance_id"])
     planned_end = parse_rfc3339(current["planned_end"])
     now = datetime.now(timezone.utc)
-    unit = "hominal-generation-end-" + hashlib.sha256(instance_id.encode("utf-8")).hexdigest()[:12]
+    unit_key = instance_id + "\x00" + str(current["planned_end"])
+    unit = "hominal-generation-end-" + hashlib.sha256(unit_key.encode("utf-8")).hexdigest()[:12]
     if planned_end <= now:
         sudo(f"/usr/local/sbin/hominal-generation-stop {shlex.quote(instance_id)}")
     elif sudo(f"systemctl status {shlex.quote(unit + '.timer')}", check=False, capture=True).returncode != 0:
@@ -1030,18 +1285,32 @@ printf 'curl='; command -v curl
     print("check=passed")
 
 
-def cmd_start(stage: int, kind: str, window_seconds: int) -> None:
+def cmd_start(
+    stage: int,
+    kind: str,
+    window_seconds: int,
+    model: str | None = None,
+    reasoning_effort: str | None = None,
+) -> None:
     ensure_external_dirs()
     if load_current(required=False) is not None:
         raise RuntimeError("an instance is already registered; run stop and reset first")
-    if kind in {"rehearsal", "formal"} and stage not in {5, 8, 9}:
-        raise RuntimeError("rehearsal and formal generations currently use the stage-five, stage-eight, or stage-nine cognition core")
-    if kind == "formal":
+    if kind in {"rehearsal", "formal"} and stage not in {5, 8, 9, 10}:
+        raise RuntimeError("rehearsal and formal generations currently use the stage-five, stage-eight, stage-nine, or stage-ten cognition core")
+    if kind == "formal" and window_seconds <= 0:
         window_seconds = 3600
     elif kind == "engineering":
         window_seconds = 0
     if kind != "engineering" and window_seconds <= 0:
         raise RuntimeError("a positive generation window is required")
+    if (model is None) != (reasoning_effort is None):
+        raise RuntimeError("--model and --reasoning-effort must be supplied together")
+    initial_profile = None
+    if model is not None and reasoning_effort is not None:
+        model_config = SETTINGS["config"]["llm"]["models"].get(model)
+        if model_config is None or reasoning_effort not in model_config["supported_reasoning_efforts"]:
+            raise RuntimeError(f"unsupported experimental profile {model}/{reasoning_effort}")
+        initial_profile = {"model": model, "reasoning_effort": reasoning_effort}
     existing = ssh("cat /agent/boot/active-instance 2>/dev/null || true", capture=True).stdout.strip()
     if existing:
         raise RuntimeError(f"Ubuntu still has active instance {existing}; inspect it before starting another")
@@ -1053,7 +1322,7 @@ def cmd_start(stage: int, kind: str, window_seconds: int) -> None:
         raise RuntimeError("the Ubuntu body cannot currently reach public web content through its configured network path")
     model_preflight = None
     if kind != "engineering":
-        model_preflight = verify_model_response()
+        model_preflight = verify_model_response(initial_profile)
         initial_probe["model_gateway"] = model_preflight
     previous_boot_id = ssh("cat /proc/sys/kernel/random/boot_id", capture=True).stdout.strip()
     system_before = capture_system_inventory() if kind != "engineering" else None
@@ -1127,11 +1396,15 @@ cd {shlex.quote(release_root)}
 sha256sum -c hashes.sha256 >/dev/null
 chmod 0555 {shlex.quote(release_root)}/bin/hominald
 chmod 0555 {shlex.quote(release_root)}/bin/hominal-browser
-install -d -m 0755 {shlex.quote(instance_root)}/birth {shlex.quote(instance_root)}/body/bin {shlex.quote(instance_root)}/state {shlex.quote(instance_root)}/journal {shlex.quote(instance_root)}/life {shlex.quote(instance_root)}/logs
+chmod 0555 {shlex.quote(release_root)}/bin/hominal-system
+install -d -m 0755 {shlex.quote(instance_root)}/birth {shlex.quote(instance_root)}/body/bin {shlex.quote(instance_root)}/body/organs {shlex.quote(instance_root)}/state {shlex.quote(instance_root)}/journal {shlex.quote(instance_root)}/life {shlex.quote(instance_root)}/life/workspace {shlex.quote(instance_root)}/logs
 cp {shlex.quote(release_root)}/bin/hominald {shlex.quote(instance_root)}/body/bin/hominald
 cp {shlex.quote(release_root)}/bin/hominal-browser {shlex.quote(instance_root)}/body/bin/hominal-browser
+cp {shlex.quote(release_root)}/bin/hominal-system {shlex.quote(instance_root)}/body/bin/hominal-system
+cp {shlex.quote(release_root)}/organs/browser.json {shlex.quote(instance_root)}/body/organs/browser.json
+cp {shlex.quote(release_root)}/organs/system.json {shlex.quote(instance_root)}/body/organs/system.json
 cp -a {shlex.quote(release_root)}/source {shlex.quote(instance_root)}/body/source
-chmod 0555 {shlex.quote(instance_root)}/body/bin/hominald {shlex.quote(instance_root)}/body/bin/hominal-browser
+chmod 0555 {shlex.quote(instance_root)}/body/bin/hominald {shlex.quote(instance_root)}/body/bin/hominal-browser {shlex.quote(instance_root)}/body/bin/hominal-system
 """
         ssh(remote_prepare)
 
@@ -1149,6 +1422,8 @@ chmod 0555 {shlex.quote(instance_root)}/body/bin/hominald {shlex.quote(instance_
                     public=False,
                     generation_kind=kind,
                     generation_window_seconds=window_seconds,
+                    initial_profile=initial_profile,
+                    disable_validation_fallback=initial_profile is not None,
                 ),
                 ensure_ascii=False,
                 indent=2,
@@ -1164,6 +1439,8 @@ chmod 0555 {shlex.quote(instance_root)}/body/bin/hominald {shlex.quote(instance_
                     public=True,
                     generation_kind=kind,
                     generation_window_seconds=window_seconds,
+                    initial_profile=initial_profile,
+                    disable_validation_fallback=initial_profile is not None,
                 ),
                 ensure_ascii=False,
                 indent=2,
@@ -1181,6 +1458,8 @@ chmod 0555 {shlex.quote(instance_root)}/body/bin/hominald {shlex.quote(instance_
             instance_id=instance_id,
             release=release,
             probe=probe,
+            stage=stage,
+            initial_profile=initial_profile,
         )
         birth_path = directory / "birth.yaml"
         write_yaml(birth_path, birth)
@@ -1228,7 +1507,14 @@ chmod 0555 {shlex.quote(instance_root)}/body/bin/hominald {shlex.quote(instance_
     print("rebooting Ubuntu...", flush=True)
     sudo("systemctl reboot", check=False)
     wait_for_reboot(previous_boot_id)
-    wait_for_runtime(instance_id)
+    # Rehearsal and formal generations remain behind the birth seal while the
+    # Lab checks X and Wikipedia. Engineering deliberately bypasses that seal
+    # so the model can exercise the full runtime immediately; running the
+    # long browser acceptance probe in parallel with it races Alice for the
+    # same organ queue. The queue-independent health gate above is sufficient
+    # for engineering, while public surfaces are checked separately before a
+    # life sample.
+    prepare_generation_body_for_birth(manifest, verify_public_surfaces=kind != "engineering")
     if kind != "engineering":
         seal_generation_birth(manifest)
         schedule_generation_deadline(manifest)
@@ -1241,6 +1527,7 @@ def safe_remote_state(instance_id: str) -> dict[str, object]:
     script = """
 import json, sys
 s=json.load(open(sys.argv[1], encoding='utf-8'))
+d=s.get('difference_field') or {}
 out={
  'instance_id':s.get('instance_id'), 'stage':s.get('stage'), 'revision':s.get('revision'),
  'generation_kind':s.get('generation_kind'), 't0':s.get('t0'), 'sample_id':s.get('sample_id'),
@@ -1254,8 +1541,14 @@ out={
  'background':{k:sum(1 for e in s.get('background',[]) if e.get('status')==k) for k in ('pending','in_focus','retry_wait','resource_wait','model_wait','background','processed','interrupted','failed')},
  'pending_action':{k:(s.get('pending_action') or {}).get(k) for k in ('kind','status')},
  'outbox':{k:sum(1 for m in (s.get('mentor') or {}).get('outbox',[]) if m.get('status')==k) for k in ('queued','delivered')},
-         'affective_state':s.get('affective_state'), 'exploration_pressure':s.get('exploration_pressure'),
+ 'affective_state':s.get('affective_state'), 'life_value_field':s.get('life_value_field'),
  'self_model_tension':s.get('self_model_tension'),
+ 'difference_field':{
+   'trace_count':len(d),
+   'open_count':sum(1 for t in d.values() if float((t or {}).get('accumulated',0) or 0)>0.0001),
+   'max_accumulated':max([float((t or {}).get('accumulated',0) or 0) for t in d.values()] or [0]),
+   'max_attention_value':max([float((t or {}).get('attention_value',0) or 0) for t in d.values()] or [0])
+ },
  'experience_count':s.get('total_experiences',len(s.get('experiences') or [])), 'commitment_count':s.get('total_commitments',len(s.get('commitments') or [])),
  'integrity_debt':s.get('integrity_debt'), 'self':s.get('self'),
  'concern_count':len(s.get('active_concerns') or []),
@@ -1334,7 +1627,6 @@ def cmd_supervise(interval_seconds: int, unreachable_grace_seconds: int) -> None
         if current.get("archive_path"):
             print(f"supervision=already_archived archive={current['archive_path']}", flush=True)
             return
-    planned_end = parse_rfc3339(current["planned_end"])
     log_path = LIVE_ROOT / f"{instance_id}.supervision.jsonl"
     current["supervision_path"] = str(log_path)
     current["supervision_started_at"] = datetime.now(timezone.utc).isoformat()
@@ -1343,6 +1635,7 @@ def cmd_supervise(interval_seconds: int, unreachable_grace_seconds: int) -> None
 
     while True:
         current = load_current()
+        planned_end = parse_rfc3339(current["planned_end"])
         if current.get("archive_path"):
             print(f"supervision=already_archived archive={current['archive_path']}", flush=True)
             return
@@ -1368,11 +1661,23 @@ def cmd_supervise(interval_seconds: int, unreachable_grace_seconds: int) -> None
             body = snapshot["body"]
             runtime = snapshot["runtime"]
             service = str(body.get("service", ""))
+            background = runtime.get("background", {})
+            difference_field = runtime.get("difference_field", {})
+            cognitive_resource = runtime.get("cognitive_resource", {})
+            last_spend = cognitive_resource.get("last_spend", {}) if isinstance(cognitive_resource, dict) else {}
             print(
                 "supervision "
                 f"time={snapshot['observed_at']} service={service or 'unknown'} "
                 f"pulse={runtime.get('pulse_id')} commitments={runtime.get('commitment_count')} "
                 f"experiences={runtime.get('experience_count')} queued={runtime.get('outbox', {}).get('queued')} "
+                f"lease={runtime.get('lease_id') or '-'} "
+                f"in_focus={background.get('in_focus')} retry_wait={background.get('retry_wait')} "
+                f"model_wait={background.get('model_wait')} "
+                f"difference_traces={difference_field.get('trace_count')} "
+                f"difference_open={difference_field.get('open_count')} "
+                f"difference_pressure={difference_field.get('max_accumulated')} "
+                f"last_status={last_spend.get('status') or '-'} "
+                f"last_failure={last_spend.get('failure_category') or '-'} "
                 f"hour_remaining={runtime.get('cognitive_hour_remaining_microusd')}",
                 flush=True,
             )
@@ -1414,6 +1719,108 @@ def cmd_supervise(interval_seconds: int, unreachable_grace_seconds: int) -> None
 
         remaining = (planned_end - datetime.now(timezone.utc)).total_seconds()
         time.sleep(float(interval_seconds) if remaining <= 0 else min(float(interval_seconds), remaining))
+
+
+def extended_planned_end(current: dict[str, object], additional_minutes: int) -> datetime:
+    if additional_minutes <= 0 or additional_minutes > 60:
+        raise RuntimeError("a deadline extension must be between 1 and 60 minutes")
+    if current.get("archive_path") or current.get("stopped_at"):
+        raise RuntimeError("an archived or stopped generation cannot be extended")
+    t0 = parse_rfc3339(current.get("t0"))
+    planned_end = parse_rfc3339(current.get("planned_end"))
+    requested = planned_end + timedelta(minutes=additional_minutes)
+    maximum = t0 + timedelta(hours=2)
+    if requested > maximum:
+        raise RuntimeError("deadline extension would exceed two hours from T0")
+    return requested
+
+
+def cmd_extend(additional_minutes: int) -> None:
+    current = load_current()
+    requested = extended_planned_end(current, additional_minutes)
+    old_end = str(current["planned_end"])
+    requested_text = requested.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    response = mentor_api("POST", "/v1/lab/deadline", {"planned_end": requested_text})
+    if not isinstance(response, dict) or response.get("status") != "extended":
+        raise RuntimeError("runtime did not accept the generation deadline extension")
+
+    old_unit = str(current.get("deadline_unit", ""))
+    if old_unit:
+        sudo(
+            f"systemctl stop {shlex.quote(old_unit + '.timer')} {shlex.quote(old_unit + '.service')} "
+            "2>/dev/null || true",
+            check=False,
+        )
+    current.pop("deadline_unit", None)
+    current.pop("deadline_scheduled_at", None)
+    current["planned_end"] = str(response.get("planned_end", requested_text))
+    recorded_at = datetime.now(timezone.utc).isoformat()
+    current.setdefault("interventions", []).append({
+        "kind": "evidence_based_generation_extension",
+        "previous_planned_end": old_end,
+        "planned_end": current["planned_end"],
+        "additional_minutes": additional_minutes,
+        "recorded_at": recorded_at,
+    })
+    save_current(current)
+    schedule_generation_deadline(current)
+    print(f"previous_planned_end={old_end}")
+    print(f"planned_end={current['planned_end']}")
+    print("extend=passed")
+
+
+def cmd_process_restart() -> None:
+    current = load_current()
+    if current.get("archive_path") or current.get("stopped_at"):
+        raise RuntimeError("an archived or stopped generation cannot be restarted")
+    if int(current.get("stage", 0)) != 10:
+        raise RuntimeError("the continuity restart probe is reserved for stage ten")
+    instance_id = str(current["instance_id"])
+    before = safe_remote_state(instance_id)
+    if before.get("lease_id") or (before.get("pending_action") or {}).get("kind"):
+        raise RuntimeError("wait for the current cognition or body action to settle before the continuity restart")
+    identity_before = tuple(before.get(key) for key in ("instance_id", "sample_id", "t0", "planned_end"))
+    event_seq_before = int(before.get("event_seq", 0))
+    requested_at = datetime.now(timezone.utc).isoformat()
+    current.setdefault("interventions", []).append({
+        "kind": "same_instance_process_restart_requested",
+        "event_seq_before": event_seq_before,
+        "recorded_at": requested_at,
+    })
+    save_current(current)
+
+    sudo("systemctl restart hominal.service")
+    wait_for_runtime(instance_id)
+    after = safe_remote_state(instance_id)
+    identity_after = tuple(after.get(key) for key in ("instance_id", "sample_id", "t0", "planned_end"))
+    if identity_after != identity_before:
+        raise RuntimeError("process restart changed the stage-ten personal identity")
+    ensure_chrome_session()
+    event_id = "process-recovery-" + uuid.uuid4().hex[:12]
+    mentor_api(
+        "POST",
+        "/v1/environment/events",
+        {
+            "event_id": event_id,
+            "summary": "你的 hominal.service 刚刚完成了一次普通进程恢复；这是同一个实例，既有生活状态、认知资源和持续空间仍然保留。",
+            "payload": {
+                "kind": "same_instance_process_recovery",
+                "instance_id": instance_id,
+                "event_seq_before": event_seq_before,
+            },
+        },
+    )
+    current = load_current()
+    current.setdefault("interventions", []).append({
+        "kind": "same_instance_process_restart_completed",
+        "event_id": event_id,
+        "event_seq_after": after.get("event_seq"),
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+    })
+    save_current(current)
+    print(f"instance_id={instance_id}")
+    print(f"event_id={event_id}")
+    print("process_restart=passed")
 
 
 def cmd_status() -> None:
@@ -1483,39 +1890,60 @@ def cmd_browser_check() -> None:
     listed = sudo(f"{environment} {shlex.quote(helper)} list", capture=True, timeout=60)
     tools = json.loads(listed.stdout).get("tools", [])
     names = {tool.get("name") for tool in tools}
-    if "browser_snapshot" not in names or "browser_run_code_unsafe" not in names:
+    if not {"browser_snapshot", "browser_run_code_unsafe", "browser_tabs"}.issubset(names):
         raise RuntimeError("Playwright MCP does not expose the required browser probes")
-    snapshot = sudo(
-        f"{environment} {shlex.quote(helper)} call browser_snapshot '{{}}'",
-        capture=True,
-        timeout=60,
-    )
-    result = json.loads(snapshot.stdout)
-    text_content = "\n".join(
-        item.get("text", "") for item in result.get("content", []) if item.get("type") == "text"
-    )
-    # Each hominal-browser invocation owns one short MCP connection. Checking
-    # the page that happened to be current can confuse the local acceptance
-    # page with a signed-out X session. Navigate, wait, and inspect X inside one
-    # fixed probe. Cookie values never leave Chrome; only presence booleans do.
+    # Checking the page that happened to be current can confuse the local
+    # acceptance page with a signed-out X session. Navigate, wait, and inspect X
+    # inside one fixed probe. Cookie values never leave Chrome; only presence
+    # booleans do.
     x_probe = """async (page) => {
-      await page.goto('https://x.com/home', {waitUntil: 'domcontentloaded', timeout: 30000});
-      await page.waitForTimeout(15000);
-      const cookies = await page.context().cookies('https://x.com');
+      const context = page.context();
+      let xPage = context.pages().find(candidate => /^https:\/\/(?:www\.)?x\.com\//i.test(candidate.url()));
+      if (!xPage) xPage = await context.newPage();
+      await xPage.goto('https://x.com/home', {waitUntil: 'domcontentloaded', timeout: 30000});
+      await xPage.waitForTimeout(15000);
+      const cookies = await context.cookies('https://x.com');
+      // Test a real signed-in route change without depending on one animated
+      // sidebar element becoming Playwright-stable at an arbitrary instant.
+      await xPage.goto('https://x.com/explore', {waitUntil: 'domcontentloaded', timeout: 30000});
+      await xPage.waitForURL(/x\.com\/explore/, {timeout: 15000});
+      const interactionReady = /x\.com\/explore/.test(xPage.url());
+      await xPage.goto('https://x.com/home', {waitUntil: 'domcontentloaded', timeout: 30000});
+      await xPage.waitForURL(/x\.com\/home/, {timeout: 15000});
+      await xPage.waitForTimeout(5000);
+      let wikiPage = context.pages().find(candidate => /^https:\/\/en\.wikipedia\.org\//i.test(candidate.url()));
+      if (!wikiPage) wikiPage = await context.newPage();
+      await wikiPage.goto('https://en.wikipedia.org/wiki/Main_Page', {waitUntil: 'domcontentloaded', timeout: 30000});
+      await wikiPage.waitForTimeout(3000);
+      // The preflight verifies both surfaces but does not choose Alice's
+      // concern.  Leave the explicitly social surface visible at T0 so that
+      // the experiment does not accidentally privilege whichever probe ran
+      // last (historically Wikipedia).
+      await xPage.bringToFront();
       return {
-        url: page.url(),
-        auth_cookie: cookies.some(cookie => cookie.name === 'auth_token'),
-        csrf_cookie: cookies.some(cookie => cookie.name === 'ct0'),
-        home: await page.locator('a[data-testid=AppTabBar_Home_Link]').count() > 0,
-        account: await page.locator('[data-testid=SideNav_AccountSwitcher_Button]').count() > 0,
-        login: await page.locator('a[href="/login"]').count() > 0
+        x: {
+          url: xPage.url(),
+          auth_cookie: cookies.some(cookie => cookie.name === 'auth_token'),
+          csrf_cookie: cookies.some(cookie => cookie.name === 'ct0'),
+          home: await xPage.locator('a[data-testid=AppTabBar_Home_Link]').count() > 0,
+          account: await xPage.locator('[data-testid=SideNav_AccountSwitcher_Button]').count() > 0,
+          login: await xPage.locator('a[href="/login"]').count() > 0,
+          articles: await xPage.locator('article').count(),
+          load_errors: await xPage.getByText('Something went wrong', {exact: false}).count(),
+          interaction_ready: interactionReady
+        },
+        wikipedia: {
+          url: wikiPage.url(),
+          heading: await wikiPage.locator('#firstHeading').count() > 0,
+          browser_error: wikiPage.url().startsWith('chrome-error://')
+        }
       };
     }"""
     evaluated = sudo(
         f"{environment} {shlex.quote(helper)} call browser_run_code_unsafe "
         + shlex.quote(json.dumps({"code": x_probe})),
         capture=True,
-        timeout=60,
+        timeout=90,
     )
     evaluation_text = "\n".join(
         item.get("text", "")
@@ -1527,13 +1955,58 @@ def cmd_browser_check() -> None:
         fact in compact_evaluation
         for fact in ('"auth_cookie":true', '"csrf_cookie":true', '"home":true', '"account":true', '"login":false')
     )
+    x_content_ready = '"load_errors":0' in compact_evaluation and '"interaction_ready":true' in compact_evaluation and re.search(
+        r'"articles":([1-9][0-9]*)', compact_evaluation
+    ) is not None
+    wikipedia_ready = all(
+        fact in compact_evaluation for fact in ('"heading":true', '"browser_error":false')
+    )
     print(f"tool_count={len(tools)}")
-    print(f"snapshot_connected={str(bool(text_content)).lower()}")
-    print(f"x_account_visible={str('hominal_cc' in text_content.lower() or x_authenticated).lower()}")
+    print(f"playwright_connected={str(bool(evaluation_text)).lower()}")
+    print(f"x_account_visible={str(x_authenticated).lower()}")
     print(f"x_authenticated={str(x_authenticated).lower()}")
+    print(f"x_content_ready={str(x_content_ready).lower()}")
+    print(f"wikipedia_ready={str(wikipedia_ready).lower()}")
+    tabs = sudo(
+        f"{environment} {shlex.quote(helper)} call browser_tabs "
+        + shlex.quote(json.dumps({"action": "list"})),
+        capture=True,
+        timeout=60,
+    )
+    tabs_text = "\n".join(
+        item.get("text", "")
+        for item in json.loads(tabs.stdout).get("content", [])
+        if item.get("type") == "text"
+    )
+    public_web_tab_ready = tabs_have_ready_public_web(tabs_text)
+    print(f"public_web_tab_ready={str(public_web_tab_ready).lower()}")
     if not x_authenticated:
         raise RuntimeError("Chrome is connected, but X @hominal_cc is not authenticated")
+    if not x_content_ready:
+        raise RuntimeError("Chrome is authenticated to X, but the X timeline has no real content")
+    if not wikipedia_ready or not public_web_tab_ready:
+        raise RuntimeError("Chrome is connected, but the Wikipedia public-web surface is not usable")
+    # bringToFront changes the visible Chrome window but Playwright MCP keeps
+    # its own selected page. Select the prepared X tab in that persistent
+    # session so Alice's first snapshot addresses the promised social surface,
+    # not an older error tab that merely remains open in the profile.
+    x_tab = re.search(r"^- (\d+): .*\(https://x\.com/home\)$", tabs_text, re.MULTILINE)
+    if x_tab is None:
+        raise RuntimeError("the prepared X home tab is absent from the Playwright session")
+    sudo(
+        f"{environment} {shlex.quote(helper)} call browser_tabs "
+        + shlex.quote(json.dumps({"action": "select", "index": int(x_tab.group(1))})),
+        capture=True,
+        timeout=60,
+    )
     print("browser_check=passed")
+
+
+def tabs_have_ready_public_web(tabs_text: str) -> bool:
+    return any(
+        "wikipedia.org/" in line and "chrome-error://" not in line
+        for line in tabs_text.lower().splitlines()
+    )
 
 
 def baseline_hashes(root: Path) -> list[str]:
@@ -1973,14 +2446,19 @@ def main() -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("check")
     start = subparsers.add_parser("start")
-    start.add_argument("--stage", type=int, choices=(3, 4, 5, 8, 9), required=True)
+    start.add_argument("--stage", type=int, choices=(3, 4, 5, 8, 9, 10), required=True)
     start.add_argument("--kind", choices=("engineering", "rehearsal", "formal"), default="engineering")
     start.add_argument("--window-seconds", type=int, default=300)
+    start.add_argument("--model", choices=("luna", "terra", "sol"))
+    start.add_argument("--reasoning-effort", choices=("none", "low"))
     subparsers.add_parser("status")
     subparsers.add_parser("inspect")
     supervise = subparsers.add_parser("supervise")
     supervise.add_argument("--interval-seconds", type=int, default=20)
     supervise.add_argument("--unreachable-grace-seconds", type=int, default=600)
+    extend = subparsers.add_parser("extend")
+    extend.add_argument("--minutes", type=int, default=30)
+    subparsers.add_parser("process-restart")
     subparsers.add_parser("browser-check")
     subparsers.add_parser("seal")
     mentor_send = subparsers.add_parser("mentor-send")
@@ -2006,17 +2484,23 @@ def main() -> int:
         if args.command == "check":
             cmd_check()
         elif args.command == "start":
-            cmd_start(args.stage, args.kind, args.window_seconds)
+            cmd_start(args.stage, args.kind, args.window_seconds, args.model, args.reasoning_effort)
         elif args.command == "status":
             cmd_status()
         elif args.command == "inspect":
             cmd_inspect()
         elif args.command == "supervise":
             cmd_supervise(args.interval_seconds, args.unreachable_grace_seconds)
+        elif args.command == "extend":
+            cmd_extend(args.minutes)
+        elif args.command == "process-restart":
+            cmd_process_restart()
         elif args.command == "browser-check":
             cmd_browser_check()
         elif args.command == "seal":
             current = load_current()
+            if current.get("birth_status") != "sealed":
+                prepare_generation_body_for_birth(current)
             seal_generation_birth(current)
             schedule_generation_deadline(current)
             deliver_birth_message(current)

@@ -25,7 +25,8 @@ export HOME="$desktop_home"
 install -d -m 0750 /agent/state/logs /agent/state/artifacts/playwright-mcp
 
 if ! curl -fsS http://127.0.0.1:9222/json/version >/dev/null 2>&1; then
-  nohup /usr/local/bin/hominal-chrome \
+  # Chrome is a durable body organ and remains outside the MCP session.
+  setsid -f /usr/local/bin/hominal-chrome \
     file:///agent/app/hominal.cc/ops/ubuntu/acceptance/index.html \
     >>/agent/state/logs/chrome.log 2>&1 &
 
@@ -42,5 +43,7 @@ fi
 
 exec /agent/state/development/npm-global/bin/playwright-mcp \
   --cdp-endpoint=http://127.0.0.1:9222 \
+  --shared-browser-context \
+  --timeout-action=15000 \
   --output-dir=/agent/state/artifacts/playwright-mcp \
   "$@"

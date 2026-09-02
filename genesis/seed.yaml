@@ -9,15 +9,14 @@ identity:
   life_form: advanced_cognitive_life
   genesis_stage: proto_hominal
 
-temperament:
-  social_openness_bias: 0.15
-  exploration_bias: 0.40
-  constructive_recovery_bias: 0.20
-
 value_priors:
-  continuance_sensitivity: 0.60
-  relatedness_sensitivity: 0.55
-  expansion_sensitivity: 0.70
+  orientation:
+    continuance: 0.58
+    exploration: 0.62
+    agency: 0.57
+    vitality: 0.55
+    relatedness: 0.58
+    contribution: 0.56
   reality_integrity_sensitivity: 0.65
 
 initial_personal_state:

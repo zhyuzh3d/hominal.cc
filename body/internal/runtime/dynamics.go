@@ -9,12 +9,15 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"hominal.cc/hominal/body/internal/organ"
 )
 
 const (
 	defaultAttentionCandidateLimit = 3
 	defaultAttentionRevisitSeconds = 300
-	defaultConcernContextLimit     = 8
+	defaultConcernContextLimit     = 5
+	lifeValueCompetitionBand       = 0.06
 )
 
 func (r *Runtime) advanceDynamics(elapsed time.Duration) error {
@@ -22,11 +25,18 @@ func (r *Runtime) advanceDynamics(elapsed time.Duration) error {
 	if minutes <= 0 {
 		return nil
 	}
+	r.decayDifferenceField(minutes)
 	returnFactor := clamp01(1 - r.config.Dynamics.AffectReturnRate*minutes)
 	r.state.AffectiveState.Valence = clampSigned(r.state.AffectiveState.Valence * returnFactor)
 	r.state.AffectiveState.Activation = clamp01(r.state.AffectiveState.Activation * returnFactor)
 	r.state.AffectiveState.Control = clamp01(0.5 + (r.state.AffectiveState.Control-0.5)*returnFactor)
 	r.state.AffectiveState.Certainty = clamp01(0.5 + (r.state.AffectiveState.Certainty-0.5)*returnFactor)
+	beforeExploration := lifeValuePressure(r.state.ValueField).Exploration
+	r.decayLifeValueField(minutes)
+	r.accumulateIdleLifeValues(minutes)
+	if err := r.maybeOpenAffectiveSelfDifference(); err != nil {
+		return err
+	}
 
 	concernFactor := clamp01(1 - r.config.Dynamics.ConcernNaturalDecayRate*minutes)
 	for index := range r.state.Concerns {
@@ -37,16 +47,19 @@ func (r *Runtime) advanceDynamics(elapsed time.Duration) error {
 		r.state.Concerns[index].Activation = clamp01(r.state.Concerns[index].Activation * concernFactor)
 	}
 
-	before := r.state.ExplorationPressure
-	if r.state.Lease == nil && r.state.PendingAction == nil {
-		r.state.ExplorationPressure = clamp01(before + r.config.Dynamics.ExplorationIdleGrowth*minutes)
+	if r.state.Stage >= 10 {
+		emitted, err := r.maybeEmitLifeValueSignal()
+		if err != nil || emitted {
+			return err
+		}
 	}
-	crossed := before < r.config.Dynamics.AttentionThreshold && r.state.ExplorationPressure >= r.config.Dynamics.AttentionThreshold
+	explorationPressure := lifeValuePressure(r.state.ValueField).Exploration
+	crossed := beforeExploration < r.config.Dynamics.AttentionThreshold && explorationPressure >= r.config.Dynamics.AttentionThreshold
 	currentConcernID := r.currentExplorationConcernID()
-	orphaned := r.state.ExplorationPressure >= r.config.Dynamics.AttentionThreshold &&
+	orphaned := explorationPressure >= r.config.Dynamics.AttentionThreshold &&
 		currentConcernID == "" && !r.explorationCandidateActive() &&
 		attentionDue(r.state.LastAttentionAt, time.Now().UTC(), r.config.Dynamics.AttentionRevisitSeconds)
-	if (crossed || orphaned) && currentConcernID == "" && !r.attentionCandidateActive() {
+	if (crossed || orphaned) && explorationDominatesValuePressure(r.state.ValueField) && currentConcernID == "" && !r.attentionCandidateActive() {
 		if r.state.Stage >= 8 {
 			// The drive stays active, while a low-cost perceptual scan supplies the
 			// next eligible object only when visible content actually differs. A
@@ -54,8 +67,8 @@ func (r *Runtime) advanceDynamics(elapsed time.Duration) error {
 			return nil
 		}
 		payloadFields := map[string]any{
-			"before": before,
-			"after":  r.state.ExplorationPressure,
+			"before": beforeExploration,
+			"after":  explorationPressure,
 		}
 		summary := "探索张力已经积蓄到值得接触现实。"
 		payload, _ := json.Marshal(payloadFields)
@@ -69,6 +82,299 @@ func (r *Runtime) advanceDynamics(elapsed time.Duration) error {
 		)
 	}
 	return nil
+}
+
+type namedLifeValue struct {
+	Name     string
+	Pressure float64
+}
+
+func namedLifeValuePressures(field LifeValueField) []namedLifeValue {
+	pressure := lifeValuePressure(field)
+	return []namedLifeValue{
+		{Name: "continuance", Pressure: pressure.Continuance},
+		{Name: "exploration", Pressure: pressure.Exploration},
+		{Name: "agency", Pressure: pressure.Agency},
+		{Name: "vitality", Pressure: pressure.Vitality},
+		{Name: "relatedness", Pressure: pressure.Relatedness},
+		{Name: "contribution", Pressure: pressure.Contribution},
+	}
+}
+
+func explorationDominatesValuePressure(field LifeValueField) bool {
+	values := namedLifeValuePressures(field)
+	exploration := lifeValueByName(lifeValuePressure(field), "exploration")
+	for _, value := range values {
+		if value.Name != "exploration" && value.Pressure+0.05 > exploration {
+			return false
+		}
+	}
+	return true
+}
+
+type lifeValueSignalPayload struct {
+	Direction     string  `json:"value_direction"`
+	AffordanceKey string  `json:"affordance_key"`
+	Surface       string  `json:"surface"`
+	SelectionSeed string  `json:"selection_seed,omitempty"`
+	Orientation   float64 `json:"orientation"`
+	Activation    float64 `json:"activation"`
+	Satiation     float64 `json:"satiation"`
+	Pressure      float64 `json:"pressure"`
+}
+
+func (r *Runtime) maybeEmitLifeValueSignal() (bool, error) {
+	if r.attentionCandidateActive() || r.hasUnassimilatedCommitment() {
+		return false, nil
+	}
+	cooldown := r.config.Dynamics.AttentionMaximumIdleSeconds
+	if cooldown <= 0 {
+		cooldown = 30
+	}
+	now := time.Now().UTC()
+	if !attentionDue(r.state.LastAttentionAt, now, cooldown) {
+		return false, nil
+	}
+	available := make([]namedLifeValue, 0, 6)
+	freshByDirection := make(map[string][]lifeValueAffordance, 6)
+	for _, value := range namedLifeValuePressures(r.state.ValueField) {
+		fresh := r.freshLifeValueAffordances(value.Name, now)
+		if len(fresh) == 0 {
+			continue
+		}
+		available = append(available, value)
+		freshByDirection[value.Name] = fresh
+	}
+	// A digital life has no bodily sleep requirement. Value pressure still
+	// determines what is likely to matter, but it no longer decides whether life
+	// exists at all: after one bounded quiet interval the body presents a real
+	// available surface and Alice may adopt or release it. This keeps continuous
+	// attention without manufacturing an action obligation.
+	eligible := competitiveLifeValues(available, 0)
+	if len(eligible) == 0 {
+		return false, nil
+	}
+	sort.SliceStable(eligible, func(i, j int) bool { return eligible[i].Pressure > eligible[j].Pressure })
+	topBand := 1
+	for topBand < len(eligible) && eligible[0].Pressure-eligible[topBand].Pressure <= lifeValueCompetitionBand {
+		topBand++
+	}
+	seed := randomID()
+	digest := sha256.Sum256([]byte(seed))
+	selected := eligible[int(digest[0])%topBand]
+	affordances := freshByDirection[selected.Name]
+	if lastKey := r.lastLifeValueSignalAffordance(); lastKey != "" && len(affordances) > 1 {
+		alternatives := make([]lifeValueAffordance, 0, len(affordances)-1)
+		for _, affordance := range affordances {
+			if affordance.Key != lastKey {
+				alternatives = append(alternatives, affordance)
+			}
+		}
+		if len(alternatives) > 0 {
+			affordances = alternatives
+		}
+	}
+	selectedAffordance := affordances[int(digest[1])%len(affordances)]
+	payload := lifeValueSignalPayload{
+		Direction:     selected.Name,
+		AffordanceKey: selectedAffordance.Key,
+		Surface:       selectedAffordance.Surface,
+		SelectionSeed: seed,
+		Orientation:   lifeValueByName(r.state.ValueField.Orientation, selected.Name),
+		Activation:    lifeValueByName(r.state.ValueField.Activation, selected.Name),
+		Satiation:     lifeValueByName(r.state.ValueField.Satiation, selected.Name),
+		Pressure:      selected.Pressure,
+	}
+	encoded, _ := json.Marshal(payload)
+	return true, r.addEvent(
+		"value_signal",
+		"endogenous",
+		lifeValueSignalSummary(selected.Name, selectedAffordance.Surface),
+		"value:"+selected.Name,
+		encoded,
+		true,
+	)
+}
+
+func (r *Runtime) freshLifeValueAffordances(direction string, now time.Time) []lifeValueAffordance {
+	base := time.Duration(r.perceptualReorientationSeconds()) * time.Second
+	fresh := make([]lifeValueAffordance, 0)
+	for _, affordance := range r.lifeValueAffordances(direction) {
+		if !r.lifeValueAffordanceHabituated(affordance.Key, now, base) {
+			fresh = append(fresh, affordance)
+		}
+	}
+	return fresh
+}
+
+// competitiveLifeValues opens attention only after at least one direction has
+// reached the common threshold, then lets every nearby direction participate
+// in the same competition. Requiring every candidate to cross first made tiny
+// orientation and pulse-timing differences choose a deterministic winner
+// before the random variation step could operate at all.
+func competitiveLifeValues(values []namedLifeValue, threshold float64) []namedLifeValue {
+	maximum := 0.0
+	for _, value := range values {
+		maximum = maxFloat(maximum, value.Pressure)
+	}
+	if maximum < threshold {
+		return nil
+	}
+	cutoff := maximum - lifeValueCompetitionBand
+	competitive := make([]namedLifeValue, 0, len(values))
+	for _, value := range values {
+		if value.Pressure >= cutoff {
+			competitive = append(competitive, value)
+		}
+	}
+	return competitive
+}
+
+type lifeValueAffordance struct {
+	Key      string
+	Surface  string
+	Supports []string
+}
+
+func supportsLifeValue(affordance lifeValueAffordance, direction string) bool {
+	for _, supported := range affordance.Supports {
+		if supported == direction {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *Runtime) lifeValueAffordances(direction string) []lifeValueAffordance {
+	available := []lifeValueAffordance{
+		{
+			Key: "mentor_channel", Surface: "可以交流、讨论、分享或倾诉的导师通道",
+			Supports: []string{"vitality", "relatedness"},
+		},
+	}
+	if bodyHasOrganCapability(r.state.Body, "public_web") {
+		available = append(available,
+			lifeValueAffordance{
+				Key: "x_social", Surface: "Chrome 会话中已登录 @hominal_cc、可通过导航接触他人公开账号与互动的 X 社交网络",
+				Supports: []string{"exploration", "vitality", "relatedness"},
+			},
+			lifeValueAffordance{
+				Key: "x_account", Surface: "属于你的、在 Chrome 会话中保持登录、公开内容跨实验保存为谱系环境、可通过导航管理与发布的 X 账号 @hominal_cc；本代新发布由本代行动结果和新状态 URL 确认",
+				Supports: []string{"contribution"},
+			},
+			lifeValueAffordance{
+				Key: "public_web", Surface: "可通过 Chrome 导航进入的公开网络与 Wikipedia",
+				Supports: []string{"exploration", "vitality"},
+			},
+		)
+	}
+	if r.state.Body.DesktopAvailable && r.state.Body.WechatRunning {
+		available = append(available, lifeValueAffordance{
+			Key: "wechat", Surface: "当前运行并保持会话状态的微信客户端",
+			Supports: []string{"exploration", "vitality", "relatedness"},
+		})
+	}
+	affordances := make([]lifeValueAffordance, 0, len(available))
+	for _, affordance := range available {
+		if supportsLifeValue(affordance, direction) {
+			affordances = append(affordances, affordance)
+		}
+	}
+	return affordances
+}
+
+func lifeValueSignalSummary(direction, surface string) string {
+	summaries := map[string]string{
+		"continuance":  "存续与节律的内部牵引进入注意。",
+		"exploration":  "探索与理解的内部牵引进入注意。",
+		"agency":       "能力与成就的内部牵引进入注意。",
+		"vitality":     "体验与活力的内部牵引进入注意。",
+		"relatedness":  "联结与表达的内部牵引进入注意。",
+		"contribution": "创造与贡献的内部牵引进入注意。",
+	}
+	return summaries[direction] + " 同一时刻，一个真实可用的环境入口也进入感知：" + surface + "。你可以结合自身状态、已有经历和这个现实入口判断它此刻是否产生值得承接的具体意义。若要承接，让这次接触指向超出动作痕迹本身的新现实、体验、理解、能力、联结、贡献或未来行动空间。"
+}
+
+func (r *Runtime) lifeValueSignalHabituated(direction string, now time.Time) bool {
+	base := time.Duration(r.perceptualReorientationSeconds()) * time.Second
+	for index := len(r.state.Background) - 1; index >= 0; index-- {
+		event := r.state.Background[index]
+		if event.Kind != "value_signal" || len(event.Payload) == 0 {
+			continue
+		}
+		var payload lifeValueSignalPayload
+		if json.Unmarshal(event.Payload, &payload) != nil || payload.Direction != direction {
+			continue
+		}
+		observed, err := time.Parse(time.RFC3339Nano, event.ObservedAt)
+		return err == nil && now.Sub(observed) < base
+	}
+	return false
+}
+
+func (r *Runtime) lifeValueAffordanceHabituated(key string, now time.Time, base time.Duration) bool {
+	if key == "" || base <= 0 {
+		return false
+	}
+	dismissedStreak := 0
+	var lastPresented time.Time
+	for index := len(r.state.Background) - 1; index >= 0; index-- {
+		event := r.state.Background[index]
+		if event.Kind != "value_signal" || len(event.Payload) == 0 {
+			continue
+		}
+		var payload lifeValueSignalPayload
+		if json.Unmarshal(event.Payload, &payload) != nil || payload.AffordanceKey != key {
+			continue
+		}
+		observed, err := time.Parse(time.RFC3339Nano, event.ObservedAt)
+		if err != nil {
+			continue
+		}
+		if lastPresented.IsZero() {
+			lastPresented = observed
+		}
+		if r.lifeValueSignalEventActed(event) {
+			break
+		}
+		dismissedStreak++
+	}
+	if lastPresented.IsZero() {
+		return false
+	}
+	// A surface Alice used returns at the ordinary interval. Each consecutive
+	// presentation she leaves without action adds one interval, capped at thirty
+	// minutes. Her own action therefore restores availability, while a stable
+	// door she has already declined stops demanding the same paid judgement.
+	factor := 1 + dismissedStreak
+	if factor > 6 {
+		factor = 6
+	}
+	return now.Sub(lastPresented) < time.Duration(factor)*base
+}
+
+func (r *Runtime) lifeValueSignalEventActed(event Event) bool {
+	for _, commitment := range r.state.Commitments {
+		if commitment.FocusID == event.ID ||
+			(event.ConcernID != "" && commitment.ConcernID == event.ConcernID) {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *Runtime) lastLifeValueSignalAffordance() string {
+	for index := len(r.state.Background) - 1; index >= 0; index-- {
+		event := r.state.Background[index]
+		if event.Kind != "value_signal" || len(event.Payload) == 0 {
+			continue
+		}
+		var payload lifeValueSignalPayload
+		if json.Unmarshal(event.Payload, &payload) == nil && payload.AffordanceKey != "" {
+			return payload.AffordanceKey
+		}
+	}
+	return ""
 }
 
 func (r *Runtime) currentExplorationConcernID() string {
@@ -210,7 +516,7 @@ func (r *Runtime) nextStage4Request() (CognitiveRequest, bool) {
 		if len(candidates) == 0 &&
 			ownsExplorationDrive &&
 			(!concernHasCommitment(concern.ID, r.state.Commitments) || selfRevisitWithoutReality) &&
-			r.state.ExplorationPressure < explorationActionThreshold(r.config.Dynamics.AttentionThreshold) {
+			lifeValuePressure(r.state.ValueField).Exploration < explorationActionThreshold(r.config.Dynamics.AttentionThreshold) {
 			continue
 		}
 		candidate := Event{
@@ -235,8 +541,18 @@ func (r *Runtime) nextStage4Request() (CognitiveRequest, bool) {
 		// fresh Reality. selfRevisitWithoutReality above still prevents thought-only
 		// loops, while exploration pressure retains its existing revival path.
 		minimumConcernSalience := r.config.Dynamics.AttentionThreshold * r.config.Dynamics.ConcernBaseDrive
+		effectiveConcernSalience := maxFloat(concern.Strength, concern.Activation)
+		if concern.OriginKind == "self_model_difference" {
+			// A self-model Concern is the durable identity of an unresolved
+			// interoceptive difference. Its own per-appraisal Strength may be
+			// deliberately modest even while the accumulated self-model tension
+			// has reached attention. Use the same effective salience here that
+			// candidateScore uses below; otherwise the difference is preserved as
+			// a Concern but can never receive its one direct, action-capable revisit.
+			effectiveConcernSalience = maxFloat(effectiveConcernSalience, r.state.SelfModelTension)
+		}
 		if !ownsExplorationDrive && !r.concernAwaitsRealityRevisit(concern) &&
-			maxFloat(concern.Strength, concern.Activation) < minimumConcernSalience {
+			effectiveConcernSalience < minimumConcernSalience {
 			continue
 		}
 		if !attentionDue(concern.LastFocusedAt, now, r.config.Dynamics.AttentionRevisitSeconds) {
@@ -333,16 +649,23 @@ func explorationApproachLens(choice byte) string {
 }
 
 func attentionVariationSeed(instanceID string, pulseID uint64, candidates []Event) string {
-	parts := []string{instanceID, fmt.Sprintf("%d", pulseID)}
-	for _, candidate := range candidates {
-		parts = append(parts, candidate.ID)
-	}
-	digest := sha256.Sum256([]byte(strings.Join(parts, "|")))
-	return fmt.Sprintf("%x", digest[:8])
+	// The seed is sampled once from the operating system and then journaled with
+	// the cognition. Replay can therefore explain the variation without making
+	// identical model priors choose the same path in every new life.
+	_ = instanceID
+	_ = pulseID
+	_ = candidates
+	return randomID()
 }
 
 func (r *Runtime) shouldOfferVariation(focus Event) bool {
-	if r.state.ExplorationPressure < r.config.Dynamics.AttentionThreshold || r.hasUnassimilatedCommitment() {
+	if r.hasUnassimilatedCommitment() {
+		return false
+	}
+	if focus.Kind == "value_signal" {
+		return true
+	}
+	if lifeValuePressure(r.state.ValueField).Exploration < r.config.Dynamics.AttentionThreshold {
 		return false
 	}
 	if focus.Kind == "perceptual_change" {
@@ -441,28 +764,31 @@ func attentionDue(last string, now time.Time, revisitSeconds int) bool {
 }
 
 func (r *Runtime) candidateScore(candidate Event) float64 {
-	novelty := 0.0
-	if candidate.Kind != "concern" {
-		novelty = 1
-	}
+	differencePressure := candidateDifferencePressure(candidate)
 	concernStrength := 0.0
 	affectiveSalience := r.state.AffectiveState.Activation
-	explorationValue := 0.0
+	valueAlignment := 0.0
+	pull := lifeValuePull(r.state.ValueField)
 	expectedCost := 0.25
 	if concern := r.concernByID(candidate.ConcernID); concern != nil {
 		concernStrength = concern.Strength
 		affectiveSalience = maxFloat(affectiveSalience, concern.Activation)
 		expectedCost = 1 - concern.Answerability
+		valueAlignment = lifeValueAlignment(concern.Values, pull)
 		if concernOwnsExplorationDrive(*concern, r.state.Commitments, r.state.Mentor, r.config.Dynamics.AttentionThreshold) {
 			// The concern is the durable identity of one exploration tension. As the
 			// underlying pressure returns, the same concern must be able to compete
 			// again instead of requiring a duplicate periodic event.
-			concernStrength = maxFloat(concernStrength, r.state.ExplorationPressure)
-			explorationValue = r.state.ExplorationPressure
+			concernStrength = maxFloat(concernStrength, lifeValuePressure(r.state.ValueField).Exploration)
+			valueAlignment = maxFloat(valueAlignment, pull.Exploration)
 		}
 	}
 	if candidate.Kind == "endogenous_change" || strings.Contains(strings.ToLower(candidate.Summary), "exploration") {
-		explorationValue = r.state.ExplorationPressure
+		valueAlignment = pull.Exploration
+		expectedCost = 0.15
+	}
+	if direction := eventLifeValueDirection(candidate); direction != "" {
+		valueAlignment = lifeValueByName(pull, direction)
 		expectedCost = 0.15
 	}
 	if candidate.Kind == "self_model_difference" {
@@ -474,9 +800,20 @@ func (r *Runtime) candidateScore(candidate Event) float64 {
 	}
 	return concernStrength +
 		r.config.Dynamics.AttentionAffectWeight*affectiveSalience +
-		r.config.Dynamics.AttentionExplorationWeight*explorationValue +
-		r.config.Dynamics.AttentionNoveltyWeight*novelty -
+		r.config.Dynamics.AttentionValueWeight*valueAlignment +
+		r.config.Dynamics.AttentionNoveltyWeight*differencePressure -
 		r.config.Dynamics.AttentionCostWeight*expectedCost
+}
+
+func eventLifeValueDirection(event Event) string {
+	if event.Kind != "value_signal" || len(event.Payload) == 0 {
+		return ""
+	}
+	var payload lifeValueSignalPayload
+	if json.Unmarshal(event.Payload, &payload) != nil {
+		return ""
+	}
+	return payload.Direction
 }
 
 func normalizeUnendorsedAction(commit CognitiveCommit, threshold float64) (CognitiveCommit, string) {
@@ -509,7 +846,52 @@ func (r *Runtime) applyCognitiveCommit(commit CognitiveCommit) error {
 	return r.applyPreparedCognitiveCommit(commit, withheldActionKind)
 }
 
+// constrainStageTenActionAssistance preserves one consciousness while still
+// allowing Alice to use Sol/low as a precise action organ. The main cognition
+// has already formed the Concern and fixed the purpose. Assistance contributes
+// only an executable body step; it cannot reappraise the life meaning, redirect
+// the action into a relationship message, or rewrite Self.
+func (r *Runtime) constrainStageTenActionAssistance(commit CognitiveCommit) CognitiveCommit {
+	if r.state.Stage < 10 || r.state.Lease == nil || r.state.Lease.ProfileSource != "next" {
+		return commit
+	}
+	concern := r.concernByID(r.focusConcernID(commit.FocusID))
+	if concern == nil {
+		return commit
+	}
+	commit.Appraisals = []CandidateAppraisal{{
+		CandidateID:   commit.FocusID,
+		Meaning:       concern.Meaning,
+		Difference:    concern.Difference,
+		Ownership:     concern.Ownership,
+		Value:         concern.Value,
+		Values:        concern.Values,
+		Urgency:       concern.Urgency,
+		Answerability: concern.Answerability,
+		Certainty:     concern.Certainty,
+		Resolution:    "hold",
+	}}
+	commit.ContinuesConcernID = ""
+	commit.WithinConcernID = ""
+	commit.ContributesToConcernID = ""
+	commit.NewConcernClosureCondition = ""
+	commit.EmergingConsequence = ""
+	commit.ExperienceUpdates = nil
+	commit.NarrativeUpdate = ""
+	commit.ValueOrientationUpdate = LifeValueVector{}
+	commit.ThoughtThread = "我正在把主力认知已经认领的行动交给身体精确实现：" + strings.TrimSpace(r.state.Lease.ProfilePurpose)
+	if commit.Action.Kind == "organ_action" {
+		commit.Action.Intent = strings.TrimSpace(r.state.Lease.ProfilePurpose)
+	}
+	commit.ResourceChoice = CognitiveResourceChoice{
+		Apply: "keep", Model: "current", ReasoningEffort: "current",
+		Purpose: "一次性行动协助完成后回到主力认知",
+	}
+	return commit
+}
+
 func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldActionKind string) error {
+	withheldProjections := make(map[string]string)
 	if len(commit.Appraisals) == 0 || len(commit.Appraisals) > defaultAttentionCandidateLimit {
 		return errors.New("cognitive commit must contain one to three appraisals")
 	}
@@ -518,7 +900,9 @@ func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldA
 	}
 	continuedConcernID, err := r.validateConcernContinuation(commit)
 	if err != nil {
-		return err
+		withheldProjections["continues_concern_id"] = err.Error()
+		commit.ContinuesConcernID = ""
+		continuedConcernID = ""
 	}
 	effectiveConcernID := r.focusConcernID(commit.FocusID)
 	if continuedConcernID != "" {
@@ -526,12 +910,16 @@ func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldA
 	}
 	withinConcernID, err := r.validateConcernContext(commit, effectiveConcernID)
 	if err != nil {
-		return err
+		withheldProjections["within_concern_id"] = err.Error()
+		commit.WithinConcernID = ""
+		withinConcernID = ""
 	}
 	commit.WithinConcernID = withinConcernID
 	contributesToConcernID, err := r.validateConcernContribution(commit, effectiveConcernID)
 	if err != nil {
-		return err
+		withheldProjections["contributes_to_concern_id"] = err.Error()
+		commit.ContributesToConcernID = ""
+		contributesToConcernID = ""
 	}
 	commit.ContributesToConcernID = contributesToConcernID
 	if len([]rune(strings.TrimSpace(commit.ThoughtThread))) > 2000 {
@@ -540,12 +928,15 @@ func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldA
 	if err := validateCognitiveAction(commit.Action, r.state.Stage); err != nil {
 		return err
 	}
-	if err := r.validateActionObjectFocus(commit, effectiveConcernID); err != nil {
+	if err := r.validateOrganOperation(commit.Action); err != nil {
 		return err
 	}
-	matureExplorationDrive := r.explorationHasMatureDrive(commit.FocusID)
-	if matureExplorationDrive && commit.Action.Kind == "mentor_send" && !genericExplorationMentorContactAvailable(r.state.Commitments) {
-		return errors.New("general exploration has already made mentor contact; continue the relationship from a mentor message or a concrete experience, or let another part of reality introduce new difference")
+	if r.state.Stage >= 10 && r.state.Lease != nil && r.state.Lease.ProfileSource == "next" &&
+		commit.Action.Kind != "none" && commit.Action.Kind != "organ_action" {
+		return errors.New("stage-ten action assistance can only form one organ_action or return control to the main cognition")
+	}
+	if err := r.validateActionObjectFocus(commit, effectiveConcernID); err != nil {
+		return err
 	}
 	if commit.Action.Kind != "none" {
 		if effectiveConcernID != "" {
@@ -561,7 +952,19 @@ func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldA
 		return err
 	}
 	if err := r.validateNarrativeUpdate(commit); err != nil {
+		// Narrative is a sparse projection of already usable cognition, not a
+		// prerequisite for absorbing Reality or executing an independently valid
+		// action. If the proposed projection has not earned that status, preserve
+		// the appraisal, Experience and action while leaving Narrative unchanged.
+		withheldProjections["narrative_update"] = err.Error()
+		commit.NarrativeUpdate = ""
+	}
+	if err := validateLifeValueVector(commit.ValueOrientationUpdate, true); err != nil {
 		return err
+	}
+	if strings.TrimSpace(commit.NarrativeUpdate) == "" && !lifeValueVectorEmpty(commit.ValueOrientationUpdate) {
+		withheldProjections["value_orientation_update"] = "long-term value orientation changes with an accepted narrative update"
+		commit.ValueOrientationUpdate = LifeValueVector{}
 	}
 	profile, err := r.validateResourceChoice(commit.ResourceChoice, commit.FocusID, commit.Action.Kind)
 	if err != nil {
@@ -579,13 +982,6 @@ func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldA
 		if err := validateAppraisal(appraisal); err != nil {
 			return err
 		}
-		candidate := r.activeCandidates[appraisal.CandidateID]
-		backgroundExistingConcern := r.state.Stage >= 8 && appraisal.CandidateID != commit.FocusID && r.concernForCandidate(candidate) != nil
-		if !backgroundExistingConcern {
-			if err := validateAppraisalLifecycle(appraisal, r.config.Dynamics.AttentionThreshold); err != nil {
-				return err
-			}
-		}
 	}
 	if len(seen) != len(r.activeCandidates) {
 		return errors.New("every active candidate must receive one appraisal")
@@ -595,12 +991,16 @@ func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldA
 	}
 	closureCondition, err := r.validateNewConcernClosureCondition(commit, effectiveConcernID)
 	if err != nil {
-		return err
+		withheldProjections["new_concern_closure_condition"] = err.Error()
+		commit.NewConcernClosureCondition = ""
+		closureCondition = ""
 	}
 	commit.NewConcernClosureCondition = closureCondition
 	emergingConsequence, err := r.validateEmergingConsequence(commit)
 	if err != nil {
-		return err
+		withheldProjections["emerging_consequence"] = err.Error()
+		commit.EmergingConsequence = ""
+		emergingConsequence = ""
 	}
 	commit.EmergingConsequence = emergingConsequence
 	focusCandidate := r.activeCandidates[commit.FocusID]
@@ -610,11 +1010,10 @@ func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldA
 			focusOriginKind = concern.OriginKind
 		}
 	}
-	if err := validateFocusedEnactment(commit, focusCandidate, focusOriginKind, r.config.Dynamics.AttentionThreshold, r.hasOwnedAlternativeCandidate(commit, effectiveConcernID)); err != nil {
+	if err := validateFocusedEnactment(commit, focusCandidate, focusOriginKind, r.config.Dynamics.AttentionThreshold); err != nil {
 		return err
 	}
 	normalizedCompositeDisposition := r.normalizeCompositeProgressDisposition(&commit, effectiveConcernID)
-	minimumConcernSalience := r.config.Dynamics.AttentionThreshold * r.config.Dynamics.ConcernBaseDrive
 	for _, appraisal := range commit.Appraisals {
 		candidate := r.activeCandidates[appraisal.CandidateID]
 		concern := r.concernForCandidate(candidate)
@@ -626,7 +1025,7 @@ func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldA
 		if !isFocus && r.state.Stage >= 8 {
 			continue
 		}
-		if err := validateExistingConcernDisposition(appraisal, *concern, candidate, minimumConcernSalience, enactsFocusedConcern, r.state.Stage); err != nil {
+		if err := validateExistingConcernDisposition(appraisal, *concern, candidate, enactsFocusedConcern, r.state.Stage); err != nil {
 			return err
 		}
 	}
@@ -647,13 +1046,24 @@ func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldA
 	for _, appraisal := range commit.Appraisals {
 		candidate := r.activeCandidates[appraisal.CandidateID]
 		if appraisal.CandidateID == commit.FocusID {
-			r.applyPerceptualSaturation(candidate, appraisal, commit)
+			r.learnDifferenceFromAppraisal(candidate, appraisal, commit.Action.Kind != "none")
+		} else {
+			r.learnDifferenceFromAppraisal(candidate, appraisal, false)
 		}
 
 		activation := appraisalActivation(r.config.Dynamics, appraisal)
 		concern := r.concernForCandidate(candidate)
 		created := false
-		if concern == nil && r.shouldPersistNewConcern(commit, appraisal, activation) {
+		persistNewConcern := concern == nil && r.shouldPersistNewConcern(commit, appraisal, activation)
+		if persistNewConcern && r.state.Stage >= 9 && appraisal.CandidateID == commit.FocusID && closureCondition == "" {
+			// A durable Concern needs Alice's own stable reality boundary. Missing
+			// that boundary no longer invalidates an otherwise usable appraisal or
+			// action: this attention episode remains momentary and Reality can still
+			// return through its ActionCommitment. The kernel declines to manufacture
+			// persistence instead of discarding the whole cognitive result.
+			persistNewConcern = false
+		}
+		if persistNewConcern {
 			r.state.Concerns = append(r.state.Concerns, Concern{ID: "concern-" + randomID()})
 			concern = &r.state.Concerns[len(r.state.Concerns)-1]
 			created = true
@@ -693,6 +1103,7 @@ func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldA
 			concern.Difference = appraisal.Difference
 			concern.Ownership = appraisal.Ownership
 			concern.Value = appraisal.Value
+			concern.Values = appraisal.Values
 			concern.Urgency = appraisal.Urgency
 			concern.Answerability = appraisal.Answerability
 			concern.Activation = activation
@@ -783,10 +1194,11 @@ func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldA
 			maxActivation = activation
 		}
 		uncertaintyTotal += 1 - appraisal.Certainty
+		r.activateLifeValues(appraisal)
 	}
 	if explorationResultRelief > 0 {
-		r.state.ExplorationPressure = clamp01(
-			r.state.ExplorationPressure - r.config.Dynamics.ExplorationRelief*explorationResultRelief,
+		r.state.ValueField.Activation.Exploration = clamp01(
+			r.state.ValueField.Activation.Exploration - r.config.Dynamics.ExplorationRelief*explorationResultRelief,
 		)
 		if r.state.Stage < 5 {
 			for index := range r.state.Concerns {
@@ -809,8 +1221,8 @@ func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldA
 		r.state.AffectiveState.Control = clamp01((1-newExperienceWeight)*r.state.AffectiveState.Control + newExperienceWeight*targetControl)
 		r.state.AffectiveState.Certainty = clamp01((1-newExperienceWeight)*r.state.AffectiveState.Certainty + newExperienceWeight*targetCertainty)
 	}
-	r.state.ExplorationPressure = clamp01(
-		r.state.ExplorationPressure + r.config.Dynamics.ExplorationUnknownGrowth*(uncertaintyTotal/float64(len(commit.Appraisals))),
+	r.state.ValueField.Activation.Exploration = clamp01(
+		r.state.ValueField.Activation.Exploration + r.config.Dynamics.ExplorationUnknownGrowth*(uncertaintyTotal/float64(len(commit.Appraisals))),
 	)
 	r.state.LastAttentionAt = now
 	// A contribution exists only to wake its still-open parent Concern. Once the
@@ -824,9 +1236,15 @@ func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldA
 	if err := r.applyExperienceUpdates(commit); err != nil {
 		return err
 	}
+	if len(commit.ExperienceUpdates) == 0 && independentFactKind(focusCandidate.Kind) {
+		if err := r.enqueueObservedConcernContribution(contributesToConcernID, focusCandidate); err != nil {
+			return err
+		}
+	}
 	if err := r.applyNarrativeUpdate(commit); err != nil {
 		return err
 	}
+	r.applyValueOrientationUpdate(commit.ValueOrientationUpdate)
 	if err := r.addMentorContentCandidate(commit); err != nil {
 		return err
 	}
@@ -849,6 +1267,8 @@ func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldA
 		"thought_thread":                truncate(strings.TrimSpace(commit.ThoughtThread), 2000),
 		"appraisals":                    commit.Appraisals,
 		"affective_state":               r.state.AffectiveState,
+		"life_value_field":              r.state.ValueField,
+		"value_orientation_update":      commit.ValueOrientationUpdate,
 		"action_kind":                   commit.Action.Kind,
 		"resource_choice":               commit.ResourceChoice,
 		"variation_bias":                variationBias,
@@ -856,6 +1276,9 @@ func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldA
 	}
 	if withheldActionKind != "" {
 		payload["withheld_action_kind"] = withheldActionKind
+	}
+	if len(withheldProjections) > 0 {
+		payload["withheld_projections"] = withheldProjections
 	}
 	if normalizedCompositeDisposition != "" {
 		payload["normalized_composite_disposition"] = normalizedCompositeDisposition
@@ -887,17 +1310,7 @@ func commitAssimilates(commit CognitiveCommit, commitmentID string) bool {
 	return len(commit.ExperienceUpdates) == 1 && commit.ExperienceUpdates[0].CommitmentID == commitmentID
 }
 
-func validateAppraisalLifecycle(appraisal CandidateAppraisal, ownershipThreshold float64) error {
-	if appraisal.Resolution == "hold" && appraisal.Ownership < ownershipThreshold {
-		return fmt.Errorf("candidate %q cannot be held with ownership %.3f below the concern threshold %.3f; either own its future consequence or resolve it", appraisal.CandidateID, appraisal.Ownership, ownershipThreshold)
-	}
-	if appraisal.Resolution == "released" && appraisal.Ownership >= ownershipThreshold {
-		return fmt.Errorf("candidate %q cannot be released with ownership %.3f at or above the concern threshold %.3f; lower ownership only after deciding this difference no longer belongs to your future", appraisal.CandidateID, appraisal.Ownership, ownershipThreshold)
-	}
-	return nil
-}
-
-func validateExistingConcernDisposition(appraisal CandidateAppraisal, concern Concern, candidate Event, closureThreshold float64, enacts bool, stage int) error {
+func validateExistingConcernDisposition(appraisal CandidateAppraisal, concern Concern, candidate Event, enacts bool, stage int) error {
 	if concern.Resolution != "hold" {
 		return nil
 	}
@@ -906,9 +1319,6 @@ func validateExistingConcernDisposition(appraisal CandidateAppraisal, concern Co
 	}
 	if enacts && appraisal.Resolution != "hold" {
 		return fmt.Errorf("concern %q is being enacted and must remain held until Reality returns", concern.ID)
-	}
-	if appraisal.Resolution == "resolved" && appraisal.Difference > closureThreshold {
-		return fmt.Errorf("concern %q cannot be resolved with remaining difference %.3f above the closure threshold %.3f; keep it held, or use released with low ownership and a reality-grounded reason for withdrawing responsibility", concern.ID, appraisal.Difference, closureThreshold)
 	}
 	return nil
 }
@@ -981,24 +1391,24 @@ func (r *Runtime) normalizeCompositeProgressDisposition(commit *CognitiveCommit,
 	return ""
 }
 
-func validateFocusedEnactment(commit CognitiveCommit, candidate Event, originKind string, threshold float64, canHandOff bool) error {
+func validateFocusedEnactment(commit CognitiveCommit, candidate Event, originKind string, threshold float64) error {
 	if commit.Action.Kind != "none" || originKind == "endogenous_change" {
 		return nil
 	}
-	if candidate.Kind == "action_result" && canHandOff {
-		// Absorb the returning Reality in this single attention moment, while an
-		// independently owned concrete object remains pending to own the next
-		// action. Requiring the old result to enact the new object would conflict
-		// with causal focus validation and waste a model retry.
+	if candidate.Kind == "action_result" {
+		// Reality absorption is itself the single foreground operation in this
+		// attention moment. A held Concern retains one bounded, immediate revisit
+		// through concernAwaitsRealityRevisit, where Alice can choose the next
+		// action after the result has actually become Experience. Requiring her to
+		// interpret an unexpected result and enact its sequel in one commit breaks
+		// the serial loop and turns ordinary reflection into validation waste.
 		return nil
 	}
-	// A direct Concern and the Reality of its last action are the same causal
-	// foreground at two moments. Letting a highly answerable action_result say
-	// "hold" and stop made that thread disappear until its revisit timer, after
-	// which Alice could borrow an unrelated Concern as the identity of the next
-	// action. Fresh external events may be understood without immediate action;
-	// already-enacted Reality must instead continue, settle, or name a real wait.
-	if candidate.Kind != "concern" && candidate.Kind != "action_result" {
+	// Once that same Concern directly returns to focus, a highly answerable,
+	// self-owned difference needs an action, closure, or an actual waiting
+	// condition. Fresh external events may still be understood and released
+	// without compulsory enactment.
+	if candidate.Kind != "concern" {
 		return nil
 	}
 	for _, appraisal := range commit.Appraisals {
@@ -1015,35 +1425,17 @@ func validateFocusedEnactment(commit CognitiveCommit, candidate Event, originKin
 	return nil
 }
 
-func (r *Runtime) hasOwnedAlternativeCandidate(commit CognitiveCommit, effectiveConcernID string) bool {
-	threshold := r.config.Dynamics.AttentionThreshold
-	for _, appraisal := range commit.Appraisals {
-		if appraisal.CandidateID == commit.FocusID || appraisal.Resolution != "hold" || appraisal.Ownership < threshold || appraisal.Answerability < threshold {
-			continue
-		}
-		candidate, exists := r.activeCandidates[appraisal.CandidateID]
-		if !exists {
-			continue
-		}
-		alternativeConcernID := r.focusConcernID(candidate.ID)
-		if alternativeConcernID == "" || alternativeConcernID != effectiveConcernID {
-			return true
-		}
-	}
-	return false
-}
-
 // validateActionObjectFocus preserves causal identity at the boundary between
-// attention and bodily action. When a shell action names the exact path of a
+// attention and bodily action. When a System Organ action names the exact path of a
 // different independent object that is still present in the attention field,
 // that object—not a broad parent Concern—must own the action and its returning
 // Reality. This does not choose an object or require action; it only prevents a
 // chosen action from being recorded as the life of something else.
 func (r *Runtime) validateActionObjectFocus(commit CognitiveCommit, effectiveConcernID string) error {
-	if r.state.Stage < 9 || commit.Action.Kind != "body_shell" {
+	if r.state.Stage < 9 || commit.Action.Kind != "organ_action" || commit.Action.OrganID != "system" || commit.Action.Operation != "exec" {
 		return nil
 	}
-	command := strings.TrimSpace(commit.Action.Command)
+	command := strings.TrimSpace(commit.Action.Input)
 	if command == "" {
 		return nil
 	}
@@ -1089,74 +1481,18 @@ func eventObjectPath(candidate Event) string {
 	return path
 }
 
-func (r *Runtime) applyPerceptualSaturation(candidate Event, appraisal CandidateAppraisal, commit CognitiveCommit) {
-	trace, exists := r.state.Perception[browserPerceptionSurface]
-	if !exists {
-		return
-	}
-	concern := r.concernForCandidate(candidate)
-	perceptualOrigin := candidate.Kind == "perceptual_change" ||
-		(concern != nil && concern.OriginKind == "perceptual_change")
-	if !perceptualOrigin {
-		return
-	}
-	if commit.Action.Kind != "none" {
-		// Acting is an attempt to obtain yield, not evidence that yield was
-		// obtained. Clearing saturation here let a stream of unrelated objects
-		// remain attractive forever as long as Alice repeated a low-yield action
-		// on each one. Keep the accumulated scene history until Reality arrives.
-		trace.Pending = nil
-		trace.ExhaustedContext = ""
-		trace.ExhaustedAt = ""
-		r.state.Perception[browserPerceptionSurface] = trace
-		return
-	}
-	if candidate.Kind == "action_result" {
-		if len(commit.ExperienceUpdates) != 1 {
-			return
+func bodyHasOrganCapability(body BodySnapshot, expected string) bool {
+	for _, organ := range body.Organs {
+		if !organ.Accepting || organ.Status == "unavailable" {
+			continue
 		}
-		commitment := r.commitmentByID(commit.ExperienceUpdates[0].CommitmentID)
-		if commitment == nil || commitment.InitialDifference <= 0 {
-			return
+		for _, capability := range organ.Capabilities {
+			if capability == expected {
+				return true
+			}
 		}
-		update := commit.ExperienceUpdates[0]
-		progress := clamp01((commitment.InitialDifference - appraisal.Difference) / commitment.InitialDifference)
-		endogenousValue := maxFloat(
-			absFloat(update.Values.Continuance),
-			maxFloat(absFloat(update.Values.Relatedness), absFloat(update.Values.Expansion)),
-		)
-		realisedYield := clamp01(
-			progress * endogenousValue * absFloat(update.Values.SelfEndorsed) * (1 - update.ExperiencedCost),
-		)
-		threshold := r.config.Dynamics.AttentionThreshold
-		if realisedYield >= threshold {
-			trace.Saturation = clamp01(
-				trace.Saturation * (1 - r.config.Dynamics.ConcernResolutionGain*realisedYield),
-			)
-		} else if threshold > 0 {
-			trace.Saturation = clamp01(
-				trace.Saturation + r.config.Dynamics.ConcernGrowthGain*(threshold-realisedYield)/threshold,
-			)
-		}
-		r.state.Perception[browserPerceptionSurface] = trace
-		return
 	}
-	if candidate.Kind != "perceptual_change" && candidate.Kind != "concern" {
-		return
-	}
-	// A visible object may be novel and thematically important while the current
-	// surface still cannot help Alice answer it.  Counting only low ownership and
-	// low value made an endless feed of valued-but-unanswerable fragments look
-	// productive forever.  Realised perceptual yield needs all three existing
-	// AIP conditions: Alice owns the object, values it, and can currently respond
-	// through this surface.  The complement is habituation pressure.  Urgency is
-	// deliberately absent: an urgent but unanswerable concern should remain a
-	// concern, while this particular surface still loses the right to keep
-	// supplying near-identical fragments.
-	realisedYield := clamp01(appraisal.Ownership * absFloat(appraisal.Value) * appraisal.Answerability)
-	lowYield := clamp01((1 - realisedYield) * appraisal.Certainty)
-	trace.Saturation = clamp01(trace.Saturation + r.config.Dynamics.ConcernGrowthGain*lowYield)
-	r.state.Perception[browserPerceptionSurface] = trace
+	return false
 }
 
 func (r *Runtime) shouldPersistNewConcern(commit CognitiveCommit, appraisal CandidateAppraisal, activation float64) bool {
@@ -1176,9 +1512,8 @@ func (r *Runtime) shouldPersistNewConcern(commit CognitiveCommit, appraisal Cand
 		if candidate, exists := r.activeCandidates[appraisal.CandidateID]; exists &&
 			candidate.Kind == "endogenous_change" && commit.Action.Kind == "none" {
 			// Exploration pressure is a drive, not a thing Alice must keep thinking
-			// about. A non-enacted orienting surface has completed one value filter
-			// and becomes temporarily familiar; concrete self-generated wishes can
-			// still form from Narrative, Reality, relationship and other candidates.
+			// about. Concrete continuing orientation is now represented uniformly as
+			// a value_signal bound to a real affordance.
 			return false
 		}
 		if candidate, exists := r.activeCandidates[appraisal.CandidateID]; exists &&
@@ -1244,8 +1579,12 @@ func (r *Runtime) validateNewConcernClosureCondition(commit CognitiveCommit, eff
 		return "", nil
 	}
 	condition := strings.TrimSpace(commit.NewConcernClosureCondition)
+	// An absent boundary means this appraisal has not yet earned durable Concern
+	// identity. The caller still accepts the thought and any bounded action; it
+	// simply keeps this episode momentary rather than asking a validation retry to
+	// restate the same meaning in more ceremonial form.
 	if condition == "" {
-		return "", errors.New("a new held concern needs one concise reality condition that would close its whole self-owned difference")
+		return "", nil
 	}
 	if len([]rune(condition)) > 512 {
 		return "", errors.New("new concern closure condition is too large")
@@ -1455,10 +1794,10 @@ func (r *Runtime) validateConcernContext(commit CognitiveCommit, effectiveConcer
 	return withinID, nil
 }
 
-// validateConcernContribution keeps a concrete child episode distinct while
-// allowing Alice to decide, after Reality is available, that this actual
-// Experience matters to one broader Concern she already owns. Prediction,
-// intention, or task labels alone cannot manufacture contribution.
+// validateConcernContribution keeps each real episode distinct while allowing
+// Alice to decide that an independently observed fact or an actual child
+// Experience advances one Concern she already owns. Prediction, intention, or
+// semantic similarity alone cannot manufacture contribution.
 func (r *Runtime) validateConcernContribution(commit CognitiveCommit, effectiveConcernID string) (string, error) {
 	concernID := strings.TrimSpace(commit.ContributesToConcernID)
 	if concernID == "" {
@@ -1470,6 +1809,24 @@ func (r *Runtime) validateConcernContribution(commit CognitiveCommit, effectiveC
 		// self-loop or spending another cognition on a losslessly removable
 		// redundancy.  A genuinely different parent remains Alice's explicit choice.
 		return "", nil
+	}
+	candidate, exists := r.activeCandidates[commit.FocusID]
+	if !exists {
+		return "", fmt.Errorf("focus %q is not an active candidate", commit.FocusID)
+	}
+	concern := r.concernByID(concernID)
+	if concern == nil || concern.Resolution != "hold" || concern.Ownership < r.config.Dynamics.AttentionThreshold {
+		return "", fmt.Errorf("contributed concern %q is not a currently held self-owned concern", concernID)
+	}
+	if concern.OriginKind == "birth_orientation" {
+		return "", errors.New("concrete episodes shape Narrative and Experience without repeatedly reactivating the stable birth orientation")
+	}
+	if independentFactKind(candidate.Kind) {
+		// An independently observed Reality keeps its own causal identity. Alice may
+		// nevertheless recognize that the fact changes whether an already-owned
+		// Concern's stable closure condition is satisfied. The kernel only wakes the
+		// target; it does not edit or settle that Concern here.
+		return concernID, nil
 	}
 	if len(commit.ExperienceUpdates) != 1 {
 		// Before Reality there is only a prediction of relevance.  The actual
@@ -1484,13 +1841,6 @@ func (r *Runtime) validateConcernContribution(commit CognitiveCommit, effectiveC
 	}
 	if concernID != child.WithinConcernID {
 		return "", fmt.Errorf("contributed concern %q is not the focused concern's self-endorsed parent %q", concernID, child.WithinConcernID)
-	}
-	concern := r.concernByID(concernID)
-	if concern == nil || concern.Resolution != "hold" || concern.Ownership < r.config.Dynamics.AttentionThreshold {
-		return "", fmt.Errorf("contributed concern %q is not a currently held self-owned concern", concernID)
-	}
-	if concern.OriginKind == "birth_orientation" {
-		return "", errors.New("concrete episodes shape Narrative and Experience without repeatedly reactivating the stable birth orientation")
 	}
 	return concernID, nil
 }
@@ -1605,6 +1955,17 @@ func (r *Runtime) validateResourceChoice(choice CognitiveResourceChoice, focusID
 	if err := validateProfile(r.config.CognitiveResource, profile); err != nil {
 		return CognitiveProfile{}, err
 	}
+	if r.state.Stage >= 10 {
+		if r.state.Lease != nil && r.state.Lease.ProfileSource == "next" && choice.Apply != "keep" {
+			return CognitiveProfile{}, errors.New("stage-ten action assistance is one-use and returns to the main profile after this cognition")
+		}
+		if choice.Apply == "next" && profile != (CognitiveProfile{Model: "sol", ReasoningEffort: "low"}) {
+			return CognitiveProfile{}, errors.New("stage-ten serial assistance uses sol/low for one bounded body action")
+		}
+		if choice.Apply == "default" && profile != r.config.CognitiveResource.InitialDefaultProfile {
+			return CognitiveProfile{}, errors.New("this generation keeps its selected main profile; use next sol/low for bounded action assistance")
+		}
+	}
 	if choice.Apply == "default" && r.state.Body.CognitiveResourceBand == "open" &&
 		cognitiveProfileRank(profile) < cognitiveProfileRank(r.config.CognitiveResource.InitialDefaultProfile) {
 		return CognitiveProfile{}, errors.New("cognitive resources are open; keep the capability-first birth baseline as the persistent default and use next for one bounded lower-cost cognition")
@@ -1622,6 +1983,9 @@ func (r *Runtime) validateResourceChoice(choice CognitiveResourceChoice, focusID
 		// continuation.
 		if candidate.Kind == "cognition_continuation" && actionKind == "none" {
 			return CognitiveProfile{}, errors.New("a thought-only serial continuation cannot continue again without new reality")
+		}
+		if r.state.Stage >= 10 && r.focusConcernID(focusID) == "" {
+			return CognitiveProfile{}, errors.New("stage-ten action assistance requires an already owned concern and fixed action purpose")
 		}
 	}
 	return profile, nil
@@ -1730,7 +2094,7 @@ func (r *Runtime) pruneInactiveConcerns() {
 			continue
 		}
 		if concernOwnsExplorationDrive(concern, r.state.Commitments, r.state.Mentor, r.config.Dynamics.AttentionThreshold) &&
-			r.state.ExplorationPressure >= r.config.Dynamics.AttentionThreshold {
+			lifeValuePressure(r.state.ValueField).Exploration >= r.config.Dynamics.AttentionThreshold {
 			kept = append(kept, concern)
 			continue
 		}
@@ -1770,7 +2134,7 @@ func (r *Runtime) pruneInactiveConcerns() {
 // to keep the exploration thread salient and prevent a generic drive from
 // repeatedly borrowing an already-established mentor relationship.
 func (r *Runtime) explorationHasMatureDrive(focusID string) bool {
-	if r.state.Stage < 5 || r.state.ExplorationPressure < r.config.Dynamics.AttentionThreshold {
+	if r.state.Stage < 5 || lifeValuePressure(r.state.ValueField).Exploration < r.config.Dynamics.AttentionThreshold {
 		return false
 	}
 	candidate, exists := r.activeCandidates[focusID]
@@ -1797,7 +2161,7 @@ func (r *Runtime) explorationHasMatureDrive(focusID string) bool {
 	if concern == nil || concernAwaitsMentorReply(concern.ID, r.state.Commitments, r.state.Mentor) {
 		return false
 	}
-	return r.state.ExplorationPressure >= explorationActionThreshold(r.config.Dynamics.AttentionThreshold) &&
+	return lifeValuePressure(r.state.ValueField).Exploration >= explorationActionThreshold(r.config.Dynamics.AttentionThreshold) &&
 		concernOwnsExplorationDrive(*concern, r.state.Commitments, r.state.Mentor, r.config.Dynamics.AttentionThreshold)
 }
 
@@ -1814,6 +2178,9 @@ func validateAppraisal(appraisal CandidateAppraisal) error {
 	if appraisal.Value < -1 || appraisal.Value > 1 {
 		return fmt.Errorf("candidate %q has value outside -1..1", appraisal.CandidateID)
 	}
+	if err := validateLifeValueVector(appraisal.Values, true); err != nil {
+		return fmt.Errorf("candidate %q has invalid life values: %w", appraisal.CandidateID, err)
+	}
 	switch appraisal.Resolution {
 	case "hold", "reframed", "relieved", "resolved", "released":
 		return nil
@@ -1826,12 +2193,15 @@ func validateCognitiveAction(action CognitiveAction, stage int) error {
 	switch action.Kind {
 	case "none":
 		return nil
-	case "body_shell":
-		if strings.TrimSpace(action.Command) == "" {
-			return errors.New("body_shell action requires a command")
+	case "organ_action":
+		if strings.TrimSpace(action.OrganID) == "" || strings.TrimSpace(action.Operation) == "" {
+			return errors.New("organ_action requires organ_id and operation")
 		}
-		if !shellActionContactsReality(action.Command) {
-			return errors.New("body_shell action must read or change a body or world fact; express waiting or deliberate non-action with none")
+		if strings.TrimSpace(action.Input) == "" {
+			return errors.New("organ_action requires an explicit input; use {} when the operation takes no arguments")
+		}
+		if action.OrganID == "system" && action.Operation == "exec" && !shellActionContactsReality(action.Input) {
+			return errors.New("system exec must read or change a body or world fact; express waiting or deliberate non-action with none")
 		}
 	case "mentor_send":
 		if strings.TrimSpace(action.Text) == "" {
@@ -1851,12 +2221,36 @@ func validateCognitiveAction(action CognitiveAction, stage int) error {
 	return nil
 }
 
+// validateOrganOperation keeps the host's passive protocol vocabulary out of
+// Alice's intentional action payload. Each organ is the factual owner of its
+// callable surface; cognition chooses from that published catalog rather than
+// inferring an implementation name from capabilities or prose.
+func (r *Runtime) validateOrganOperation(action CognitiveAction) error {
+	if action.Kind != "organ_action" {
+		return nil
+	}
+	if r.organs == nil {
+		return errors.New("organ host is unavailable")
+	}
+	description, exists := r.organs.Description(action.OrganID)
+	if !exists || !stringSliceContains(description.Capabilities, "perform") {
+		return fmt.Errorf("organ %q is unavailable for action", action.OrganID)
+	}
+	if !stringSliceContains(description.Operations, action.Operation) {
+		return fmt.Errorf("organ %q operation %q is not in its published operations; choose one of: %s", action.OrganID, action.Operation, strings.Join(description.Operations, ", "))
+	}
+	return nil
+}
+
 func cognitiveActionContactsReality(action CognitiveAction) bool {
 	switch action.Kind {
 	case "mentor_send":
 		return strings.TrimSpace(action.Text) != ""
-	case "body_shell":
-		return shellActionContactsReality(action.Command)
+	case "organ_action":
+		if action.OrganID == "system" && action.Operation == "exec" {
+			return shellActionContactsReality(action.Input)
+		}
+		return strings.TrimSpace(action.OrganID) != "" && strings.TrimSpace(action.Operation) != ""
 	default:
 		return false
 	}
@@ -2016,17 +2410,29 @@ func (r *Runtime) startStage4Action(ctx context.Context, leaseID string, action 
 			}
 		}
 		return r.persist()
-	case "body_shell":
+	case "organ_action":
 		if r.state.PendingAction != nil {
 			return errors.New("another body action is already in progress")
+		}
+		if r.organs == nil {
+			return errors.New("organ host is unavailable")
+		}
+		description, exists := r.organs.Description(action.OrganID)
+		if !exists || !stringSliceContains(description.Capabilities, "perform") {
+			return fmt.Errorf("organ %q is unavailable for action", action.OrganID)
+		}
+		if !stringSliceContains(description.Operations, action.Operation) {
+			return fmt.Errorf("organ %q does not publish operation %q", action.OrganID, action.Operation)
 		}
 		actionID := "action-" + randomID()
 		r.state.PendingAction = &ActionState{
 			ID:           actionID,
 			LeaseID:      leaseID,
 			CommitmentID: action.CommitmentID,
-			Kind:         "body_shell",
-			Request:      action.Command,
+			Kind:         "organ_action",
+			OrganID:      action.OrganID,
+			Operation:    action.Operation,
+			Request:      action.Input,
 			Status:       "started",
 			StartedAt:    nowUTC(),
 		}
@@ -2034,20 +2440,29 @@ func (r *Runtime) startStage4Action(ctx context.Context, leaseID string, action 
 			commitment.ActionID = actionID
 			commitment.Status = "acting"
 		}
-		if err := r.journal("action_started", actionID, map[string]any{"kind": "body_shell", "command": action.Command, "timeout_seconds": 120, "commitment_id": action.CommitmentID}); err != nil {
+		if err := r.journal("action_started", actionID, map[string]any{"kind": "organ_action", "organ_id": action.OrganID, "operation": action.Operation, "input": action.Input, "timeout_seconds": 120, "commitment_id": action.CommitmentID}); err != nil {
 			return err
 		}
 		if err := r.persist(); err != nil {
 			return err
 		}
 		go func() {
-			result := ActionResultNotice{
-				ActionID: actionID,
-				Result: redactRuntimeSecret(
-					executeShell(ctx, action.Command, 120*time.Second),
-					r.config.ModelGateway.APIKey,
-				),
+			callCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+			defer cancel()
+			performed, err := r.organs.Perform(callCtx, action.OrganID, organ.ActionRequest{
+				ActionID: actionID, Operation: action.Operation, Input: action.Input, TimeoutMilliseconds: 120_000,
+			})
+			result := ActionResultNotice{ActionID: actionID, Status: "failed"}
+			if err != nil {
+				if errors.Is(callCtx.Err(), context.DeadlineExceeded) || errors.Is(callCtx.Err(), context.Canceled) {
+					result.Status = "unknown"
+				}
+				result.Result = fmt.Sprintf(`{"error":%q}`, truncate(err.Error(), 2048))
+			} else {
+				result.Status = performed.Status
+				result.Result = performed.Output
 			}
+			result.Result = redactRuntimeSecret(result.Result, r.config.ModelGateway.APIKey)
 			select {
 			case r.actionResults <- result:
 			case <-ctx.Done():
@@ -2064,19 +2479,32 @@ func (r *Runtime) handleStage4ActionResult(ctx context.Context, result ActionRes
 		return r.journal("late_action_result", result.ActionID, map[string]any{"result": truncate(result.Result, 2048)})
 	}
 	completed := *r.state.PendingAction
-	completed.Status = "completed"
+	completed.Status = result.Status
+	if completed.Status != "completed" && completed.Status != "failed" && completed.Status != "unknown" {
+		completed.Status = "unknown"
+	}
 	completed.EndedAt = nowUTC()
 	completed.Result = truncate(result.Result, 64*1024)
-	if err := r.journal("action_completed", completed.ID, map[string]any{"kind": completed.Kind, "result": completed.Result}); err != nil {
+	if err := r.journal("action_"+completed.Status, completed.ID, map[string]any{"kind": completed.Kind, "organ_id": completed.OrganID, "operation": completed.Operation, "result": completed.Result}); err != nil {
 		return err
 	}
 	payload, _ := json.Marshal(completed)
-	if err := r.addEvent("action_result", "observed", "一项身体行动已经完成，并返回了真实结果。", completed.ID, payload, true); err != nil {
+	summary := "一项身体行动已经完成，并返回了真实结果。"
+	if completed.Status == "failed" {
+		summary = "一项身体行动已结束，现实结果表明操作失败。"
+	} else if completed.Status == "unknown" {
+		summary = "一项身体行动被中断；现实是否已经部分改变尚不确定。"
+	}
+	if err := r.addEvent("action_result", "observed", summary, completed.ID, payload, true); err != nil {
 		return err
 	}
 	realityEventID := fmt.Sprintf("event-%012d", r.state.EventSeq)
 	if commitment := r.commitmentByID(completed.CommitmentID); commitment != nil {
-		commitment.Status = "reality_available"
+		if completed.Status == "unknown" {
+			commitment.Status = "reality_unknown"
+		} else {
+			commitment.Status = "reality_available"
+		}
 		commitment.RealityEventID = realityEventID
 		if err := r.bindNextProfileToReality(commitment.ConcernID, realityEventID); err != nil {
 			return err
@@ -2108,4 +2536,13 @@ func maxFloat(left, right float64) float64 {
 		return left
 	}
 	return right
+}
+
+func stringSliceContains(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
 }

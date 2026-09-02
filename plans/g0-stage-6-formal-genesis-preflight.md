@@ -128,7 +128,7 @@ alice 仍然通过现有 `body_shell` 选择这个命令，因此浏览器操作
 
 正式运行直接使用通用 Playwright MCP 操作 X，不接 X API，不建设 X 专用动作、数量限制或平台风险控制层。浏览、关注、资料修改和发帖仍由 alice 逐次自主形成 Action Commitment；验证码、重新登录、平台提示和操作失败作为真实 Reality Event 返回。
 
-X 的公开用户名可以进入 Birth Manifest；手机号和密码只保存在受保护的上层 `xconfig.yaml`，按照运行凭据处理，不写入 Git、Birth Manifest、思想日志或代际档案。若登录会话失效，正式部署可以把必要凭据放入实例之外的临时运行位置供 alice 的 root 身体使用，停止和 reset 时清理。
+X 的公开用户名可以进入 Birth Manifest；手机号和密码只保存在受保护的上层 `xconfigs/hominal/xconfig.yaml`，按照运行凭据处理，不写入 Git、Birth Manifest、思想日志或代际档案。若登录会话失效，正式部署可以把必要凭据放入实例之外的临时运行位置供 alice 的 root 身体使用，停止和 reset 时清理。
 
 ### 5. 一小时边界、归档和出生基线成为同一条 Lab 操作
 
@@ -272,7 +272,7 @@ plans/README.md              登记本阶段计划
 
 ## 十一、实施与实机验收结果
 
-阶段六已经完成。上层受保护配置、Birth Manifest、导师协议和全部项目文档中的 X 公开用户名统一为 `@hominal_cc`；登录凭据仍只存在于权限为 `0600` 的上层 `xconfig.yaml`，没有进入仓库、出生文件或代际日志。
+阶段六已经完成。上层受保护配置、Birth Manifest、导师协议和全部项目文档中的 X 公开用户名统一为 `@hominal_cc`；登录凭据仍只存在于权限为 `0600` 的上层 `xconfigs/hominal/xconfig.yaml`，没有进入仓库、出生文件或代际日志。
 
 Genesis Lab 已建立唯一账号出生基线 `/Users/zhyuzh/HominalGenesisLab/baselines/agent`。基线包含 Chrome 与微信 profile，共 1355 个文件通过 SHA-256 复核。基线建立、重启和两次代后恢复均成功；每次恢复后 LightDM、Chrome CDP、Playwright MCP 与微信均正常，X 页面 DOM 同时显示首页、账户入口和 `hominal_cc`。
 

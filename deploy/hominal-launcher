@@ -13,6 +13,7 @@ instance_id=$(tr -d '\r\n' <"$active_file")
 instance_root=$agent_mount/lives/$instance_id
 executable=$instance_root/body/bin/hominald
 test -x "$executable"
+test -d "$instance_root/body/organs"
 
 # /life is a body surface, so ordinary directory tools must observe it as a
 # directory.  The per-generation storage location is an implementation detail;
@@ -38,4 +39,9 @@ export HOMINAL_INSTANCE_ROOT="$instance_root"
 export HOMINAL_RESOURCE_LEDGER="$agent_mount/state/cognitive-usage.jsonl"
 export PATH="$instance_root/body/bin:$PATH"
 cd "$instance_root"
+
+# hominald owns the lifecycle of every Manifest-declared organ. The launcher
+# prepares only the common runtime surface and never starts a concrete adapter.
+install -d -m 0755 /run/hominal/organs "$instance_root/logs"
+
 exec "$executable"

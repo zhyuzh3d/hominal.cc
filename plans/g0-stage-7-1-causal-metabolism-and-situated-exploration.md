@@ -30,7 +30,7 @@
 
 ## 二、API 故障的定位
 
-本代出现三次明确的 HTTP 失败：一次 `429 Too Many Requests`，正文为 `Upstream rate limit exceeded`；随后两次 `502 Bad Gateway`，正文为 `Upstream service temporarily unavailable`。运行时使用的 Responses 入口来自 `xconfig.yaml` 的 `https://ai.ai-mesh.cn`。
+本代出现三次明确的 HTTP 失败：一次 `429 Too Many Requests`，正文为 `Upstream rate limit exceeded`；随后两次 `502 Bad Gateway`，正文为 `Upstream service temporarily unavailable`。运行时使用的 Responses 入口来自 `xconfigs/hominal/xconfig.yaml`。
 
 现有证据支持以下判断：
 

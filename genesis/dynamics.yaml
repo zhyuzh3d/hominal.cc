@@ -17,16 +17,28 @@ concern:
 
 attention:
   affect_weight: 0.30
-  exploration_weight: 0.20
+  value_weight: 0.22
   novelty_weight: 0.15
   resource_cost_weight: 0.25
   trigger_threshold: 0.45
   revisit_seconds: 10
+  maximum_idle_seconds: 30
+
+difference:
+  accumulation_decay_rate: 0.35
+  learning_rate: 0.12
 
 exploration:
-  idle_growth: 0.60
   unknown_growth: 0.10
   relief: 0.45
+
+value_field:
+  idle_growth: 0.18
+  activation_gain: 0.30
+  activation_return_rate: 0.08
+  satiation_gain: 0.25
+  satiation_return_rate: 0.05
+  orientation_gain: 0.03
 
 integrity:
   persistence: 0.85

@@ -85,7 +85,7 @@ def protected_config_path(root: Path) -> Path:
     override = os.environ.get("HOMINAL_PROTECTED_CONFIG")
     if override:
         return Path(override).expanduser().resolve()
-    return (root.parent / "xconfig.yaml").resolve()
+    return (root.parent / "xconfigs" / "hominal" / "xconfig.yaml").resolve()
 
 
 def load_protected_values(config_path: Path) -> list[tuple[str, bytes]]:

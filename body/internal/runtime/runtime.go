@@ -10,32 +10,41 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
+
+	"hominal.cc/hominal/body/internal/organ"
 )
 
 type Runtime struct {
-	instanceRoot     string
-	config           Config
-	store            *Store
-	cognizer         Cognizer
-	state            State
-	commands         chan RuntimeCommand
-	notices          chan WorkerNotice
-	results          chan CognitiveResult
-	actionResults    chan ActionResultNotice
-	workerCancel     context.CancelFunc
-	lastSlowScan     time.Time
-	activeCandidates map[string]Event
+	instanceRoot       string
+	config             Config
+	store              *Store
+	organs             *organ.Registry
+	cognizer           Cognizer
+	state              State
+	commands           chan RuntimeCommand
+	notices            chan WorkerNotice
+	results            chan CognitiveResult
+	actionResults      chan ActionResultNotice
+	workerCancel       context.CancelFunc
+	lastSlowScan       time.Time
+	lastPerceptualScan time.Time
+	organCursor        int
+	activeCandidates   map[string]Event
 }
 
-const cognitionRetryDelay = time.Minute
+const (
+	cognitionRetryDelay       = 10 * time.Second
+	maximumGenerationLifetime = 2 * time.Hour
+)
 
 func New(instanceRoot, instanceID string, config Config, cognizer Cognizer) (*Runtime, error) {
 	if instanceID == "" {
 		return nil, errors.New("instance id is required")
 	}
-	if config.Stage != 3 && config.Stage != 4 && config.Stage != 5 && config.Stage != 8 && config.Stage != 9 {
+	if config.Stage != 3 && config.Stage != 4 && config.Stage != 5 && config.Stage != 8 && config.Stage != 9 && config.Stage != 10 {
 		return nil, fmt.Errorf("unsupported runtime stage %d", config.Stage)
 	}
 	if config.GenerationKind == "" {
@@ -44,8 +53,8 @@ func New(instanceRoot, instanceID string, config Config, cognizer Cognizer) (*Ru
 	switch config.GenerationKind {
 	case "engineering":
 	case "rehearsal", "formal":
-		if config.Stage != 5 && config.Stage != 8 && config.Stage != 9 {
-			return nil, errors.New("rehearsal and formal generations require the stage-five, stage-eight, or stage-nine cognition core")
+		if config.Stage != 5 && config.Stage != 8 && config.Stage != 9 && config.Stage != 10 {
+			return nil, errors.New("rehearsal and formal generations require the stage-five, stage-eight, stage-nine, or stage-ten cognition core")
 		}
 		if config.GenerationWindowSeconds <= 0 {
 			return nil, errors.New("generation window is required")
@@ -66,11 +75,39 @@ func New(instanceRoot, instanceID string, config Config, cognizer Cognizer) (*Ru
 		return nil, err
 	}
 	if config.Stage >= 4 {
+		if config.Dynamics.DifferenceDecayRate <= 0 {
+			config.Dynamics.DifferenceDecayRate = 0.35
+		}
+		if config.Dynamics.DifferenceLearningRate <= 0 {
+			config.Dynamics.DifferenceLearningRate = 0.12
+		}
+		if config.Dynamics.DifferenceDecayRate > 1 || config.Dynamics.DifferenceLearningRate > 1 {
+			return nil, errors.New("difference dynamics must remain within 0..1")
+		}
 		if config.Dynamics.AttentionCandidateLimit <= 0 {
 			config.Dynamics.AttentionCandidateLimit = defaultAttentionCandidateLimit
 		}
 		if config.Dynamics.AttentionRevisitSeconds <= 0 {
 			config.Dynamics.AttentionRevisitSeconds = defaultAttentionRevisitSeconds
+		}
+		if config.Dynamics.AttentionMaximumIdleSeconds <= 0 {
+			config.Dynamics.AttentionMaximumIdleSeconds = 30
+		}
+		if err := validateLifeValueVector(config.Seed.ValueOrientation, false); err != nil {
+			return nil, fmt.Errorf("invalid genesis value orientation: %w", err)
+		}
+		valueDynamics := []float64{
+			config.Dynamics.AttentionValueWeight,
+			config.Dynamics.ValueActivationGain,
+			config.Dynamics.ValueActivationReturnRate,
+			config.Dynamics.ValueSatiationGain,
+			config.Dynamics.ValueSatiationReturnRate,
+			config.Dynamics.ValueOrientationGain,
+		}
+		for _, value := range valueDynamics {
+			if value < 0 || value > 1 {
+				return nil, errors.New("life value dynamics must remain within 0..1")
+			}
 		}
 	}
 	if config.Stage >= 5 {
@@ -93,10 +130,18 @@ func New(instanceRoot, instanceID string, config Config, cognizer Cognizer) (*Ru
 	if err != nil {
 		return nil, err
 	}
+	organRegistry, err := organ.Load(instanceRoot)
+	if err != nil {
+		return nil, err
+	}
+	organRegistry.SetEnvironment(map[string]string{
+		"HOMINAL_NETWORK_PROBE_URL": config.ModelGateway.BaseURL,
+	})
 	runtime := &Runtime{
 		instanceRoot:     instanceRoot,
 		config:           config,
 		store:            store,
+		organs:           organRegistry,
 		cognizer:         cognizer,
 		commands:         make(chan RuntimeCommand, 16),
 		notices:          make(chan WorkerNotice),
@@ -126,7 +171,14 @@ func New(instanceRoot, instanceID string, config Config, cognizer Cognizer) (*Ru
 		if config.Stage >= 4 {
 			runtime.state.AffectiveState.Control = 0.5
 			runtime.state.AffectiveState.Certainty = 0.5
-			runtime.state.ExplorationPressure = clamp01(0.10 + 0.20*config.Seed.ExplorationBias)
+			runtime.state.ValueField = LifeValueField{
+				Orientation: config.Seed.ValueOrientation,
+				Activation: mapLifeValueVector(config.Seed.ValueOrientation, func(orientation float64) float64 {
+					return clamp01(0.10 + 0.20*orientation)
+				}),
+				UpdatedAt: nowUTC(),
+			}
+			runtime.state.DifferenceField = make(map[string]DifferenceTrace)
 		}
 	} else {
 		if loaded.InstanceID != instanceID {
@@ -142,6 +194,13 @@ func New(instanceRoot, instanceID string, config Config, cognizer Cognizer) (*Ru
 			return nil, fmt.Errorf("state generation kind %q does not match runtime kind %q", loaded.GenerationKind, config.GenerationKind)
 		}
 		runtime.state = *loaded
+		if config.Stage >= 4 && lifeValueVectorEmpty(runtime.state.ValueField.Orientation) {
+			runtime.state.ValueField.Orientation = config.Seed.ValueOrientation
+			runtime.state.ValueField.UpdatedAt = nowUTC()
+		}
+		if config.Stage >= 4 && runtime.state.DifferenceField == nil {
+			runtime.state.DifferenceField = make(map[string]DifferenceTrace)
+		}
 		if runtime.state.Mentor.Received == nil {
 			runtime.state.Mentor.Received = make(map[string]uint64)
 		}
@@ -177,6 +236,11 @@ func (r *Runtime) Run(ctx context.Context) error {
 	if r.cognizer == nil {
 		return errors.New("cognizer is required")
 	}
+	if err := r.organs.Start(ctx); err != nil {
+		r.organs.Stop()
+		return err
+	}
+	defer r.organs.Stop()
 	if err := r.recoverInterrupted(); err != nil {
 		return err
 	}
@@ -317,7 +381,7 @@ func (r *Runtime) initialSnapshot() error {
 			return err
 		}
 	}
-	current := collectSnapshot(r.config, r.state, true)
+	current := collectSnapshot(r.config, r.state, true, r.organs)
 	initial := r.state.Body.ObservedAt == ""
 	differences := bodyDifferences(r.state.Body, current, initial)
 	r.state.Body = current
@@ -359,7 +423,7 @@ func (r *Runtime) pulse(ctx context.Context) error {
 	r.state.LastPulseAt = nowUTC()
 	r.pruneUsage()
 	slow := r.lastSlowScan.IsZero() || time.Since(r.lastSlowScan) >= time.Duration(r.config.Pulse.SlowScanSeconds)*time.Second
-	current := collectSnapshot(r.config, r.state, slow)
+	current := collectSnapshot(r.config, r.state, slow, r.organs)
 	if !slow {
 		current = mergeFastSnapshot(r.state.Body, current)
 	} else {
@@ -378,17 +442,21 @@ func (r *Runtime) pulse(ctx context.Context) error {
 			return err
 		}
 	}
-	pendingPerception := len(r.state.Perception[browserPerceptionSurface].Pending) > 0
-	if (slow || pendingPerception) && r.state.Stage >= 8 &&
-		r.state.ExplorationPressure >= r.config.Dynamics.AttentionThreshold &&
-		!r.attentionCandidateActive() && !r.explorationCandidateActive() &&
-		r.state.Body.ChromeAvailable && r.state.Body.PlaywrightReady {
+	pendingSurface, pendingPerception := r.pendingPerceptionSurface()
+	explorationOrientation := lifeValuePressure(r.state.ValueField).Exploration >= r.config.Dynamics.AttentionThreshold &&
+		explorationDominatesValuePressure(r.state.ValueField) && !r.explorationCandidateActive()
+	idleOrientation := r.activePerceptionDue(time.Now().UTC())
+	if r.state.Stage >= 8 && !r.attentionCandidateActive() {
 		if pendingPerception {
-			if err := r.emitBrowserPerception(); err != nil {
+			if err := r.emitPerception(pendingSurface); err != nil {
 				return err
 			}
-		} else if err := r.observeBrowserPerception(); err != nil {
-			return err
+		} else if (idleOrientation || (slow && explorationOrientation)) && r.passivePerceptionAllowed() {
+			if organID := r.passiveObservableOrgan(); organID != "" {
+				if err := r.observeOrganPerception(organID); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	if r.config.Stage >= 4 {
@@ -420,61 +488,108 @@ func (r *Runtime) pulse(ctx context.Context) error {
 	return nil
 }
 
-func (r *Runtime) observeBrowserPerception() error {
-	observation, err := collectBrowserPerception(r.instanceRoot)
+// activePerceptionDue keeps an awake digital body from becoming inert merely
+// because every abstract affordance was recently considered. The kernel may
+// move an existing sense organ after the common idle boundary; only a concrete
+// novel object can then enter cognition, and Alice still decides its meaning.
+func (r *Runtime) activePerceptionDue(now time.Time) bool {
+	if r.state.Stage < 10 || !r.passivePerceptionAllowed() || r.attentionCandidateActive() {
+		return false
+	}
+	seconds := r.config.Dynamics.AttentionMaximumIdleSeconds
+	if seconds <= 0 {
+		seconds = 30
+	}
+	minimum := time.Duration(maxInt(r.config.Pulse.IntervalSeconds*2, 10)) * time.Second
+	if !r.lastPerceptualScan.IsZero() && now.Sub(r.lastPerceptualScan) < minimum {
+		return false
+	}
+	return attentionDue(r.state.LastAttentionAt, now, seconds)
+}
+
+// Passive sensing is allowed only while the single conscious/action thread is
+// genuinely idle. A model deciding what to do, an enacted body action, or
+// Reality waiting to be assimilated all retain the current external scene.
+func (r *Runtime) passivePerceptionAllowed() bool {
+	return r.state.Lease == nil && r.state.PendingAction == nil && !r.hasUnassimilatedCommitment()
+}
+
+func (r *Runtime) pendingPerceptionSurface() (string, bool) {
+	surfaces := make([]string, 0, len(r.state.Perception))
+	for surface, trace := range r.state.Perception {
+		if len(trace.Pending) > 0 {
+			surfaces = append(surfaces, surface)
+		}
+	}
+	sort.Strings(surfaces)
+	if len(surfaces) == 0 {
+		return "", false
+	}
+	return surfaces[0], true
+}
+
+func (r *Runtime) passiveObservableOrgan() string {
+	ids := r.organs.ObservableIDs()
+	for offset := 0; offset < len(ids); offset++ {
+		index := (r.organCursor + offset) % len(ids)
+		id := ids[index]
+		body, exists := r.state.Body.Organs[id]
+		if exists && body.Accepting && (body.Status == "ready" || body.Status == "recovering") {
+			r.organCursor = (index + 1) % len(ids)
+			return id
+		}
+	}
+	return ""
+}
+
+func (r *Runtime) readOrganObservation(organID string) (perceptualObservation, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 9*time.Second)
+	defer cancel()
+	value, err := r.organs.Observe(ctx, organID)
 	if err != nil {
-		// Perception is an available bodily route, not a reason to stop life when
-		// one scan cannot return content. The ordinary body probes will expose a
-		// persistent browser or Playwright availability change.
+		return perceptualObservation{}, err
+	}
+	return observationFromOrgan(value), nil
+}
+
+func (r *Runtime) orientOrgan(organID string) (organ.Orientation, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 9*time.Second)
+	defer cancel()
+	return r.organs.Orient(ctx, organID)
+}
+
+func (r *Runtime) observeOrganPerception(organID string) error {
+	r.lastPerceptualScan = time.Now().UTC()
+	observation, err := r.readOrganObservation(organID)
+	if err != nil {
+		// One failed sensory sample cannot stop the life core. A persistent organ
+		// fault becomes visible through the next slow body snapshot.
 		return nil
 	}
-	trace := queuePerceptualNovelty(r.state.Perception[observation.Surface], observation)
-	// A nested surface that has already exhausted its realised yield has lost
-	// the right to keep reopening itself merely because an endless feed can
-	// supply another unseen fragment.  The object-level judgement remains
-	// Alice's; the body converts the accumulated scene-level result into an
-	// immediate retreat to the prior concrete surface.  Root surfaces have no
-	// return path and retain the slower resampling behaviour below.
-	if perceptualReturnDue(trace) {
-		trace = discardPendingPerception(trace)
-		returned, renewErr := renewBrowserPerception(r.instanceRoot, trace.ReturnPath)
-		if renewErr == nil && returned {
-			if err := r.journal("perceptual_orientation", observation.Surface, map[string]any{
-				"surface": observation.Surface,
-				"motion":  "return to prior surface after realised yield exhaustion",
-			}); err != nil {
-				return err
-			}
-			if renewed, err := collectBrowserPerception(r.instanceRoot); err == nil {
-				trace = queuePerceptualNovelty(trace, renewed)
-				observation = renewed
-			}
-		}
-	}
+	surface := perceptualSurfaceKey(observation.OrganID, observation.SurfaceID)
+	trace := queuePerceptualNovelty(r.state.Perception[surface], observation)
 	if len(trace.Pending) == 0 {
-		// A stable visual field activates one small orienting movement before the
-		// next comparison. This is the digital analogue of shifting gaze: it only
-		// changes the local viewport and cannot publish, follow, message or choose
-		// a semantic object for Alice.
-		if err := orientBrowserPerception(r.instanceRoot); err != nil {
-			return nil
-		}
-		if err := r.journal("perceptual_orientation", observation.Surface, map[string]any{
-			"surface": observation.Surface,
-			"motion":  "one bounded viewport forward",
-		}); err != nil {
-			return err
-		}
-		observation, err = collectBrowserPerception(r.instanceRoot)
+		orientation, err := r.orientOrgan(organID)
 		if err != nil {
 			return nil
 		}
+		if err := r.journal("perceptual_orientation", surface, map[string]any{
+			"organ_id": organID, "surface_id": observation.SurfaceID,
+			"status": orientation.Status, "detail": truncate(orientation.Detail, 1200),
+		}); err != nil {
+			return err
+		}
+		observation, err = r.readOrganObservation(organID)
+		if err != nil {
+			return nil
+		}
+		surface = perceptualSurfaceKey(observation.OrganID, observation.SurfaceID)
 		trace = queuePerceptualNovelty(trace, observation)
 	}
 	if r.state.Perception == nil {
 		r.state.Perception = make(map[string]PerceptualTrace)
 	}
-	r.state.Perception[observation.Surface] = trace
+	r.state.Perception[surface] = trace
 	if len(trace.Pending) == 0 {
 		now := time.Now().UTC()
 		if !perceptualResampleDue(trace, now, r.perceptualReorientationSeconds()) {
@@ -482,72 +597,46 @@ func (r *Runtime) observeBrowserPerception() error {
 		}
 		contextKey := perceptualContextKey(trace.Context)
 		if trace.ExhaustedContext == contextKey {
-			// A persistent drive first lets its sensory organ renew the same
-			// external surface. This can reveal genuinely new content without
-			// making the model invent an object or letting the kernel choose a new
-			// site, topic or social action. Stable, already-seen content remains
-			// suppressed by the same semantic novelty gate.
-			returned, renewErr := renewBrowserPerception(r.instanceRoot, trace.ReturnPath)
-			if renewErr == nil {
-				motion := "renew current surface after quiet exhaustion"
-				if returned {
-					motion = "return to prior surface after quiet exhaustion"
-				}
-				if err := r.journal("perceptual_orientation", observation.Surface, map[string]any{
-					"surface": observation.Surface,
-					"motion":  motion,
+			if orientation, renewErr := r.orientOrgan(organID); renewErr == nil {
+				if err := r.journal("perceptual_orientation", surface, map[string]any{
+					"organ_id": organID, "surface_id": observation.SurfaceID,
+					"status": orientation.Status, "detail": truncate(orientation.Detail, 1200),
 				}); err != nil {
 					return err
 				}
-				if renewed, err := collectBrowserPerception(r.instanceRoot); err == nil {
+				if renewed, err := r.readOrganObservation(organID); err == nil {
 					trace = queuePerceptualNovelty(trace, renewed)
 					if len(trace.Pending) > 0 {
 						trace = reopenPerceptualSampling(trace)
 					}
-					r.state.Perception[renewed.Surface] = trace
+					surface = perceptualSurfaceKey(renewed.OrganID, renewed.SurfaceID)
+					r.state.Perception[surface] = trace
 					if len(trace.Pending) > 0 {
-						return r.emitBrowserPerception()
+						return r.emitPerception(surface)
 					}
 				}
 			}
 		}
-		return r.recordBrowserPerceptualExhaustion(trace, "no unseen object remained after bounded sensory orientation")
+		return r.recordPerceptualExhaustion(surface, trace, "no unseen object remained after bounded sensory orientation")
 	}
-	return r.emitBrowserPerception()
+	return r.emitPerception(surface)
 }
 
-func (r *Runtime) emitBrowserPerception() error {
-	const surface = browserPerceptionSurface
+func (r *Runtime) emitPerception(surface string) error {
 	trace, exists := r.state.Perception[surface]
 	if !exists {
 		return nil
 	}
-	if trace.Saturation >= r.config.Dynamics.AttentionThreshold {
-		contextKey := perceptualContextKey(trace.Context)
-		if trace.ExhaustedContext == contextKey &&
-			perceptualSaturationDue(trace, r.config.Dynamics.AttentionThreshold, time.Now().UTC(), r.perceptualReorientationSeconds()) {
-			// The quiet interval restores one concrete sample, not another thought
-			// about the lack of a sample.  Alice still appraises the real object;
-			// the body only decides that this sensory surface may be sampled again.
-			trace = reopenPerceptualSampling(trace)
-			r.state.Perception[surface] = trace
-			return r.emitBrowserPerception()
-		}
-		if trace.ExhaustedContext != contextKey {
-			return r.recordBrowserPerceptualExhaustion(trace, "recent concrete objects produced low realised perceptual yield")
-		}
-		trace = discardPendingPerception(trace)
-		r.state.Perception[surface] = trace
-		return nil
-	}
-	trace, novelContent := takePerceptualNovelty(trace)
+	trace, object, novelContent := takePerceptualNovelty(trace)
 	r.state.Perception[surface] = trace
 	if novelContent == "" {
 		return nil
 	}
 	observedAt := nowUTC()
 	payload, _ := json.Marshal(map[string]any{
-		"surface":     surface,
+		"organ_id":    trace.OrganID,
+		"surface_id":  trace.SurfaceID,
+		"object_id":   object.ID,
 		"digest":      trace.Digest,
 		"observed_at": observedAt,
 		"content":     truncate(novelContent, perceptualContentLimit),
@@ -555,27 +644,27 @@ func (r *Runtime) emitBrowserPerception() error {
 	return r.addEvent(
 		"perceptual_change",
 		"observed",
-		"Chrome 当前页面呈现了一个此前尚未进入感知的新对象。",
-		perceptualObjectDigest(novelContent),
+		fmt.Sprintf("%s 器官的当前感官表面呈现了一个此前尚未进入注意的新对象。", trace.OrganID),
+		object.ID,
 		payload,
 		true,
 	)
 }
 
-func (r *Runtime) recordBrowserPerceptualExhaustion(trace PerceptualTrace, reason string) error {
+func (r *Runtime) recordPerceptualExhaustion(surface string, trace PerceptualTrace, reason string) error {
 	trace = discardPendingPerception(trace)
 	trace.ExhaustedContext = perceptualContextKey(trace.Context)
 	trace.ExhaustedAt = nowUTC()
 	if r.state.Perception == nil {
 		r.state.Perception = make(map[string]PerceptualTrace)
 	}
-	r.state.Perception[browserPerceptionSurface] = trace
+	r.state.Perception[surface] = trace
 	payload, _ := json.Marshal(map[string]any{
-		"surface":     browserPerceptionSurface,
+		"organ_id":    trace.OrganID,
+		"surface_id":  trace.SurfaceID,
 		"digest":      trace.Digest,
 		"observed_at": trace.ObservedAt,
 		"context":     trace.Context,
-		"saturation":  trace.Saturation,
 		"reason":      reason,
 	})
 	// Exhaustion is a sensory control fact. It never enters the attention
@@ -646,6 +735,42 @@ func (r *Runtime) handleCommand(ctx context.Context, command RuntimeCommand) err
 		}
 		command.Reply <- CommandReply{Status: 202, Body: map[string]any{"status": "observed", "seq": r.state.EventSeq}}
 		r.maybeStartCognition(ctx)
+		return nil
+	case "generation_extend":
+		if r.config.GenerationKind == "engineering" || r.state.T0 == "" || r.state.PlannedEnd == "" {
+			command.Reply <- CommandReply{Status: 409, Body: map[string]string{"error": "generation deadline is unavailable"}}
+			return nil
+		}
+		currentEnd, currentErr := time.Parse(time.RFC3339Nano, r.state.PlannedEnd)
+		requestedEnd, requestedErr := time.Parse(time.RFC3339Nano, command.Deadline.PlannedEnd)
+		t0, t0Err := time.Parse(time.RFC3339Nano, r.state.T0)
+		if currentErr != nil || requestedErr != nil || t0Err != nil {
+			command.Reply <- CommandReply{Status: 409, Body: map[string]string{"error": "generation deadline state is invalid"}}
+			return nil
+		}
+		maximumEnd := t0.Add(maximumGenerationLifetime)
+		if !requestedEnd.After(currentEnd) {
+			command.Reply <- CommandReply{Status: 409, Body: map[string]string{"error": "planned_end must extend the current deadline"}}
+			return nil
+		}
+		if requestedEnd.After(maximumEnd) {
+			command.Reply <- CommandReply{Status: 409, Body: map[string]string{"error": "planned_end exceeds the two-hour generation limit"}}
+			return nil
+		}
+		previous := r.state.PlannedEnd
+		r.state.PlannedEnd = requestedEnd.UTC().Format(time.RFC3339Nano)
+		r.state.Revision++
+		if err := r.journal("generation_deadline_extended", r.state.InstanceID, map[string]any{
+			"previous_planned_end": previous,
+			"planned_end":          r.state.PlannedEnd,
+			"maximum_planned_end":  maximumEnd.UTC().Format(time.RFC3339Nano),
+		}); err != nil {
+			return err
+		}
+		if err := r.persist(); err != nil {
+			return err
+		}
+		command.Reply <- CommandReply{Status: 200, Body: map[string]string{"status": "extended", "planned_end": r.state.PlannedEnd}}
 		return nil
 	case "mentor_outbox":
 		messages := append([]MentorMessage(nil), r.state.Mentor.Outbox...)
@@ -780,27 +905,48 @@ func (r *Runtime) handleNotice(notice WorkerNotice) error {
 			}
 		}
 	case "action_start":
-		request, ok := notice.Payload.(ShellActionRequest)
+		request, ok := notice.Payload.(OrganActionRequest)
 		if !ok || r.state.PendingAction != nil {
 			ack.Accepted = false
 			break
 		}
-		r.state.PendingAction = &ActionState{ID: request.ActionID, LeaseID: notice.LeaseID, Kind: "body_shell", Request: request.Command, Status: "started", StartedAt: nowUTC()}
-		if err := r.journal("action_started", request.ActionID, map[string]any{"kind": "body_shell", "command": request.Command, "timeout_seconds": request.TimeoutSeconds}); err != nil {
-			return err
-		}
-	case "action_result":
-		result, ok := notice.Payload.(ActionResultNotice)
-		if !ok || r.state.PendingAction == nil || r.state.PendingAction.ID != result.ActionID {
+		description, exists := r.organs.Description(request.OrganID)
+		if !exists || !stringSliceContains(description.Capabilities, "perform") ||
+			!stringSliceContains(description.Operations, request.Operation) || strings.TrimSpace(request.Input) == "" {
 			ack.Accepted = false
 			break
 		}
-		r.state.PendingAction.Status = "completed"
-		r.state.PendingAction.EndedAt = nowUTC()
-		r.state.PendingAction.Result = truncate(result.Result, 64*1024)
-		if err := r.journal("action_completed", result.ActionID, map[string]any{"kind": r.state.PendingAction.Kind, "result": r.state.PendingAction.Result}); err != nil {
+		r.state.PendingAction = &ActionState{ID: request.ActionID, LeaseID: notice.LeaseID, Kind: "organ_action", OrganID: request.OrganID, Operation: request.Operation, Request: request.Input, Status: "started", StartedAt: nowUTC()}
+		if err := r.journal("action_started", request.ActionID, map[string]any{"kind": "organ_action", "organ_id": request.OrganID, "operation": request.Operation, "input": request.Input, "timeout_seconds": request.TimeoutSeconds}); err != nil {
 			return err
 		}
+		timeout := time.Duration(request.TimeoutSeconds) * time.Second
+		if timeout <= 0 || timeout > 2*time.Minute {
+			timeout = 30 * time.Second
+		}
+		callCtx, cancel := context.WithTimeout(context.Background(), timeout)
+		performed, performErr := r.organs.Perform(callCtx, request.OrganID, organ.ActionRequest{
+			ActionID: request.ActionID, Operation: request.Operation, Input: request.Input, TimeoutMilliseconds: int(timeout.Milliseconds()),
+		})
+		cancel()
+		status := performed.Status
+		output := performed.Output
+		if performErr != nil {
+			status = "failed"
+			if errors.Is(callCtx.Err(), context.DeadlineExceeded) || errors.Is(callCtx.Err(), context.Canceled) {
+				status = "unknown"
+			}
+			output = fmt.Sprintf(`{"error":%q}`, truncate(performErr.Error(), 2048))
+		}
+		r.state.PendingAction.Status = status
+		r.state.PendingAction.EndedAt = nowUTC()
+		r.state.PendingAction.Result = truncate(redactRuntimeSecret(output, r.config.ModelGateway.APIKey), 64*1024)
+		if err := r.journal("action_"+status, request.ActionID, map[string]any{"kind": r.state.PendingAction.Kind, "organ_id": request.OrganID, "operation": request.Operation, "result": r.state.PendingAction.Result}); err != nil {
+			return err
+		}
+		response := map[string]any{"status": status, "output": r.state.PendingAction.Result}
+		encoded, _ := json.Marshal(response)
+		ack.Output = string(encoded)
 	case "mentor_send":
 		request, ok := notice.Payload.(MentorActionRequest)
 		if !ok || r.state.PendingAction != nil {
@@ -906,7 +1052,8 @@ func (r *Runtime) handleCognitiveResult(ctx context.Context, result CognitiveRes
 			}
 		}
 	} else if r.state.Stage >= 4 && result.Stage4 != nil {
-		commit, withheldActionKind := normalizeUnendorsedAction(*result.Stage4, r.config.Dynamics.AttentionThreshold)
+		prepared := r.constrainStageTenActionAssistance(*result.Stage4)
+		commit, withheldActionKind := normalizeUnendorsedAction(prepared, r.config.Dynamics.AttentionThreshold)
 		if err := r.applyPreparedCognitiveCommit(commit, withheldActionKind); err != nil {
 			paidUnusable := r.markLeaseUsageUnusable(result.LeaseID)
 			attempts := markEventForRetry(&r.state, r.state.Lease.FocusID, err.Error())
@@ -1199,14 +1346,18 @@ func (r *Runtime) cognitiveRequestAllowedAt(request CognitiveRequest, now time.T
 }
 
 func (r *Runtime) recoveryProfile(failedModel string) (CognitiveProfile, bool) {
-	for _, model := range []string{"luna", "terra", "sol"} {
+	// Preserve cognition with the action-capable support model before falling to
+	// a lower-capability alternate. The recovery source and purpose remain
+	// visible to Alice; this is continuity under a failed organ, not a silent
+	// second stream of thought.
+	for _, model := range []string{"sol", "terra", "luna"} {
 		if model == failedModel {
 			continue
 		}
 		if protected, _ := modelProtected(r.state, model, time.Now().UTC()); protected {
 			continue
 		}
-		for _, effort := range []string{"low", "medium", "none"} {
+		for _, effort := range []string{"low", "none", "medium"} {
 			profile := CognitiveProfile{Model: model, ReasoningEffort: effort}
 			if validateProfile(r.config.CognitiveResource, profile) == nil {
 				return profile, true
@@ -1273,6 +1424,11 @@ func (r *Runtime) addEvent(kind, source, summary, correlationID string, payload 
 		Payload:       payload,
 		Status:        "observed",
 	}
+	if candidate && r.state.Stage >= 4 {
+		var admitted bool
+		event, admitted = r.admitDifference(event)
+		candidate = admitted
+	}
 	if candidate {
 		event.Status = "pending"
 		if len(concernIDs) > 0 {
@@ -1280,7 +1436,11 @@ func (r *Runtime) addEvent(kind, source, summary, correlationID string, payload 
 		}
 		r.state.Background = append(r.state.Background, event)
 	}
-	record := JournalRecord{Seq: event.Seq, Time: event.ObservedAt, Kind: kind, InstanceID: r.state.InstanceID, Revision: r.state.Revision, CorrelationID: correlationID, Payload: map[string]any{"event_id": event.ID, "source": source, "summary": summary, "payload": json.RawMessage(payload)}}
+	record := JournalRecord{Seq: event.Seq, Time: event.ObservedAt, Kind: kind, InstanceID: r.state.InstanceID, Revision: r.state.Revision, CorrelationID: correlationID, Payload: map[string]any{
+		"event_id": event.ID, "source": source, "summary": summary, "payload": json.RawMessage(payload),
+		"attention_admitted": candidate, "difference_key": event.DifferenceKey,
+		"prediction_gap": event.PredictionGap, "attention_pressure": event.AttentionPressure,
+	}}
 	return r.store.Append(record)
 }
 

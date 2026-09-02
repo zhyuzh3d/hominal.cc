@@ -16,6 +16,7 @@ exec /usr/bin/google-chrome \
   --user-data-dir=/agent/state/profiles/chrome \
   --remote-debugging-address=127.0.0.1 \
   --remote-debugging-port=9222 \
+  --proxy-server=http://127.0.0.1:7897 \
   --password-store=basic \
   --hide-crash-restore-bubble \
   --no-first-run \

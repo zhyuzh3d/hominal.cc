@@ -1,0 +1,6 @@
+{
+  "schema": "hominal.organ-manifest/v1",
+  "id": "system",
+  "command": "body/bin/hominal-system",
+  "daemon": false
+}

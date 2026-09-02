@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -40,6 +41,12 @@ func cognitiveActionKinds(t *testing.T, tool map[string]any) []string {
 	return kinds
 }
 
+func TestStageTenUsesUnifiedCognition(t *testing.T) {
+	if !usesUnifiedCognition(10) {
+		t.Fatal("stage ten did not reuse the frozen unified cognition path")
+	}
+}
+
 func TestStageNineUsesTheStageEightCognitiveContract(t *testing.T) {
 	if !usesUnifiedCognition(9) {
 		t.Fatal("stage nine did not enter the shared cognitive route")
@@ -70,20 +77,29 @@ func TestStageFourModelUsesOneForcedCognitiveCommit(t *testing.T) {
 			t.Fatalf("unexpected reasoning effort: %#v", reasoning)
 		}
 		instructions, _ := body["instructions"].(string)
-		if !strings.Contains(instructions, "探索张力的绝对强度") || !strings.Contains(instructions, "current_situation") || !strings.Contains(instructions, "只有 candidates") {
-			t.Fatalf("stage four omitted the meaning and agency of exploration pressure: %q", instructions)
+		if !strings.Contains(instructions, "探索方向的 activation") || !strings.Contains(instructions, "current_situation") || !strings.Contains(instructions, "只有 candidates") {
+			t.Fatalf("stage four omitted the meaning and agency of the value field: %q", instructions)
 		}
-		if !strings.Contains(instructions, "hominal-browser list") || !strings.Contains(instructions, "hominal-browser schema") || !strings.Contains(instructions, "hominal-browser call") {
-			t.Fatalf("stage four omitted Alice's browser proprioception: %q", instructions)
+		if !strings.Contains(instructions, "available_capabilities.organs") || !strings.Contains(instructions, "器官只实施并返回事实") {
+			t.Fatalf("stage four omitted Alice's generic organ proprioception: %q", instructions)
+		}
+		if !strings.Contains(instructions, "operation 只从该器官说明中的 operations 选择") || !strings.Contains(instructions, "不是可猜测的行动名") {
+			t.Fatalf("stage four confused host capabilities with callable organ operations: %q", instructions)
 		}
 		if !strings.Contains(instructions, "associative_recall") || !strings.Contains(instructions, "不是方向、目标、命令或奖励") {
 			t.Fatalf("stage four did not preserve Alice's agency over programmatic variation: %q", instructions)
 		}
-		if !strings.Contains(instructions, "keep 保持已经存在的长期默认不变") || !strings.Contains(instructions, "使用 default 明确认领") || !strings.Contains(instructions, "一次 next 完成后会自然回到原默认") {
+		if !strings.Contains(instructions, "default_profile 是本代主力认知") || !strings.Contains(instructions, "Sol/low 是进阶行动协助") || !strings.Contains(instructions, "确定性的本能与机械状态工作由身体内核完成") || !strings.Contains(instructions, "next 只安排同一因果线程中紧接着的一次认知") {
 			t.Fatalf("resource choice semantics remained ambiguous: %q", instructions)
 		}
 		if !strings.Contains(instructions, "机器可读的键值") || !strings.Contains(instructions, "读取到一项声明") {
 			t.Fatalf("stage four lost the distinction between reading and checking an explicit claim: %q", instructions)
+		}
+		if !strings.Contains(instructions, "器官观察中的 context 提供当前感官场景") || !strings.Contains(instructions, "Visible object 才是这次新进入注意的具体对象") {
+			t.Fatalf("organ scene context could masquerade as the newly perceived object: %q", instructions)
+		}
+		if !strings.Contains(instructions, "少量仍可感到但不再影响未来选择的不确定可以保留") {
+			t.Fatalf("a subjective residual difference was still treated as schema failure: %q", instructions)
 		}
 		if !strings.Contains(instructions, "等待上位 Concern、整轮计划或兄弟对象") || !strings.Contains(instructions, "不把同一份等待重复背在两层张力上") {
 			t.Fatalf("concern hierarchy could duplicate one waiting condition across parent and child: %q", instructions)
@@ -94,6 +110,14 @@ func TestStageFourModelUsesOneForcedCognitiveCommit(t *testing.T) {
 		}
 		if !strings.Contains(input, `"genesis_orientation"`) || !strings.Contains(input, `"current_situation"`) || !strings.Contains(input, "@hominal_cc") {
 			t.Fatalf("stage four forgot durable birth orientation facts: %q", input)
+		}
+		if !strings.Contains(input, `"user":"root"`) || !strings.Contains(input, `"home":"/root"`) || !strings.Contains(input, `"working_directory":"/agent/lives/`) || !strings.Contains(input, `"life_space":"/life"`) ||
+			!strings.Contains(input, `"desktop_home":"/home/hominal"`) || !strings.Contains(input, `"command":"hominal-browser"`) ||
+			!strings.Contains(input, `"operations":["browser_snapshot","browser_click"]`) ||
+			!strings.Contains(input, `"wechat_client"`) || !strings.Contains(input, `"mentor_channel"`) ||
+			!strings.Contains(input, `"content_persistence":"cross_generation"`) || !strings.Contains(input, `"existing_content_role":"lineage_environment"`) ||
+			!strings.Contains(input, `"current_generation_publication_evidence"`) {
+			t.Fatalf("stage four did not make Alice's device, file and communication resources recoverable: %q", input)
 		}
 		if !strings.Contains(input, `"linked_concern"`) || !strings.Contains(input, "共同实验仍有多个独立物件") {
 			t.Fatalf("a contribution fact was detached from the whole concern it reappraises: %q", input)
@@ -127,7 +151,12 @@ func TestStageFourModelUsesOneForcedCognitiveCommit(t *testing.T) {
 		Focus:      Event{ID: "event-1", Kind: "concern_contribution", Source: "experience", Summary: "one child advanced", ConcernID: "parent-concern", LastCommitErr: "previous focus was invalid"},
 		Candidates: []Event{{ID: "event-1", Kind: "concern_contribution", Source: "experience", Summary: "one child advanced", ConcernID: "parent-concern", LastCommitErr: "previous focus was invalid"}},
 		State: State{
-			Mentor:   MentorState{Received: map[string]uint64{}},
+			Mentor: MentorState{Received: map[string]uint64{}},
+			Body: BodySnapshot{Organs: map[string]OrganSnapshot{"browser": {
+				Name: "Chrome browser", Command: "hominal-browser", Capabilities: []string{"observe", "perform", "authenticated_web"},
+				Operations: []string{"browser_snapshot", "browser_click"},
+				Guidance:   "Use the organ command.", Status: "ready", Accepting: true,
+			}}},
 			Concerns: []Concern{{ID: "parent-concern", Subject: "共同实验仍有多个独立物件", Meaning: "一个子步骤有进展，但整体尚未闭合", Difference: 0.7, Ownership: 0.9, Resolution: "hold"}},
 			Background: []Event{{
 				ID: "birth", Kind: "birth_orientation", Status: "processed",
@@ -172,7 +201,7 @@ func TestStageFourModelUsesOneForcedCognitiveCommit(t *testing.T) {
 }
 
 func TestCognitiveCommitSchemaBindsPresentCandidateFacts(t *testing.T) {
-	payload, _ := json.Marshal(ActionState{CommitmentID: "commitment-now", Kind: "body_shell", Status: "completed"})
+	payload, _ := json.Marshal(ActionState{CommitmentID: "commitment-now", Kind: "organ_action", Status: "completed"})
 	candidates := []Event{{ID: "reality-now", Kind: "action_result", Payload: payload}}
 	tool := cognitiveCommitTool(5, candidates, true, true, true, "existing-concern")
 	parameters := tool["parameters"].(map[string]any)
@@ -238,6 +267,29 @@ func TestCognitiveCommitSchemaBindsPresentCandidateFacts(t *testing.T) {
 	}
 }
 
+func TestStageTenSchemaCarriesPluralValuesAndLocksUngroundedOrientation(t *testing.T) {
+	ordinary := cognitiveCommitTool(10, []Event{{ID: "ordinary", Kind: "perceptual_change"}}, false, true, true)
+	properties := ordinary["parameters"].(map[string]any)["properties"].(map[string]any)
+	appraisal := properties["appraisals"].(map[string]any)["items"].(map[string]any)["properties"].(map[string]any)
+	valueProperties := appraisal["values"].(map[string]any)["properties"].(map[string]any)
+	for _, name := range []string{"continuance", "exploration", "agency", "vitality", "relatedness", "contribution"} {
+		if _, exists := valueProperties[name]; !exists {
+			t.Fatalf("appraisal omitted life value direction %q", name)
+		}
+	}
+	orientation := properties["value_orientation_update"].(map[string]any)["properties"].(map[string]any)
+	if orientation["relatedness"].(map[string]any)["maximum"] != float64(0) {
+		t.Fatal("an ordinary perception could permanently rewrite value orientation")
+	}
+
+	grounded := cognitiveCommitTool(10, []Event{{ID: "reality", Kind: "action_result"}}, true, true, true)
+	groundedProperties := grounded["parameters"].(map[string]any)["properties"].(map[string]any)
+	groundedOrientation := groundedProperties["value_orientation_update"].(map[string]any)["properties"].(map[string]any)
+	if groundedOrientation["relatedness"].(map[string]any)["maximum"] != float64(1) {
+		t.Fatal("grounded self revision could not express a slow value-orientation change")
+	}
+}
+
 func TestNewIndependentConcernCanChooseAStableBroaderContext(t *testing.T) {
 	parent := Concern{
 		ID: "shared-experiment", OriginKind: "mentor_received", Meaning: "共同实验仍在进行",
@@ -254,9 +306,9 @@ func TestNewIndependentConcernCanChooseAStableBroaderContext(t *testing.T) {
 	if len(within) != 1 || within[0] != parent.ID {
 		t.Fatalf("a held broader concern was unavailable as the child's stable context: %#v", within)
 	}
-	contributable := contributableConcernIDs(state, []Event{child, visibleParent})
-	if len(contributable) != 0 {
-		t.Fatalf("a new object could claim actual contribution before Experience: %#v", contributable)
+	contributable := contributableConcernIDs(state, []Event{child, visibleParent}, testConfig(9).Dynamics)
+	if len(contributable) != 1 || contributable[0] != parent.ID {
+		t.Fatalf("an independent reality fact could not affect a visible self-owned concern: %#v", contributable)
 	}
 	tool := cognitiveCommitToolWithLinks(9, []Event{child, visibleParent}, false, true, true, continuable, within, contributable)
 	properties := tool["parameters"].(map[string]any)["properties"].(map[string]any)
@@ -269,6 +321,9 @@ func TestNewIndependentConcernCanChooseAStableBroaderContext(t *testing.T) {
 	}
 	if _, exists := properties["emerging_consequence"]; !exists {
 		t.Fatal("Stage 9 tool schema omitted the serial preservation of a newly emerging consequence")
+	}
+	if properties["emerging_consequence"].(map[string]any)["maxLength"] != 0 {
+		t.Fatal("a non-reality focus could manufacture another emerging consequence")
 	}
 	required := tool["parameters"].(map[string]any)["required"].([]string)
 	foundClosure := false
@@ -285,6 +340,20 @@ func TestNewIndependentConcernCanChooseAStableBroaderContext(t *testing.T) {
 	}
 }
 
+func TestOnlyActionResultCanExposeAnEmergingConsequence(t *testing.T) {
+	reality := cognitiveCommitTool(9, []Event{{ID: "reality", Kind: "action_result"}}, false, true, true)
+	realityProperties := reality["parameters"].(map[string]any)["properties"].(map[string]any)
+	if _, closed := realityProperties["emerging_consequence"].(map[string]any)["maxLength"]; closed {
+		t.Fatal("an action result could not preserve a genuinely new consequence")
+	}
+
+	consequence := cognitiveCommitTool(9, []Event{{ID: "next-object", Kind: "reality_consequence"}}, false, true, true)
+	consequenceProperties := consequence["parameters"].(map[string]any)["properties"].(map[string]any)
+	if consequenceProperties["emerging_consequence"].(map[string]any)["maxLength"] != 0 {
+		t.Fatal("a preserved consequence could recursively create another consequence before acting")
+	}
+}
+
 func TestRealityCanOnlyContributeToItsChildsStableContext(t *testing.T) {
 	parent := Concern{ID: "shared-experiment", OriginKind: "mentor_received", Ownership: 0.9, Resolution: "hold"}
 	sibling := Concern{ID: "earlier-object", OriginKind: "environment_change", Ownership: 0.9, Resolution: "hold"}
@@ -293,9 +362,25 @@ func TestRealityCanOnlyContributeToItsChildsStableContext(t *testing.T) {
 	payload, _ := json.Marshal(ActionState{CommitmentID: commitment.ID, Status: "completed"})
 	reality := Event{ID: "child-reality", Kind: "action_result", ConcernID: child.ID, Payload: payload}
 	state := State{Concerns: []Concern{parent, sibling, child}, Commitments: []ActionCommitment{commitment}}
-	ids := contributableConcernIDs(state, []Event{reality})
+	ids := contributableConcernIDs(state, []Event{reality}, testConfig(9).Dynamics)
 	if len(ids) != 1 || ids[0] != parent.ID {
 		t.Fatalf("semantic similarity exposed a sibling instead of the self-endorsed parent: %#v", ids)
+	}
+}
+
+func TestIndependentRealityOnlyExposesVisibleOwnedContributionTargets(t *testing.T) {
+	config := testConfig(10)
+	valid := Concern{ID: "public-expression", OriginKind: "perceptual_change", Ownership: 0.9, Resolution: "hold"}
+	birth := Concern{ID: "birth", OriginKind: "birth_orientation", Ownership: 1, Resolution: "hold"}
+	unowned := Concern{ID: "noticed-only", OriginKind: "environment_change", Ownership: config.Dynamics.AttentionThreshold - 0.01, Resolution: "hold"}
+	settled := Concern{ID: "settled", OriginKind: "environment_change", Ownership: 0.9, Resolution: "resolved"}
+	current := Concern{ID: "current-object", OriginKind: "perceptual_change", Ownership: 0.9, Resolution: "hold"}
+	state := State{Concerns: []Concern{valid, birth, unowned, settled, current}}
+	perception := Event{ID: "visible-post", Kind: "perceptual_change", ConcernID: current.ID}
+
+	ids := contributableConcernIDs(state, []Event{perception}, config.Dynamics)
+	if len(ids) != 1 || ids[0] != valid.ID {
+		t.Fatalf("independent reality exposed a non-owned, settled, birth, or self target: %#v", ids)
 	}
 }
 
@@ -435,11 +520,212 @@ func TestTruncateKeepsUTF8Valid(t *testing.T) {
 	}
 }
 
+func TestLLMServerAdapterUsesNativeFunctionCognitionAndConfirmedServerBill(t *testing.T) {
+	arguments, _ := json.Marshal(CognitiveCommit{
+		Appraisals: []CandidateAppraisal{{
+			CandidateID: "llmserver-focus", Meaning: "本地认知服务已经可达", Difference: 0.2,
+			Ownership: 0.8, Value: 0.4, Urgency: 0.1, Answerability: 0.7, Certainty: 0.9, Resolution: "hold",
+		}},
+		FocusID: "llmserver-focus", ThoughtThread: "我可以继续理解这个事实。",
+		Action:         CognitiveAction{Kind: "none"},
+		ResourceChoice: CognitiveResourceChoice{Apply: "keep", Model: "current", ReasoningEffort: "current"},
+	})
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		tools, ok := body["tools"].([]any)
+		if !ok || len(tools) != 1 || tools[0].(map[string]any)["name"] != "cognitive_commit" || tools[0].(map[string]any)["strict"] != true {
+			t.Fatalf("llmserver request did not contain the one native strict cognition tool: %#v", body["tools"])
+		}
+		choice, ok := body["tool_choice"].(map[string]any)
+		if !ok || choice["type"] != "function" || choice["name"] != "cognitive_commit" || body["parallel_tool_calls"] != false {
+			t.Fatalf("llmserver native tool selection was not single and forced: choice=%#v parallel=%#v", body["tool_choice"], body["parallel_tool_calls"])
+		}
+		if body["model"] != "codex-terra" || body["store"] != false {
+			t.Fatalf("unexpected llmserver request basics: %#v", body)
+		}
+		instructions, _ := body["instructions"].(string)
+		if strings.Contains(instructions, "不提供 function tool") || strings.Contains(instructions, "请只输出一个 JSON 对象") {
+			t.Fatal("obsolete prompt-emulated tool contract remained in native cognition")
+		}
+		extension, _ := body["llmserver"].(map[string]any)
+		if !strings.HasPrefix(extension["idempotency_key"].(string), "hominal:llmserver-life:llmserver-focus:") {
+			t.Fatalf("missing stable llmserver idempotency key: %#v", extension)
+		}
+		writer.Header().Set("X-LLMServer-Request-ID", "req-confirmed")
+		_ = json.NewEncoder(writer).Encode(map[string]any{
+			"id": "response-local", "model": "codex-terra",
+			"output": []map[string]any{{"type": "function_call", "name": "cognitive_commit", "call_id": "call-native", "arguments": string(arguments)}},
+			"usage":  map[string]any{"input_tokens": 100, "output_tokens": 20, "total_tokens": 120},
+			"llmserver_billing": map[string]any{
+				"request_id": "req-confirmed", "settlement_status": "confirmed", "price_version": "codex-terra-test-v1", "currency": "USD",
+				"charges": map[string]any{"total": "0.000123456"},
+			},
+		})
+	}))
+	defer server.Close()
+
+	config := testConfig(10)
+	config.ModelGateway.BaseURL = server.URL
+	config.ModelGateway.Adapter = "llmserver"
+	terra := config.CognitiveResource.Models["terra"]
+	terra.ID = "codex-terra"
+	config.CognitiveResource.Models["terra"] = terra
+	profile := CognitiveProfile{Model: "terra", ReasoningEffort: "none"}
+	request := CognitiveRequest{
+		Lease: Lease{ID: "lease-local", Profile: profile, PulseID: 7}, Stage: 10,
+		Focus:      Event{ID: "llmserver-focus", Kind: "body_delta", Status: "pending"},
+		Candidates: []Event{{ID: "llmserver-focus", Kind: "body_delta", Status: "pending"}},
+		State:      State{InstanceID: "llmserver-life"}, Config: config, Profile: profile,
+	}
+	notices := make(chan WorkerNotice)
+	usageSeen := make(chan UsageRecord, 1)
+	go func() {
+		reservation := <-notices
+		reservation.Ack <- NoticeAck{Accepted: true}
+		usageNotice := <-notices
+		usageSeen <- usageNotice.Payload.(UsageRecord)
+		usageNotice.Ack <- NoticeAck{Accepted: true}
+	}()
+	result := NewModelClient().Run(context.Background(), request, notices)
+	if result.Error != nil || result.Stage4 == nil || result.Stage4.FocusID != "llmserver-focus" {
+		t.Fatalf("llmserver native function cognition did not become the existing commit type: %#v", result)
+	}
+	usage := <-usageSeen
+	if !usage.CostConfirmed || usage.ActualMicrousd != 124 || usage.BilledUSD != "0.000123456" ||
+		usage.RequestID != "req-confirmed" || usage.BillingStatus != "confirmed" || usage.BillingPrice != "codex-terra-test-v1" {
+		t.Fatalf("server bill was not preserved in the local resource fact: %#v", usage)
+	}
+}
+
+func TestLLMServerUnconfirmedBillRejectsCognitionWithoutInventingSpend(t *testing.T) {
+	config := testConfig(10)
+	config.ModelGateway.Adapter = "llmserver"
+	profile := CognitiveProfile{Model: "terra", ReasoningEffort: "none"}
+	request := CognitiveRequest{
+		Lease: Lease{ID: "lease-unconfirmed", PulseID: 8}, Focus: Event{ID: "focus-unconfirmed"},
+		Config: config, Profile: profile,
+	}
+	response := apiResponse{
+		Model: "gpt-5.6-terra", RequestID: "req-unconfirmed", ReservedMicrousd: 900,
+		Usage: apiUsage{InputTokens: 10, OutputTokens: 5, TotalTokens: 15},
+	}
+	notices := make(chan WorkerNotice)
+	usageSeen := make(chan UsageRecord, 1)
+	go func() {
+		usageNotice := <-notices
+		usageSeen <- usageNotice.Payload.(UsageRecord)
+		usageNotice.Ack <- NoticeAck{Accepted: true}
+	}()
+	err := acknowledgeUsage(context.Background(), notices, request, response)
+	var failure *ModelCallError
+	if !errors.As(err, &failure) || failure.Fact.Category != "billing_unconfirmed" {
+		t.Fatalf("missing llmserver settlement was not a structured failure: %v", err)
+	}
+	usage := <-usageSeen
+	if usage.ActualMicrousd != 0 || usage.CostConfirmed || usage.Status != "completed_billing_unconfirmed" || usage.FailureCategory != "billing_unconfirmed" {
+		t.Fatalf("unconfirmed settlement became invented spend: %#v", usage)
+	}
+}
+
+func TestLLMServerIdempotencyAndDecimalBillingAreStrict(t *testing.T) {
+	request := CognitiveRequest{State: State{InstanceID: "alice"}, Focus: Event{ID: "focus"}}
+	first := llmserverIdempotencyKey(request, []byte(`{"x":1}`))
+	if first != llmserverIdempotencyKey(request, []byte(`{"x":1}`)) || first == llmserverIdempotencyKey(request, []byte(`{"x":2}`)) {
+		t.Fatal("llmserver idempotency key was unstable or ignored request identity")
+	}
+	for _, value := range []struct {
+		decimal string
+		micro   int64
+	}{{"0", 0}, {"0.000001", 1}, {"0.000001001", 2}, {"1.25", 1_250_000}} {
+		got, err := decimalUSDMicrousd(value.decimal)
+		if err != nil || got != value.micro {
+			t.Fatalf("decimal %s -> %d, %v", value.decimal, got, err)
+		}
+	}
+}
+
+func TestLLMServerRetriesTransientGatewayFailureWithTheSameRequest(t *testing.T) {
+	requests := make([]string, 0, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		data, _ := io.ReadAll(request.Body)
+		requests = append(requests, string(data))
+		if len(requests) == 1 {
+			writer.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = writer.Write([]byte(`{"error":{"message":"warming"}}`))
+			return
+		}
+		_ = json.NewEncoder(writer).Encode(map[string]any{"id": "retry-ok"})
+	}))
+	defer server.Close()
+	client := NewModelClient()
+	response, err := client.doGatewayRequest(context.Background(), ModelGatewayConfig{
+		Adapter: "llmserver", BaseURL: server.URL,
+	}, []byte(`{"same":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK || len(requests) != 2 || requests[0] != requests[1] {
+		t.Fatalf("bounded retry changed the request or did not recover: status=%d requests=%q", response.StatusCode, requests)
+	}
+}
+
+func TestLLMServerDoesNotRetryARejectedProviderToolCall(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requests++
+		writer.WriteHeader(http.StatusBadGateway)
+		_, _ = writer.Write([]byte(`{"error":{"code":"invalid_provider_tool_call","message":"schema mismatch"}}`))
+	}))
+	defer server.Close()
+	client := NewModelClient()
+	response, err := client.doGatewayRequest(context.Background(), ModelGatewayConfig{
+		Adapter: "llmserver", BaseURL: server.URL,
+	}, []byte(`{"same":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	data, _ := io.ReadAll(response.Body)
+	if requests != 1 || response.StatusCode != http.StatusBadGateway || apiErrorFromData(data).Code != "invalid_provider_tool_call" {
+		t.Fatalf("a deterministic invalid tool call was retried or lost: requests=%d status=%d body=%s", requests, response.StatusCode, data)
+	}
+}
+
+func TestNativeFunctionResultInputPreservesOutputAndCausalResult(t *testing.T) {
+	raw := []json.RawMessage{json.RawMessage(`{"type":"reasoning","id":"rs_1"}`), json.RawMessage(`{"type":"function_call","call_id":"call-1","name":"mentor_send","arguments":"{\"text\":\"你好\",\"reply_to\":\"\"}"}`)}
+	call := functionCall{Name: "mentor_send", CallID: "call-1", Arguments: `{"text":"你好","reply_to":""}`}
+	input := functionResultInput("向导师问候", raw, call, `{"status":"sent"}`)
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"input_text", "reasoning", "function_call", "function_call_output", "call-1", "sent"} {
+		if !strings.Contains(string(encoded), expected) {
+			t.Fatalf("standard tool continuation lost %q: %s", expected, encoded)
+		}
+	}
+}
+
+func TestSingleFunctionCallRejectsParallelOrMalformedCalls(t *testing.T) {
+	valid := apiOutputItem{Type: "function_call", Name: "one", CallID: "call-1", Arguments: `{}`}
+	if _, err := singleFunctionCall(apiResponse{Output: []apiOutputItem{valid, valid}}); err == nil {
+		t.Fatal("parallel function calls crossed the single-consciousness boundary")
+	}
+	invalid := apiOutputItem{Type: "function_call", Name: "one", CallID: "", Arguments: `[]`}
+	if _, err := singleFunctionCall(apiResponse{Output: []apiOutputItem{invalid}}); err == nil {
+		t.Fatal("malformed function call crossed the local validation boundary")
+	}
+}
+
 func TestStageFiveCommitSchemaCarriesRealityLearningFields(t *testing.T) {
 	tool := cognitiveCommitTool(5, []Event{{ID: "event-now", Kind: "endogenous_change"}}, true, false, true)
 	parameters := tool["parameters"].(map[string]any)
 	properties := parameters["properties"].(map[string]any)
-	action := cognitiveActionBranch(t, tool, "body_shell")
+	action := cognitiveActionBranch(t, tool, "organ_action")
 	actionProperties := action["properties"].(map[string]any)
 	for _, field := range []string{"intent", "prediction", "reality_check", "stop_condition"} {
 		if _, exists := actionProperties[field]; !exists {
@@ -473,19 +759,21 @@ func TestCognitiveActionSchemaSeparatesWaitingFromExecutablePayloads(t *testing.
 		t.Fatalf("deliberate non-action carried effector payloads: %#v", noneProperties)
 	}
 
-	shell := cognitiveActionBranch(t, tool, "body_shell")
-	shellProperties := shell["properties"].(map[string]any)
-	if _, exists := shellProperties["text"]; exists {
-		t.Fatalf("body_shell carried mentor payload: %#v", shellProperties)
+	action := cognitiveActionBranch(t, tool, "organ_action")
+	actionProperties := action["properties"].(map[string]any)
+	if _, exists := actionProperties["text"]; exists {
+		t.Fatalf("organ_action carried mentor payload: %#v", actionProperties)
 	}
-	if shellProperties["command"].(map[string]any)["pattern"] != `\S` {
-		t.Fatalf("body_shell did not structurally require a nonblank command: %#v", shellProperties["command"])
+	for _, field := range []string{"organ_id", "operation", "input"} {
+		if actionProperties[field].(map[string]any)["pattern"] == nil {
+			t.Fatalf("organ_action did not structurally require %s: %#v", field, actionProperties[field])
+		}
 	}
 
 	mentor := cognitiveActionBranch(t, tool, "mentor_send")
 	mentorProperties := mentor["properties"].(map[string]any)
-	if _, exists := mentorProperties["command"]; exists {
-		t.Fatalf("mentor_send carried shell payload: %#v", mentorProperties)
+	if _, exists := mentorProperties["input"]; exists {
+		t.Fatalf("mentor_send carried organ payload: %#v", mentorProperties)
 	}
 	if mentorProperties["text"].(map[string]any)["pattern"] != `\S` {
 		t.Fatalf("mentor_send did not structurally require nonblank text: %#v", mentorProperties["text"])
@@ -537,7 +825,7 @@ func TestDynamicCommitSchemaKeepsActionChoiceAtMatureExploration(t *testing.T) {
 	newDrive := Event{ID: "exploration-new", Kind: "endogenous_change"}
 	newRequest := CognitiveRequest{
 		Stage: 8, Focus: newDrive,
-		State:  State{ExplorationPressure: 0.8},
+		State:  State{ValueField: LifeValueField{Activation: LifeValueVector{Exploration: 0.8}}},
 		Config: testConfig(8),
 	}
 	if requestHasMatureExplorationDrive(newRequest) {
@@ -557,7 +845,7 @@ func TestDynamicCommitSchemaKeepsActionChoiceAtMatureExploration(t *testing.T) {
 	request := CognitiveRequest{
 		Stage: 8, Focus: exploration,
 		State: State{
-			ExplorationPressure: 0.8,
+			ValueField: LifeValueField{Activation: LifeValueVector{Exploration: 0.8}},
 			Concerns: []Concern{{
 				ID: exploration.ConcernID, OriginKind: "endogenous_change",
 				Resolution: "hold", Answerability: 0.8,
@@ -581,14 +869,19 @@ func TestDynamicCommitSchemaKeepsActionChoiceAtMatureExploration(t *testing.T) {
 	request.State.Commitments = []ActionCommitment{{
 		ID: "mentor-first", ConcernID: "earlier-exploration", ActionKind: "mentor_send", Status: "assimilated",
 	}}
-	if requestAllowsMentorSend(request) {
-		t.Fatal("the schema still offered mentor contact as a generic exploration effect after the relationship existed")
+	if !requestAllowsMentorSend(request) {
+		t.Fatal("an earlier message removed a normal relationship affordance")
 	}
-	boundedTool := cognitiveCommitTool(8, []Event{exploration}, false, true, requestAllowsMentorSend(request))
-	for _, kind := range cognitiveActionKinds(t, boundedTool) {
-		if kind == "mentor_send" {
-			t.Fatalf("an unavailable generic exploration effect remained in the action grammar: %q", kind)
-		}
+	openTool := cognitiveCommitTool(8, []Event{exploration}, false, true, requestAllowsMentorSend(request))
+	kinds = cognitiveActionKinds(t, openTool)
+	foundMentor := false
+	foundNone = false
+	for _, kind := range kinds {
+		foundMentor = foundMentor || kind == "mentor_send"
+		foundNone = foundNone || kind == "none"
+	}
+	if !foundMentor || !foundNone {
+		t.Fatalf("the normal relationship affordance displaced Alice's choice: %v", kinds)
 	}
 
 	mentorFocus := Event{ID: "mentor-reply", Kind: "mentor_received"}
@@ -599,7 +892,7 @@ func TestDynamicCommitSchemaKeepsActionChoiceAtMatureExploration(t *testing.T) {
 		t.Fatal("a mentor message focus could not continue the existing relationship")
 	}
 	mentorTool := cognitiveCommitTool(8, []Event{mentorFocus}, false, true, requestAllowsMentorSend(mentorRequest))
-	foundMentor := false
+	foundMentor = false
 	for _, kind := range cognitiveActionKinds(t, mentorTool) {
 		foundMentor = foundMentor || kind == "mentor_send"
 	}
@@ -607,12 +900,34 @@ func TestDynamicCommitSchemaKeepsActionChoiceAtMatureExploration(t *testing.T) {
 		t.Fatal("the direct relationship focus did not expose mentor_send")
 	}
 
+	linkedPayload, _ := json.Marshal(map[string]string{"commitment_id": "mentor-first"})
+	linkedReply := Event{ID: "mentor-linked-reply", Kind: "mentor_received", Payload: linkedPayload}
+	linkedRequest := request
+	linkedRequest.Focus = linkedReply
+	linkedRequest.Candidates = []Event{linkedReply}
+	if requestAllowsMentorSend(linkedRequest) {
+		t.Fatal("linked mentor feedback could reply before its content pass")
+	}
+	linkedTool := cognitiveCommitTool(8, []Event{linkedReply}, false, true, requestAllowsMentorSend(linkedRequest))
+	for _, kind := range cognitiveActionKinds(t, linkedTool) {
+		if kind == "mentor_send" {
+			t.Fatal("linked mentor feedback exposed a duplicate mentor_send action")
+		}
+	}
+
+	actionAssistRequest := request
+	actionAssistRequest.Stage = 10
+	actionAssistRequest.Lease.ProfileSource = "next"
+	if requestAllowsMentorSend(actionAssistRequest) {
+		t.Fatal("stage-ten action assistance exposed the mentor relationship effector")
+	}
+
 	forming := exploration
 	forming.ConcernID = "forming-object"
 	formingRequest := CognitiveRequest{
 		Stage: 8, Focus: forming,
 		State: State{
-			ExplorationPressure: 0.5,
+			ValueField: LifeValueField{Activation: LifeValueVector{Exploration: 0.5}},
 			Concerns: []Concern{{
 				ID: forming.ConcernID, OriginKind: "endogenous_change",
 				Resolution: "hold", Answerability: 0.2,
@@ -623,28 +938,36 @@ func TestDynamicCommitSchemaKeepsActionChoiceAtMatureExploration(t *testing.T) {
 	if requestHasMatureExplorationDrive(formingRequest) {
 		t.Fatal("a low-pressure forming concern was marked mature before the drive accumulated")
 	}
-	formingRequest.State.ExplorationPressure = 0.8
+	formingRequest.State.ValueField.Activation.Exploration = 0.8
 	if !requestHasMatureExplorationDrive(formingRequest) {
 		t.Fatal("an accumulated drive did not mark the held concern as mature")
 	}
-	formingRequest.State.ExplorationPressure = 0.5
+	formingRequest.State.ValueField.Activation.Exploration = 0.5
 	formingRequest.State.Concerns[0].Answerability = 0.9
 	if requestHasMatureExplorationDrive(formingRequest) {
 		t.Fatal("semantic answerability bypassed the accumulated exploration action threshold")
 	}
 }
 
+func TestModelFactPayloadKeepsTheKernelOrganAgnosticAndBounded(t *testing.T) {
+	payload := json.RawMessage(`{"kind":"action_result","organ_fact":"completed","detail":"bounded"}`)
+	fact := modelFactPayload(Event{Kind: "action_result", Payload: payload}, 48)
+	if !strings.Contains(fact, "action_result") || strings.Contains(fact, "bounded") {
+		t.Fatalf("generic Reality was not bounded without organ-specific parsing: %q", fact)
+	}
+}
+
 func TestEnactedActionMemoryKeepsDistinctSettledRequests(t *testing.T) {
 	experiences := []Experience{
-		{ActionKind: "body_shell", EnactedRequest: "hominal-browser list", ObservedAt: "one", RemainingDifference: 0.04},
-		{ActionKind: "body_shell", EnactedRequest: "uname -a", ObservedAt: "two", RemainingDifference: 0.03},
-		{ActionKind: "body_shell", EnactedRequest: "hominal-browser list", ObservedAt: "three", RemainingDifference: 0.02},
+		{ActionKind: "organ_action", EnactedRequest: normalizedOrganRequest("browser", "list", `{}`), ObservedAt: "one", RemainingDifference: 0.04},
+		{ActionKind: "organ_action", EnactedRequest: normalizedOrganRequest("system", "exec", "uname -a"), ObservedAt: "two", RemainingDifference: 0.03},
+		{ActionKind: "organ_action", EnactedRequest: normalizedOrganRequest("browser", "list", `{}`), ObservedAt: "three", RemainingDifference: 0.02},
 	}
 	views := contextEnactedActionViews(experiences)
 	if len(views) != 2 {
 		t.Fatalf("action memory length = %d, want two distinct requests", len(views))
 	}
-	if views[0]["enacted_request"] != "hominal-browser list" || views[0]["observed_at"] != "three" {
+	if views[0]["enacted_request"] != normalizedOrganRequest("browser", "list", `{}`) || views[0]["observed_at"] != "three" {
 		t.Fatalf("action memory did not retain the latest settled identity: %#v", views[0])
 	}
 }

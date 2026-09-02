@@ -109,14 +109,14 @@ x_{t+1}=F(x_t,E_t;\theta,S)
 
 ## 七、Birth Manifest 工作包
 
-当前身体事实已经从上层 `xconfig.yaml` 和目标 Ubuntu 设备读取，并形成 [目标身体当前事实快照](../lab/body/current-profile.md)。阶段一冻结以下生成契约，实际生成器和身体探针在阶段二实现：
+当前身体事实已经从上层 `xconfigs/hominal/xconfig.yaml` 和目标 Ubuntu 设备读取，并形成 [目标身体当前事实快照](../lab/body/current-profile.md)。阶段一冻结以下生成契约，实际生成器和身体探针在阶段二实现：
 
-1. 规定 Manifest 生成器从 `xconfig.yaml` 读取的非秘密配置字段；
+1. 规定 Manifest 生成器从 `xconfigs/hominal/xconfig.yaml` 读取的非秘密配置字段；
 2. 规定 SSH 身体探针应读取的操作系统、硬件、磁盘、网络、工具和权限事实；
 3. 启动前由 Lab 生成 `instance_id` 和一次性 `intent.yaml`；第一次成功认知脉冲形成 `T0`，随后生成并封存样本编号、起止时间、当前身体状态和配置校验值；
 4. 运行时注入模型与番茄账号凭据，Manifest 只表达资源能力和凭据来源；
 5. 规定 alice 自主 root 通道的运行契约与验收用例；
-6. 在 `xconfig.yaml` 增加模型每小时额度、刷新时点和实时查询方式；
+6. 在 `xconfigs/hominal/xconfig.yaml` 增加模型每小时额度、刷新时点和实时查询方式；
 7. 规定轻量默认、按后果、不确定性和不可逆性按次升级的推理策略；
 8. 把动态余量交给身体探针持续感知，把出生时事实保留在本代 Manifest；
 9. 把图形桌面、Chrome、Playwright MCP 和微信组成一条可验证的身体能力链，而不是四条静态“已安装”声明；
@@ -229,4 +229,4 @@ docs/mvp-architecture.md
 
 截至 2026-08-24，八项正式交付物已经形成阶段一冻结稿：Seed、机器初态、十五项动力参数、当前身体事实、Birth 模板、导师协议、一小时实验协议和最小可编码架构。上层私密配置已经加入身体路径、Lab 离机路径、干净 agent 出生基线、双档推理和 SSH 文件信箱；Lab 目录位于 `/Users/zhyuzh/HominalGenesisLab`。
 
-`python3 lab/validate-contract.py --xconfig ../xconfig.yaml` 是阶段一最终一致性检查。模型额度已冻结为每滚动 60 分钟 `1,000,000 total_tokens`，由身体内本地用量账本读取，并由 Genesis Lab 独立复核。阶段一交付物已经通过无豁免校验并进入 Git 冻结版本。
+`python3 lab/validate-contract.py --xconfig ../xconfigs/hominal/xconfig.yaml` 是阶段一最终一致性检查。模型额度已冻结为每滚动 60 分钟 `1,000,000 total_tokens`，由身体内本地用量账本读取，并由 Genesis Lab 独立复核。阶段一交付物已经通过无豁免校验并进入 Git 冻结版本。

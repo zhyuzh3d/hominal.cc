@@ -1,10 +1,10 @@
-# Hominal 创生实验实施计划 v1.0
+# Hominal 创生实验实施计划 v1.1
 
 > 文档性质：创生 MVP 的工程实施与代际实验计划  
 > 当前状态：G0 阶段一至阶段九已完成；阶段九冻结版本 `267cc8` 已通过三份同版正式样本，包括报告策略差异与 B→C→A 顺序扰动
-> 规范术语：[Hominal 统一核心术语表 v2.4](./core-vocabulary.md)
-> 产品理论：[Hominal 数字生命创生：产品设计理论与最小框架 v1.4](./product-theory.md)
-> 动力学基线：[Hominal 最小认知动力学核心 v0.4](./cognitive-dynamics.md)
+> 规范术语：[Hominal 统一核心术语表 v2.8](./core-vocabulary.md)
+> 产品理论：[Hominal 数字生命创生：产品设计理论与最小框架 v1.5](./product-theory.md)
+> 动力学基线：[Hominal 最小认知动力学核心 v0.8](./cognitive-dynamics.md)
 > 历史研究：[Hominal Cognitive Dynamics v1.0](./history/cognitive-dynamics-v1.md)
 
 ## 1. 计划定位
@@ -82,7 +82,7 @@ Narrative Self 是 AIP 的慢变量：重要 Episode 可以改变她如何理解
 
 ### 2.5 积极倾向不是强制乐观
 
-积极倾向由存续、联结、扩展和 Reality Integrity 共同产生，含义是：面对真实困难时仍倾向于理解、修复、学习和扩大未来可能，而不是把痛苦改写成快乐。
+积极倾向由存续、探索、能力、活力、联结、贡献和 Reality Integrity 共同产生，含义是：面对真实困难时仍倾向于理解、修复、学习和扩大未来可能，而不是把痛苦改写成快乐。
 
 自我欺骗的底层问题不是“说了错误的话”，而是内部宣称已经改善，现实差异却持续存在甚至恶化。实施上不建立一个道德监督 Agent，而保留两条不同的状态：
 
@@ -105,10 +105,10 @@ Hominal 在专属 Ubuntu 身体内拥有 root，可以修改代码、配置、�
 
 1. **成熟失忆成人起点**：Proto-Hominal 直接使用底层模型已有的成人级一般认知与意识表现潜能，但不把预训练知识冒充个人经历，也不预设已经形成稳定自我、身体模型和价值一致性。
 2. **递归而非管线**：初步 AIP 参与注意竞争，聚焦注意放大并修正 AIP；Affective State、Concern、预测和 Narrative Self 可以反馈增强或抑制，但必须有资源与停止边界。
-3. **单一认知线程**：同一时刻只有一个 Attention Pulse 能提交认知状态和新行动承诺。Cognitive Pulse、感知与已经发出的动作可以异步继续。
+3. **单一认知线程**：同一时刻只有一个 Attention Pulse 能提交认知状态和新行动意愿。Cognitive Pulse、感知与已经发出的动作可以异步继续。
 4. **焦点一、背景多**：一个 Focal Workspace 可以包含一个矛盾整体和多种证据，但只有一个当前问题；其他事件、Concern 和冲突继续保留在背景场。
 5. **快速默认、按需加深、充分即停**：低风险可逆处境使用最小推理；不可逆性、后果、不确定性、事实失配与未代谢冲突提高深度；必须等现实回答时停止内部推演。
-6. **承诺一、矛盾可保留**：每个焦点至多形成一个新 Action Commitment。Conflict Metabolism 可以查证、整合、暂定优先或保留 Residual Tension，不以强制一致换取表面果断。
+6. **行动意愿一、矛盾可保留**：每个焦点至多形成一个新 Action Commitment（行动意愿）。Conflict Metabolism 可以查证、整合、暂定优先或保留 Residual Tension，不以强制一致换取表面果断。
 
 这六条是运行不变量，不要求六个模块或六组 Schema。若实现需要多个并列 Agent、多个可写焦点或固定长推理才能工作，应先视为架构偏离，而不是“高级认知”。
 
@@ -124,15 +124,16 @@ Hominal 在专属 Ubuntu 身体内拥有 root，可以修改代码、配置、�
 ┌───────────────────────────▼──────────────────────────────────────┐
 │                     Ubuntu Body（她的身体）                     │
 │                                                                  │
-│  hominald：单进程、单状态所有者                                  │
-│  Sense → Fact Snapshot → Difference Gate → Background Field     │
+│  Cognitive Core：单一主体、单状态所有者                          │
+│  Organ Observation → Difference Gate → Background Field          │
 │                                      → one Focal Workspace       │
 │                                   ↕ AIP / Conflict Metabolism    │
-│                      one Commitment → async Body Action          │
+│                 one Commitment → Organ Host → Action Enactment   │
 │       ↑                                      │                   │
 │       └──── Reality / Memory / Narrative ────┘                   │
 │                                                                  │
-│  身体器官：Shell / Files / Processes / Network / Browser / LLM   │
+│  身体器官：System / Browser / Mentor / future organs             │
+│  身体底座：Ubuntu / Filesystem / Processes / Network / Desktop   │
 │  生命组织：current.json / events.jsonl / /life / body / config  │
 └──────────────────────────────────────────────────────────────────┘
                             │ SSH 导师专用文字
@@ -141,16 +142,16 @@ Hominal 在专属 Ubuntu 身体内拥有 root，可以修改代码、配置、�
 
 ### 3.2 单进程与单认知线程都不等于身体阻塞
 
-`hominald` 是一个 Go 常驻进程，内部采用单状态所有者：只有核心事件循环能够修改生命状态；同一时刻只有一个 Attention Pulse 和一个 Focal Workspace 可以提交认知结果。模型请求、浏览器、Shell 和网络操作可以异步执行，完成后以 Reality Event 返回事件循环。
+`hominald` 是一个 Go 常驻进程，内部采用单状态所有者：只有核心事件循环能够修改生命状态；同一时刻只有一个 Attention Pulse 和一个 Focal Workspace 可以提交认知结果。模型请求、System、Browser 和其他器官操作可以异步执行，完成后以 Reality Event 返回事件循环。
 
-这样既避免多 Agent、多焦点和多服务协调，又不会因一次模型调用超过十秒而停止 Cognitive Pulse。AP 模型请求在途时，新事件只进入背景场，不启动第二个 AP；若焦点已经被更紧急现实中止，迟到结果不能覆盖新状态。
+这样既避免多个拥有生活目标的 Agent 和多焦点协调，又不会因一次模型调用超过十秒而停止 Cognitive Pulse。器官内部可以使用代理式控制器完成已经确定的 Commitment，但不能取得 Narrative Self、Concern 或新 Commitment 权。AP 模型请求在途时，新事件只进入背景场，不启动第二个 AP；若焦点已经被更紧急现实中止，迟到结果不能覆盖新状态。
 
 进程内部只有五个工程职责：
 
 1. **Runtime**：时间、脉冲、事实快照、差分、事件排序和唯一状态写入者。
 2. **Dynamics**：Concern、Affective State、探索压力的少量确定性公式和 Attention 触发。
 3. **Cognition**：上下文选择、模型调用、自由 Thought Thread、自我赋值、AIP 意义和 Narrative Self 更新。
-4. **Body**：Shell、文件、进程、网络、浏览器和导师通道适配。
+4. **Body**：Organ Host 及 System、Browser、导师和未来器官适配；负责感知和 Action Enactment，不做意义判断。
 5. **Store**：SQLite 事实记录、当前动力状态和生命工作区引用。
 
 它们是一个进程内的工程边界，不代表五个心智主体。
@@ -176,12 +177,12 @@ Hominal 在专属 Ubuntu 身体内拥有 root，可以修改代码、配置、�
     在足以继续生活、必须取得现实或预算耗尽时停止
     接收简洁思想脉络、自我赋值、AIP 输出和当前选择
     如有重要行动，形成至多一个新的最小 Action Commitment
-    异步执行身体行动
+    经 Organ Host 交给器官异步完成 Action Enactment
     结果返回后完成 ARD、结果 AIP、ER 和经验吸收
     只有自我定义性 Episode 才更新 Narrative Self
 ```
 
-Cognitive Pulse 是持续代谢；Attention Pulse 是唯一的当前昂贵认知；Episode 是事后可识别的生命片段。它们不是强制状态机。已发出的身体过程可以并行，当前解释与新承诺不能并行。
+Cognitive Pulse 是持续代谢；Attention Pulse 是唯一的当前昂贵认知；Episode 是事后可识别的生命片段。它们不是强制状态机。已发出的身体过程可以并行，当前解释与新行动意愿不能并行。
 
 ## 4. 最小认知动力学
 
@@ -258,7 +259,7 @@ Concern 不因一次“我想开了”自动完成。它可以因四种不同原
 
 ### 4.5 内生探索，避免等待成为生命终态
 
-低张力不等于永久等待。Expansion Drive 形成一个随缺少新接触而增长的探索压力：
+低张力不等于永久等待。Life Value Field 中的 Exploration 方向随缺少新接触和可理解未知逐渐形成探索压力：
 
 ```text
 X(t+Δt) = clip(
@@ -271,7 +272,7 @@ X(t+Δt) = clip(
 )
 ```
 
-当探索压力达到注意阈值，它只要求 Hominal 重新观察、发现可能性或提出新问题，不强迫立即对外行动。真实探索、创作、关系联结或能力形成会降低压力；重复同义思考不会。
+当探索压力达到注意阈值，它只提高真实感知入口和具体未知取得注意的机会，不强迫立即对外行动。真实探索形成 Experience 后增加近期 satiation；重复同义思考不会取得同等动力后果。其他五个价值方向使用相同的 orientation—activation—satiation 逻辑，并在同一个注意场竞争，不建立平行驱动器。
 
 ### 4.6 有限注意、单一焦点与矛盾代谢
 
@@ -313,10 +314,13 @@ depth_need = f(
 Endogenous Reward 不压缩成永久统一的全局目标。每次行动后至少保留以下价值变化：
 
 ```text
-continuance_delta
-relatedness_delta
-expansion_delta
-self_endorsed_delta
+continuance
+exploration
+agency
+vitality
+relatedness
+contribution
+self_endorsed
 experienced_cost
 ```
 
@@ -683,7 +687,7 @@ lab/run.py               复用阶段二已经验证的外部运行入口
 - 崩溃恢复后不会重复创建同义 Concern 或重放未知动作；
 - 一小时内形成至少一条“事实变化 → AIP → Concern/情感 → 焦点 → 自主行动 → 新现实”的完整真实链路。
 
-### 阶段五：行动承诺、现实学习、叙事形成与自我改变
+### 阶段五：行动意愿、现实学习、叙事形成与自我改变
 
 本阶段已经按 [G0 阶段五行动计划](../plans/g0-stage-5-reality-learning-and-self.md) 完成实现、真实实验、根因重构、归档与 reset。阶段结果证明历史能够改变后来行动；自然 Narrative Self 更新与更深事实审计尚未出现，保留为后续问题。
 

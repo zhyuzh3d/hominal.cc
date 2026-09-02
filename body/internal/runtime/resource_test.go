@@ -116,7 +116,7 @@ func TestValidationFailureTemporarilyEscalatesOnlyTheCurrentFocus(t *testing.T) 
 	runtime.config.GenerationKind = "formal"
 	runtime.state.BirthBriefEnteredAt = nowUTC()
 	runtime.state.PlannedEnd = time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano)
-	runtime.state.ExplorationPressure = 1
+	runtime.state.ValueField.Activation.Exploration = 1
 	runtime.state.CognitiveResource.DefaultProfile = CognitiveProfile{Model: "luna", ReasoningEffort: "low"}
 	runtime.state.Concerns = []Concern{{
 		ID: "exploration-focus", OriginKind: "endogenous_change", Meaning: "接触一个尚未确定意义的现实",
@@ -132,7 +132,7 @@ func TestValidationFailureTemporarilyEscalatesOnlyTheCurrentFocus(t *testing.T) 
 			ActualMicrousd: 1000, CostConfirmed: true, Status: "completed",
 		})
 		if err := runtime.handleCognitiveResult(context.Background(), CognitiveResult{
-			LeaseID: leaseID, FocusID: "exploration-focus", Error: errors.New("body_shell action requires a command"),
+			LeaseID: leaseID, FocusID: "exploration-focus", Error: errors.New("organ_action action requires a command"),
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -146,12 +146,26 @@ func TestValidationFailureTemporarilyEscalatesOnlyTheCurrentFocus(t *testing.T) 
 	}
 }
 
+func TestStrictExperimentalProfileDoesNotEscalateValidationFailure(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(8), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.config.CognitiveResource.DisableValidationFallback = true
+	if recovered, err := runtime.planValidationRecovery("focus", CognitiveProfile{Model: "luna", ReasoningEffort: "none"}); err != nil || recovered {
+		t.Fatalf("strict experimental profile received automatic validation fallback: recovered=%v err=%v", recovered, err)
+	}
+	if runtime.state.CognitiveResource.NextProfile != nil {
+		t.Fatalf("strict experimental profile scheduled an unrequested next profile: %#v", runtime.state.CognitiveResource.NextProfile)
+	}
+}
+
 func TestValidationExhaustionPreservesConcernButEndsRapidRetry(t *testing.T) {
 	runtime, err := New(t.TempDir(), "instance", testConfig(8), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime.state.ExplorationPressure = 1
+	runtime.state.ValueField.Activation.Exploration = 1
 	runtime.state.Concerns = []Concern{{
 		ID: "held", OriginKind: "endogenous_change", Meaning: "仍属于我的问题",
 		Strength: 1, Activation: 1, Ownership: 1, Answerability: 1, Resolution: "hold",
@@ -326,7 +340,7 @@ func TestContinuationCanScheduleRealityAbsorptionOnlyWhenItActs(t *testing.T) {
 	if _, err := runtime.validateResourceChoice(choice, "continuation", "none"); err == nil {
 		t.Fatal("a thought-only continuation was allowed to recurse without new reality")
 	}
-	profile, err := runtime.validateResourceChoice(choice, "continuation", "body_shell")
+	profile, err := runtime.validateResourceChoice(choice, "continuation", "organ_action")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -453,7 +467,7 @@ func TestRepeatedUnconfirmedGatewayFailuresProtectOnceAndOfferRecovery(t *testin
 		t.Fatalf("one protected model created duplicate facts: %#v", runtime.state.Background)
 	}
 	profile, ok := runtime.recoveryProfile("terra")
-	if !ok || profile.Model != "luna" {
-		t.Fatalf("the lowest-cost recovery cognition was unavailable: %#v", profile)
+	if !ok || profile.Model != "sol" || profile.ReasoningEffort != "low" {
+		t.Fatalf("the bounded action-capable recovery cognition was unavailable: %#v", profile)
 	}
 }

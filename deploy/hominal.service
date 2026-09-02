@@ -1,7 +1,7 @@
 [Unit]
 Description=Hominal active body
-After=local-fs.target network-online.target
-Wants=network-online.target
+After=local-fs.target network-online.target clash-verge-service.service
+Wants=network-online.target clash-verge-service.service
 RequiresMountsFor=/agent
 ConditionPathIsMountPoint=/agent
 ConditionPathExists=/agent/boot/active-instance
@@ -9,11 +9,18 @@ ConditionPathExists=/agent/boot/active-instance
 [Service]
 Type=simple
 Environment=HOMINAL_RUNTIME_CONFIG=/etc/hominal/runtime.json
+Environment=HOME=/root
+Environment=USER=root
+Environment=LOGNAME=root
+Environment=HTTP_PROXY=http://127.0.0.1:7897
+Environment=HTTPS_PROXY=http://127.0.0.1:7897
+Environment=NO_PROXY=127.0.0.1,localhost,::1,192.168.124.161,ai.ai-mesh.cn
 ExecStart=/usr/local/sbin/hominal-launcher
 Restart=always
 RestartSec=2
 TimeoutStopSec=15
 KillSignal=SIGTERM
+KillMode=control-group
 
 [Install]
 WantedBy=multi-user.target

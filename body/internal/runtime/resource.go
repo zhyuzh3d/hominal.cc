@@ -16,6 +16,11 @@ const (
 )
 
 func normalizeResourceConfig(config *Config) error {
+	switch modelGatewayAdapter(config.ModelGateway) {
+	case "openai", "llmserver":
+	default:
+		return fmt.Errorf("unsupported model gateway adapter %q", config.ModelGateway.Adapter)
+	}
 	if config.ModelGateway.MaxOutputTokens <= 0 {
 		config.ModelGateway.MaxOutputTokens = 1200
 	}
@@ -246,6 +251,9 @@ func (r *Runtime) validationRecoveryProfile(failed CognitiveProfile) (CognitiveP
 }
 
 func (r *Runtime) planValidationRecovery(focusID string, failed CognitiveProfile) (bool, error) {
+	if r.config.CognitiveResource.DisableValidationFallback {
+		return false, nil
+	}
 	profile, ok := r.validationRecoveryProfile(failed)
 	if !ok {
 		return false, nil
@@ -336,24 +344,17 @@ func modelProtected(state State, model string, now time.Time) (bool, time.Time) 
 func resourceView(request CognitiveRequest, inputTokenEstimate int) map[string]any {
 	now := time.Now().UTC()
 	hourSpent, daySpent, inflight := resourceSpend(request.State, request.Config.CognitiveResource, now)
-	models := make([]map[string]any, 0, len(request.Config.CognitiveResource.Models))
-	keys := make([]string, 0, len(request.Config.CognitiveResource.Models))
-	for key := range request.Config.CognitiveResource.Models {
-		keys = append(keys, key)
+	mainProfile := request.State.CognitiveResource.DefaultProfile
+	if mainProfile.Model == "" {
+		mainProfile = request.Config.CognitiveResource.InitialDefaultProfile
 	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		model := request.Config.CognitiveResource.Models[key]
-		models = append(models, map[string]any{
-			"name":                         key,
-			"model_id":                     model.ID,
-			"supported_reasoning_efforts":  model.SupportedReasoningEfforts,
-			"estimated_upper_microusd":     reservationCost(model, inputTokenEstimate, request.Config.ModelGateway.MaxOutputTokens),
-			"input_usd_per_million":        float64(model.InputPerMillionMicrousd) / float64(microusdPerUSD),
-			"cached_input_usd_per_million": float64(model.CachedInputPerMillionMicrousd) / float64(microusdPerUSD),
-			"output_usd_per_million":       float64(model.OutputPerMillionMicrousd) / float64(microusdPerUSD),
-		})
-	}
+	main := cognitiveProfileResourceView(request.Config, mainProfile, inputTokenEstimate)
+	main["role"] = "main"
+	main["use"] = "绝大多数感知、意义判断、关切、生活决策与现实结果吸收"
+	actionAssistProfile := CognitiveProfile{Model: "sol", ReasoningEffort: "low"}
+	actionAssist := cognitiveProfileResourceView(request.Config, actionAssistProfile, inputTokenEstimate)
+	actionAssist["role"] = "action_assistance"
+	actionAssist["use"] = "主力认知已固定对象、目标和内容后，对精确命令、代码或工具步骤的一次性实现协助"
 	view := map[string]any{
 		"current_profile": map[string]any{
 			"profile": request.Profile,
@@ -372,11 +373,31 @@ func resourceView(request CognitiveRequest, inputTokenEstimate int) map[string]a
 			"limit_microusd":     request.Config.CognitiveResource.RollingDayLimitMicrousd,
 			"remaining_microusd": maxInt64(request.Config.CognitiveResource.RollingDayLimitMicrousd-daySpent-inflight, 0),
 		},
-		"models":           models,
+		"roles": map[string]any{
+			"main":              main,
+			"action_assistance": actionAssist,
+			"body_reflex": map[string]any{
+				"implementation":        "deterministic_kernel",
+				"use":                   "脉搏、计费、重试、排序、状态保存与其他可确定的机械工作",
+				"model_choice_required": false,
+			},
+		},
 		"last_spend":       request.State.CognitiveResource.LastSpend,
 		"protected_models": request.State.CognitiveResource.ProtectedModels,
 	}
 	return view
+}
+
+func cognitiveProfileResourceView(config Config, profile CognitiveProfile, inputTokenEstimate int) map[string]any {
+	model := config.CognitiveResource.Models[profile.Model]
+	return map[string]any{
+		"profile":                      profile,
+		"model_id":                     model.ID,
+		"estimated_upper_microusd":     reservationCost(model, inputTokenEstimate, config.ModelGateway.MaxOutputTokens),
+		"input_usd_per_million":        float64(model.InputPerMillionMicrousd) / float64(microusdPerUSD),
+		"cached_input_usd_per_million": float64(model.CachedInputPerMillionMicrousd) / float64(microusdPerUSD),
+		"output_usd_per_million":       float64(model.OutputPerMillionMicrousd) / float64(microusdPerUSD),
+	}
 }
 
 func maxInt64(left, right int64) int64 {

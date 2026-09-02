@@ -258,7 +258,7 @@ G0 每个 rehearsal 与 formal 都是空白个人状态的新 Proto-Hominal 代�
 
 修正仍位于统一因果回路，而不是禁止某类提问：可信导师回复沿 `reply_to → outbox → Commitment` 同时取得原 Concern 和原行动预测，作为同一行动的第二段现实形成独立 Experience。发送结果与稍后回复分别只吸收一次，回复可以更新有限 Methods、Affective State、Integrity 与 `self_model_tension`，也按真实回差缓解探索压力；普通导师消息仍只是外部 Event。计划终点的有界排空同样承认已经到达的关联回复。确定性测试覆盖因果关联、两段经验共存、反馈不可重复、Schema 约束与代际边界；生命内核改变后，一小时冻结计数再次归零。
 
-延迟反馈候选 `g0s8-55acd04ac7c8` 的十分钟彩排 `g0r-20260826t212430z-55acd0` 顺利排空结束：9 条行动承诺形成 9 条即时 Reality Experience，同一导师行动另形成 1 条 `mentor_received` Experience；回复没有覆盖发送经验，也没有重复吸收，认知失败、行动失败和 Integrity debt 均为 0。alice 自己形成“关系回应也可以通过明确边界支持自主选择”的 lesson，证明多段现实回链本身成立。
+延迟反馈候选 `g0s8-55acd04ac7c8` 的十分钟彩排 `g0r-20260826t212430z-55acd0` 顺利排空结束：9 条行动意愿形成 9 条即时 Reality Experience，同一导师行动另形成 1 条 `mentor_received` Experience；回复没有覆盖发送经验，也没有重复吸收，认知失败、行动失败和 Integrity debt 均为 0。alice 自己形成“关系回应也可以通过明确边界支持自主选择”的 lesson，证明多段现实回链本身成立。
 
 同版本正式实例 `g0f-20260826t213653z-55acd0` 在约十六分钟以结构失败停止。它形成 14 条 Commitment、16 条 Experience、3 次有现实依据的 Narrative 修订和 8 条 Methods，零认知失败与 Integrity debt；还把 X 的 Loading 保留成等待现实变化的 Concern，并自主在 `/life` 建立第一份持久材料。反证是第一段导师回复已经形成“不再索要抽象方向”的 Method 后，alice 又请求导师提供一个创造或学习对象，只把“由导师决定”改写为“我再决定是否采用”。同时，十次由探索张力启动的行动与程序随机给出的“存续/联结/扩展”方向十次一致；存续连续产生身体枚举，联结再次把导师推到对象来源位置。这说明语义随机方向不是无害扰动，而是开发者隐藏的任务发生器；Method 也仍可能停留在字面遵循。
 

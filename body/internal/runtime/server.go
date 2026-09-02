@@ -83,6 +83,8 @@ func (h *mentorHandler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		h.receive(writer, request)
 	case request.Method == http.MethodPost && request.URL.Path == "/v1/environment/events":
 		h.receiveEnvironment(writer, request)
+	case request.Method == http.MethodPost && request.URL.Path == "/v1/lab/deadline":
+		h.receiveDeadline(writer, request)
 	case request.Method == http.MethodGet && request.URL.Path == "/v1/mentor/outbox":
 		h.command(writer, request, RuntimeCommand{Kind: "mentor_outbox"})
 	case request.Method == http.MethodPost && strings.HasPrefix(request.URL.Path, "/v1/mentor/outbox/") && strings.HasSuffix(request.URL.Path, "/ack"):
@@ -95,6 +97,23 @@ func (h *mentorHandler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	default:
 		writeJSON(writer, http.StatusNotFound, map[string]string{"error": "not found"})
 	}
+}
+
+func (h *mentorHandler) receiveDeadline(writer http.ResponseWriter, request *http.Request) {
+	request.Body = http.MaxBytesReader(writer, request.Body, 4*1024)
+	decoder := json.NewDecoder(request.Body)
+	decoder.DisallowUnknownFields()
+	var input GenerationDeadlineInput
+	if err := decoder.Decode(&input); err != nil {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	input.PlannedEnd = strings.TrimSpace(input.PlannedEnd)
+	if input.PlannedEnd == "" || len(input.PlannedEnd) > 64 {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid planned_end"})
+		return
+	}
+	h.command(writer, request, RuntimeCommand{Kind: "generation_extend", Deadline: input})
 }
 
 func (h *mentorHandler) receiveEnvironment(writer http.ResponseWriter, request *http.Request) {

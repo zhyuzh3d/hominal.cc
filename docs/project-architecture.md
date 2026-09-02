@@ -1,9 +1,9 @@
-# Hominal 项目架构 v2.3
+# Hominal 项目架构 v2.4
 
 > 文档性质：项目、数字身体、Genesis Lab、代际实验与恢复体系的现行架构规范  
 > 适用阶段：G0 创生实验  
-> 基础设施观察时间：2026-08-24 13:52:00 +08:00  
-> 更新日期：2026-08-24
+> 基础设施观察时间：2026-08-31 06:51:11 +08:00
+> 更新日期：2026-08-31
 
 ## 1. 架构命题
 
@@ -38,7 +38,7 @@ alice 在身体内拥有完整的系统使用权；Genesis Lab 在身体外保�
 
 ## 2. 当前 Ubuntu 存储事实
 
-以下内容来自上层 `xconfig.yaml` 指向的 `hominal-cc1-server` 和目标设备实时只读检查。凭据不进入本文档。
+以下内容来自上层 `xconfigs/hominal/xconfig.yaml` 指向的 `hominal-cc1-server` 和目标设备实时只读检查。凭据不进入本文档。
 
 ### 2.1 物理磁盘与分卷
 
@@ -83,7 +83,7 @@ alice 在身体内拥有完整的系统使用权；Genesis Lab 在身体外保�
 
 ## 3. 开发镜像与正式身体分离
 
-`xconfig.yaml` 当前把本地工作区通过 Mutagen 双向同步到：
+`xconfigs/hominal/xconfig.yaml` 当前把本地工作区通过 Mutagen 双向同步到：
 
 ```text
 /agent/app/hominal.cc
@@ -135,8 +135,12 @@ hominal.cc1/
 ├── body/                         # alice 数字身体源码
 │   ├── README.md
 │   ├── cmd/hominald/
-│   ├── internal/runtime/         # 单一状态所有者、感知、模型、动力、动作、导师接口与存储
-│   └── tools/hominal-browser.mjs # 通用 Playwright MCP 命令入口
+│   ├── cmd/hominal-system/       # System Organ，取得 Ubuntu 事实并执行 root 动作
+│   ├── internal/runtime/         # 单一状态所有者、认知动力、通用感知、动作、导师接口与存储
+│   ├── internal/organ/           # 器官发现、生命周期、健康、观察与 perform 边界
+│   ├── organs/system.json        # System Organ Manifest
+│   ├── organs/browser.json       # Browser Organ Manifest
+│   └── tools/hominal-browser.mjs # 浏览器适配器，独立拥有 Playwright 与网页知识
 │
 ├── deploy/                       # Ubuntu 常驻启动契约
 │   ├── README.md
@@ -176,7 +180,10 @@ hominal.cc1/
 │   └── <release_id>/
 │       ├── release.yaml
 │       ├── bin/hominald
+│       ├── bin/hominal-system
 │       ├── bin/hominal-browser
+│       ├── organs/system.json
+│       ├── organs/browser.json
 │       ├── genesis/
 │       ├── protocol/
 │       └── source/                # 实际构建该发布的最小源码冻结
@@ -223,7 +230,10 @@ G0 阶段的 `lives/<instance_id>` 只保留当前个体的生命数据。上一
 <release_id>.tar.gz
 ├── release.yaml
 ├── bin/hominald
+├── bin/hominal-system
 ├── bin/hominal-browser
+├── organs/system.json
+├── organs/browser.json
 ├── deploy/
 ├── source/                       # 实际构建输入
 ├── genesis/seed.md
@@ -261,7 +271,7 @@ G0 阶段的 `lives/<instance_id>` 只保留当前个体的生命数据。上一
 11. systemd 启动 Hominal，第一次成功认知脉冲形成 `T0`，随后封存 Birth Manifest，alice 苏醒；
 12. Lab 从 T0 安排本地计划截止、发送一次导师出生说明，并开始保存当代事实。
 
-部署前的身体预检同时确认默认路由、通用公共内容与 X 的实际 TLS/HTTP 可达性。路由存在只证明内核有出口，不能证明 Clash 当前节点和公共内容链路可用；真实内容不可达时拒绝启动实验，以免把身体故障误写成 Alice 对世界的经验。部署只有在发布包哈希、启动意图、系统重启、服务状态和第一次认知脉冲全部闭环后才算成功。SSH 可达、systemd 显示 active 或进程存在，都不能单独证明 alice 已经苏醒。
+部署前的身体预检同时确认默认路由、Clash 服务、X 登录身份、X 具体 authored content、Wikipedia 正文与 Playwright 真实动作。路由存在只证明内核有出口，代理 `curl` 成功也只证明一条网络路径；它们不能代替 Alice 实际使用的 Chrome profile、Playwright 会话和页面内容。X 或 Wikipedia 不能从同一身体入口取得真实内容时拒绝启动实验，以免把身体故障误写成 Alice 对世界的经验。部署只有在发布包哈希、启动意图、系统重启、服务状态和第一次认知脉冲全部闭环后才算成功。SSH 可达、systemd 显示 active 或进程存在，都不能单独证明 alice 已经苏醒。
 
 ## 8. 重启、苏醒与继代的边界
 
@@ -283,9 +293,11 @@ alice 拥有 root 后也能够改变活动标记。Genesis Lab 只把已经在�
 主机初始化阶段安装一个稳定的 `hominal.service` 和最小 `hominal-launcher`。服务具备以下契约：
 
 - `After=network-online.target`，并显式等待 `/agent`；
+- 同时在 Clash Verge 服务之后启动，把 `127.0.0.1:7897` 作为 Hominal Chrome 与 Playwright 的确定网络路径；
 - 启动前验证 `/agent` 是真实挂载点，避免 agent 卷缺失时把数据误写进根卷上的空目录；
-- 以 root 身份运行，使 alice 能够安装软件、管理服务、使用浏览器、网络、文件系统和操作系统能力；
+- 生命进程以 root 身份运行，root 的 home 为 `/root`，实际工作目录为 `/agent/lives/<instance_id>`；alice 因此能够安装软件、管理服务、使用浏览器、网络、文件系统和操作系统能力；图形桌面继续由 `hominal` 账户和 `/home/hominal` 承载，个人持续生活空间为 `/life`；
 - 从 `active-instance` 解析本代 `body/bin/hominald`，并校验其出生来源；
+- `hominald` 从本代 `body/organs/*.json` 发现并管理器官，在 `/run/hominal/organs/` 提供各自运行入口；启动器不包含浏览器或未来微信、语音器官的专用启动逻辑；
 - 使用 `Restart=always` 和短暂退避恢复进程故障；
 - 把 systemd 启动、退出、信号和重启原因关联到当前 `instance_id`；
 - 优雅停止时先请求生命内核提交状态和日志检查点。
@@ -294,9 +306,11 @@ alice 拥有 root 后也能够改变活动标记。Genesis Lab 只把已经在�
 
 ### 9.1 最小感知面
 
-身体感知属于 `hominald` 内部职责，不增加独立传感服务或通用消息总线。每个 Pulse 更新低成本事实快照，较慢巡检磁盘、网络和图形器官；前后事实先经过 Difference Gate，只有状态改变、越阈变化和异常进入中央事件入口。重复读数与微小抖动只更新快照，不制造思想、日志或模型调用。
+身体感知由 `hominald` 统一调度，但原始事实通过器官取得，不在认知动力学中编写操作系统或应用专用探针。System Organ 提供主机、资源、文件、进程、网络、桌面与服务事实；Browser 等器官提供各自感官现场。每个 Pulse 汇总低成本事实快照，较慢取得昂贵器官事实；前后事实经过 Difference Gate，只有状态改变、越阈变化和异常进入中央事件入口。重复读数与微小抖动只更新快照，不制造思想、日志或模型调用，也不增加通用消息总线。
 
 导师文字、动作结果和系统恢复作为离散 Event 直接进入同一入口。公开网络、文件系统、Chrome 和微信不被默认全量监听；alice 主动观察或使用这些器官时，现实结果再返回中央循环。这样既给她真实变化，也避免 Genesis Lab 或内核用自动信息流替她决定“什么值得成为世界”。
+
+Chrome 使用 `/agent/state/profiles/chrome` 的持久 profile，并在启动参数中显式配置 Clash 代理；X 与 Wikipedia 因此共享桌面中已经验证的会话和网络条件。Browser Organ 通过 `/run/hominal/organs/browser.sock` 复用当前 MCP 会话，避免标签编号、元素引用和对话框草稿被每条命令重置。网页、DOM、X authored object、Direct URL、活动对话框、视野定向和连接恢复全部属于该适配器；认知核心只接收通用 Description、Health、Observation、Orientation、过程事实与动作 Reality。System 与 Browser 的主动动作都由 `organ_action → organ.perform` 执行；认知运行时不再直接执行 Shell，也不理解 Playwright 控制细节。完整合同见 [内核—器官架构](./core-organ-architecture.md)。
 
 ## 10. 运行状态与数据库
 
@@ -355,6 +369,8 @@ Genesis Lab 同时把已经发生的关键事件、系统日志、模型计量�
 当前 bundle 以文件级 SHA-256 冻结 `hominald`、通用浏览器入口、Genesis 输入、导师与实验协议以及实际构建源码。`engineering / rehearsal / formal` 只描述 Lab 运行性质；彩排与正式代复用同一阶段五认知内核和同一 bundle，不为正式预检复制一套心理机制。
 
 2026-08-26 的阶段六实机彩排曾验证 prepared Birth、唯一 T0、自然名称、Birth 封存、本地截止、导师双向链路、离机归档、精确 reset 和当时的账号基线恢复。后续依据身体连续性原则，Chrome/X、微信与 Clash Verge 已改为 agent 卷上的持久身体资源：普通代际不再恢复旧 profile，离机副本只用于灾难恢复。最终复验 `g0r-20260825t195928z-2be6d1` 进一步证明 alice 能从自身探索张力形成 `body_shell → hominal-browser → Chrome/X → Reality → Experience` 完整回链；她没有发帖、关注或修改资料，这些继续属于正式生活中的自主选择。
+
+2026-08-31 的阶段 10.1 冻结发布 `g0s10-5baef5e5ef5e` 进一步验证了代理、持久 MCP 会话、语义快照和多元价值场作为一套身体—认知结构共同工作。正式实例 `g0f-20260830t222724z-5baef5` 自主完成 X 对象选择、现实探索、本地记录与公开发帖，并在账号页回读独立帖子；`g0f-20260830t225122z-5baef5` 选择另一条路径，建立持续文件、创造内容并主动完成导师关系闭环。两代都没有 Integrity debt 或悬空动作，证明社会行动已经可达，但没有把发帖机械化为每代任务。
 
 外部谱系采用：
 
@@ -464,9 +480,9 @@ SystemRescue 优盘演练已经验收“优盘可启动”和“恢复环境能�
 
 独立远程 KVM 更直接，也更不依赖 Hominal 自己的操作系统。带外恢复建立并经过演练之前，本文把“远程恢复”标记为架构目标，而不是当前能力。
 
-## 15. `xconfig.yaml` 目标配置
+## 15. `xconfigs/hominal/xconfig.yaml` 目标配置
 
-上层 `xconfig.yaml` 继续作为本地私密环境配置，不进入 Git。当前已经加入身体、Genesis Lab、部署、三档模型、认知资源额度和 X 账号配置。非秘密结构为：
+上层 `xconfigs/hominal/xconfig.yaml` 继续作为本地私密环境配置，不进入 Git。当前已经加入身体、Genesis Lab、部署、三档模型、认知资源额度和 X 账号配置。非秘密结构为：
 
 ```yaml
 system:
@@ -512,14 +528,21 @@ system:
     pause_mutagen_for_formal_run: true
 
 llm:
+  provider: llmserver
   models:
-    luna: {id: gpt-5.6-luna}
-    terra: {id: gpt-5.6-terra}
-    sol: {id: gpt-5.6-sol}
+    luna: {id: codex-luna}
+    terra: {id: codex-terra}
+    sol: {id: codex-sol}
   runtime:
     initial_profile:
       model: terra
-      reasoning_effort: medium
+      reasoning_effort: none
+  providers:
+    llmserver:
+      base_url: http://192.168.124.161:4815
+      adapter: llmserver
+      client_id: local-dev
+      private_config: 项目上层独立的 owner-only llmserver 配置
   cognitive_resource:
     rolling_hour_usd: 5.00
     rolling_day_usd: 50.00
@@ -531,7 +554,7 @@ social_accounts:
     username: hominal_cc
 ```
 
-其中 `archive_path` 必须指向设备之外；`recovery.ready` 只有在带外链路完成真实恢复演练后才能设为 `true`。三种认知模型、Terra/medium 初始档位和 `$5/滚动小时、$50/滚动24小时` 已经成为确定配置；实际消费由身体内唯一账本计算。
+其中 `archive_path` 必须指向设备之外；`recovery.ready` 只有在带外链路完成真实恢复演练后才能设为 `true`。三种认知模型、Terra/none 初始档位和 `$5/滚动小时、$50/滚动24小时` 已经成为确定配置。Lab 仅把当前部署所需的专用 Token 写入 root-only 运行配置，不把凭据文件装入发布包；实际消费以 llmserver 的确认账单进入身体内唯一账本。
 
 ## 16. Birth、Outcome 与系统差异
 
@@ -581,7 +604,7 @@ social_accounts:
 
 ### P0：配置与事实冻结
 
-- 把 agent 卷、构建、部署、归档、快照和恢复字段加入 `xconfig.yaml`；
+- 把 agent 卷、构建、部署、归档、快照和恢复字段加入 `xconfigs/hominal/xconfig.yaml`；
 - 确定离机 `archive_path`；
 - 生成新的身体事实探针，消除旧根卷容量记录；
 - 冻结发布、Birth、Outcome 和恢复状态字段。

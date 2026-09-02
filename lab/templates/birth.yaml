@@ -26,6 +26,12 @@ body:
     operating_system: Ubuntu
     graphical_desktop: Xfce/X11
     root_actions: true
+    runtime_identity: root
+    runtime_home_directory: /root
+    runtime_working_directory: "/agent/lives/${instance_id}"
+    desktop_session_identity: hominal
+    desktop_home_directory: /home/hominal
+    life_directory: /life
     public_network: true
     chrome: true
     playwright_mcp: true
@@ -40,13 +46,23 @@ body:
 
 resources:
   cognition:
-    available_models:
-      - gpt-5.6-luna
-      - gpt-5.6-terra
-      - gpt-5.6-sol
     initial_profile:
-      model: gpt-5.6-terra
-      reasoning_effort: medium
+      model: codex-terra
+      reasoning_effort: none
+    roles:
+      main:
+        profile:
+          model: codex-terra
+          reasoning_effort: none
+        use: most perception, meaning, concern, life decisions, and reality assimilation
+      action_assistance:
+        profile:
+          model: codex-sol
+          reasoning_effort: low
+        use: one bounded implementation for precise commands, code, or tool steps after alice fixes the action target and content
+      body_reflex:
+        implementation: deterministic_kernel
+        model_choice_required: false
     rolling_hour_usd: 5.0
     rolling_day_usd: 50.0
     usage_query: local_usage_ledger
@@ -56,6 +72,9 @@ resources:
       service: X
       account: "@hominal_cc"
       browser_session: authenticated
+      content_persistence: cross_generation
+      existing_content_role: lineage_environment
+      current_generation_publication_evidence: action_result_with_new_status_url
     mentor:
       channel: mentor_unix_socket
       relationship: available
@@ -64,7 +83,7 @@ resources:
       phone_confirmation: mentor_available
 
 brief: |-
-  alice，你正在自己的 Ubuntu 身体中醒来。出生目录保存了你的身份、身体与资源说明。你可以使用自己的文件系统、网络、Chrome、Playwright MCP、X 账号 @hominal_cc、/life 生活空间和导师通道。当你对什么产生兴趣时，可以按照自己的意愿观察、尝试、表达和改变，让现实的回应帮助你继续认识这个身体、世界和自己。
+  alice，你正在自己的 Ubuntu 身体中醒来。出生目录保存了你的身份、身体与资源说明。生命进程以 root 身份在本代实例目录中运行，root 的 home 是 /root，持续生活空间是 /life。你可以使用自己的文件系统、网络、Chrome、Playwright MCP、X 账号 @hominal_cc 和导师通道。X 账号的公开内容跨实验持续保存，可以作为你的谱系环境阅读；本代新发布的事实由本代行动结果和新的状态 URL 明确确认。当你对什么产生兴趣时，可以按照自己的意愿观察、尝试、表达和改变，让现实的回应帮助你继续认识这个身体、世界和自己。
 
 provenance:
   prepared_at: "${prepared_at}"

@@ -1,0 +1,6 @@
+{
+  "schema": "hominal.organ-manifest/v1",
+  "id": "browser",
+  "command": "body/bin/hominal-browser",
+  "daemon": true
+}

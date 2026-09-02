@@ -28,20 +28,22 @@ type PulseConfig struct {
 type ModelGatewayConfig struct {
 	BaseURL         string `json:"base_url"`
 	APIKey          string `json:"api_key"`
+	Adapter         string `json:"adapter,omitempty"`
 	MaxOutputTokens int    `json:"max_output_tokens"`
 }
 
 type CognitiveResourceConfig struct {
-	PriceTableVersion        string                          `json:"price_table_version"`
-	RollingHourLimitMicrousd int64                           `json:"rolling_hour_limit_microusd"`
-	RollingDayLimitMicrousd  int64                           `json:"rolling_day_limit_microusd"`
-	Models                   map[string]CognitiveModelConfig `json:"models"`
-	InitialDefaultProfile    CognitiveProfile                `json:"initial_default_profile"`
-	ValidationRetryPerFocus  int                             `json:"validation_retry_per_focus"`
-	ContinuationPerFocus     int                             `json:"continuation_per_focus"`
-	PaidFailureThreshold     int                             `json:"paid_failure_threshold"`
-	PaidFailureWindowMinutes int                             `json:"paid_failure_window_minutes"`
-	ModelProtectionMinutes   int                             `json:"model_protection_minutes"`
+	PriceTableVersion         string                          `json:"price_table_version"`
+	RollingHourLimitMicrousd  int64                           `json:"rolling_hour_limit_microusd"`
+	RollingDayLimitMicrousd   int64                           `json:"rolling_day_limit_microusd"`
+	Models                    map[string]CognitiveModelConfig `json:"models"`
+	InitialDefaultProfile     CognitiveProfile                `json:"initial_default_profile"`
+	ValidationRetryPerFocus   int                             `json:"validation_retry_per_focus"`
+	DisableValidationFallback bool                            `json:"disable_validation_fallback,omitempty"`
+	ContinuationPerFocus      int                             `json:"continuation_per_focus"`
+	PaidFailureThreshold      int                             `json:"paid_failure_threshold"`
+	PaidFailureWindowMinutes  int                             `json:"paid_failure_window_minutes"`
+	ModelProtectionMinutes    int                             `json:"model_protection_minutes"`
 }
 
 type CognitiveModelConfig struct {
@@ -58,41 +60,44 @@ type CognitiveProfile struct {
 }
 
 type Dynamics struct {
-	AffectReturnRate           float64 `json:"affect_return_rate"`
-	ConcernBaseDrive           float64 `json:"concern_base_drive"`
-	ConcernUrgencyWeight       float64 `json:"concern_urgency_weight"`
-	ConcernGrowthGain          float64 `json:"concern_growth_gain"`
-	ConcernResolutionGain      float64 `json:"concern_resolution_gain"`
-	ConcernNaturalDecayRate    float64 `json:"concern_natural_decay_rate"`
-	AttentionAffectWeight      float64 `json:"attention_affect_weight"`
-	AttentionExplorationWeight float64 `json:"attention_exploration_weight"`
-	AttentionNoveltyWeight     float64 `json:"attention_novelty_weight"`
-	AttentionCostWeight        float64 `json:"attention_cost_weight"`
-	AttentionThreshold         float64 `json:"attention_threshold"`
-	AttentionCandidateLimit    int     `json:"attention_candidate_limit"`
-	AttentionRevisitSeconds    int     `json:"attention_revisit_seconds"`
-	ExplorationIdleGrowth      float64 `json:"exploration_idle_growth"`
-	ExplorationUnknownGrowth   float64 `json:"exploration_unknown_growth"`
-	ExplorationRelief          float64 `json:"exploration_relief"`
-	IntegrityPersistence       float64 `json:"integrity_persistence"`
-	IntegrityGapGain           float64 `json:"integrity_gap_gain"`
-	IntegrityRepairGain        float64 `json:"integrity_repair_gain"`
-	IntegrityMirrorThreshold   float64 `json:"integrity_mirror_threshold"`
+	AffectReturnRate            float64 `json:"affect_return_rate"`
+	ConcernBaseDrive            float64 `json:"concern_base_drive"`
+	ConcernUrgencyWeight        float64 `json:"concern_urgency_weight"`
+	ConcernGrowthGain           float64 `json:"concern_growth_gain"`
+	ConcernResolutionGain       float64 `json:"concern_resolution_gain"`
+	ConcernNaturalDecayRate     float64 `json:"concern_natural_decay_rate"`
+	AttentionAffectWeight       float64 `json:"attention_affect_weight"`
+	AttentionValueWeight        float64 `json:"attention_value_weight"`
+	AttentionNoveltyWeight      float64 `json:"attention_novelty_weight"`
+	AttentionCostWeight         float64 `json:"attention_cost_weight"`
+	AttentionThreshold          float64 `json:"attention_threshold"`
+	AttentionCandidateLimit     int     `json:"attention_candidate_limit"`
+	AttentionRevisitSeconds     int     `json:"attention_revisit_seconds"`
+	AttentionMaximumIdleSeconds int     `json:"attention_maximum_idle_seconds"`
+	DifferenceDecayRate         float64 `json:"difference_decay_rate"`
+	DifferenceLearningRate      float64 `json:"difference_learning_rate"`
+	ValueIdleGrowth             float64 `json:"value_idle_growth"`
+	ExplorationUnknownGrowth    float64 `json:"exploration_unknown_growth"`
+	ExplorationRelief           float64 `json:"exploration_relief"`
+	ValueActivationGain         float64 `json:"value_activation_gain"`
+	ValueActivationReturnRate   float64 `json:"value_activation_return_rate"`
+	ValueSatiationGain          float64 `json:"value_satiation_gain"`
+	ValueSatiationReturnRate    float64 `json:"value_satiation_return_rate"`
+	ValueOrientationGain        float64 `json:"value_orientation_gain"`
+	IntegrityPersistence        float64 `json:"integrity_persistence"`
+	IntegrityGapGain            float64 `json:"integrity_gap_gain"`
+	IntegrityRepairGain         float64 `json:"integrity_repair_gain"`
+	IntegrityMirrorThreshold    float64 `json:"integrity_mirror_threshold"`
 }
 
 type Seed struct {
-	Name                        string  `json:"name"`
-	Gender                      string  `json:"gender"`
-	Age                         int     `json:"age"`
-	LifeForm                    string  `json:"life_form"`
-	SocialOpennessBias          float64 `json:"social_openness_bias"`
-	ExplorationBias             float64 `json:"exploration_bias"`
-	ConstructiveRecoveryBias    float64 `json:"constructive_recovery_bias"`
-	ContinuanceSensitivity      float64 `json:"continuance_sensitivity"`
-	RelatednessSensitivity      float64 `json:"relatedness_sensitivity"`
-	ExpansionSensitivity        float64 `json:"expansion_sensitivity"`
-	RealityIntegritySensitivity float64 `json:"reality_integrity_sensitivity"`
-	SemanticText                string  `json:"semantic_text"`
+	Name                        string          `json:"name"`
+	Gender                      string          `json:"gender"`
+	Age                         int             `json:"age"`
+	LifeForm                    string          `json:"life_form"`
+	ValueOrientation            LifeValueVector `json:"value_orientation"`
+	RealityIntegritySensitivity float64         `json:"reality_integrity_sensitivity"`
+	SemanticText                string          `json:"semantic_text"`
 }
 
 type State struct {
@@ -112,6 +117,7 @@ type State struct {
 	LastAttentionAt     string                     `json:"last_attention_at,omitempty"`
 	Body                BodySnapshot               `json:"body"`
 	Perception          map[string]PerceptualTrace `json:"perception,omitempty"`
+	DifferenceField     map[string]DifferenceTrace `json:"difference_field,omitempty"`
 	Background          []Event                    `json:"background,omitempty"`
 	Lease               *Lease                     `json:"lease,omitempty"`
 	PendingAction       *ActionState               `json:"pending_action,omitempty"`
@@ -119,7 +125,7 @@ type State struct {
 	Usage               []UsageRecord              `json:"usage,omitempty"`
 	CognitiveResource   CognitiveResourceState     `json:"cognitive_resource"`
 	AffectiveState      AffectiveState             `json:"affective_state"`
-	ExplorationPressure float64                    `json:"exploration_pressure"`
+	ValueField          LifeValueField             `json:"life_value_field"`
 	SelfModelTension    float64                    `json:"self_model_tension"`
 	Concerns            []Concern                  `json:"active_concerns,omitempty"`
 	CurrentFocus        string                     `json:"current_focus,omitempty"`
@@ -133,34 +139,64 @@ type State struct {
 }
 
 type PerceptualTrace struct {
-	Digest           string   `json:"digest"`
-	ObservedAt       string   `json:"observed_at"`
-	Context          []string `json:"context,omitempty"`
-	Pending          []string `json:"pending,omitempty"`
-	Seen             []string `json:"seen,omitempty"`
-	Saturation       float64  `json:"saturation,omitempty"`
-	ExhaustedContext string   `json:"exhausted_context,omitempty"`
-	ExhaustedAt      string   `json:"exhausted_at,omitempty"`
-	ReturnPath       []string `json:"return_path,omitempty"`
+	OrganID          string             `json:"organ_id"`
+	SurfaceID        string             `json:"surface_id"`
+	Digest           string             `json:"digest"`
+	ObservedAt       string             `json:"observed_at"`
+	Context          []string           `json:"context,omitempty"`
+	Pending          []PerceptualObject `json:"pending,omitempty"`
+	Seen             []string           `json:"seen,omitempty"`
+	ExhaustedContext string             `json:"exhausted_context,omitempty"`
+	ExhaustedAt      string             `json:"exhausted_at,omitempty"`
+}
+
+// DifferenceTrace is the compact pre-conscious memory of one stable signal
+// family. It learns what normally changes and whether earlier appearances were
+// worth Alice's scarce global attention. It never stores meaning, goals or a
+// second narrative.
+type DifferenceTrace struct {
+	Key                string  `json:"key"`
+	Observations       uint64  `json:"observations"`
+	LastDigest         string  `json:"last_digest,omitempty"`
+	LastObservedAt     string  `json:"last_observed_at,omitempty"`
+	ExpectedChangeRate float64 `json:"expected_change_rate"`
+	Accumulated        float64 `json:"accumulated"`
+	AttentionValue     float64 `json:"attention_value"`
+	LastPredictionGap  float64 `json:"last_prediction_gap"`
+	LastIgnitedAt      string  `json:"last_ignited_at,omitempty"`
+}
+
+type PerceptualObject struct {
+	ID      string `json:"id"`
+	Content string `json:"content"`
 }
 
 type BodySnapshot struct {
-	ObservedAt                     string `json:"observed_at"`
-	UptimeSeconds                  int64  `json:"uptime_seconds"`
-	RootFreeBytes                  uint64 `json:"root_free_bytes"`
-	AgentFreeBytes                 uint64 `json:"agent_free_bytes"`
-	CognitiveHourSpentMicrousd     int64  `json:"cognitive_hour_spent_microusd"`
-	CognitiveHourRemainingMicrousd int64  `json:"cognitive_hour_remaining_microusd"`
-	CognitiveDaySpentMicrousd      int64  `json:"cognitive_day_spent_microusd"`
-	CognitiveDayRemainingMicrousd  int64  `json:"cognitive_day_remaining_microusd"`
-	CognitiveResourceBand          string `json:"cognitive_resource_band"`
-	CognitivePriceTableVersion     string `json:"cognitive_price_table_version"`
-	NetworkAvailable               bool   `json:"network_available"`
-	DesktopAvailable               bool   `json:"desktop_available"`
-	ChromeAvailable                bool   `json:"chrome_available"`
-	PlaywrightReady                bool   `json:"playwright_ready"`
-	WechatRunning                  bool   `json:"wechat_running"`
-	ClashVergeRunning              bool   `json:"clash_verge_running"`
+	ObservedAt                     string                   `json:"observed_at"`
+	UptimeSeconds                  int64                    `json:"uptime_seconds"`
+	RootFreeBytes                  uint64                   `json:"root_free_bytes"`
+	AgentFreeBytes                 uint64                   `json:"agent_free_bytes"`
+	CognitiveHourSpentMicrousd     int64                    `json:"cognitive_hour_spent_microusd"`
+	CognitiveHourRemainingMicrousd int64                    `json:"cognitive_hour_remaining_microusd"`
+	CognitiveDaySpentMicrousd      int64                    `json:"cognitive_day_spent_microusd"`
+	CognitiveDayRemainingMicrousd  int64                    `json:"cognitive_day_remaining_microusd"`
+	CognitiveResourceBand          string                   `json:"cognitive_resource_band"`
+	CognitivePriceTableVersion     string                   `json:"cognitive_price_table_version"`
+	NetworkAvailable               bool                     `json:"network_available"`
+	DesktopAvailable               bool                     `json:"desktop_available"`
+	Organs                         map[string]OrganSnapshot `json:"organs,omitempty"`
+	WechatRunning                  bool                     `json:"wechat_running"`
+	ClashVergeRunning              bool                     `json:"clash_verge_running"`
+}
+
+type OrganSnapshot struct {
+	Name         string   `json:"name"`
+	Command      string   `json:"command"`
+	Capabilities []string `json:"capabilities,omitempty"`
+	Operations   []string `json:"operations,omitempty"`
+	Guidance     string   `json:"guidance,omitempty"`
+	Status       string   `json:"status"`
+	Accepting    bool     `json:"accepting"`
 }
 
 type Event struct {
@@ -178,6 +214,9 @@ type Event struct {
 	LastCommitErr     string          `json:"last_commit_error,omitempty"`
 	CognitionAttempts int             `json:"cognition_attempts,omitempty"`
 	WaitModel         string          `json:"wait_model,omitempty"`
+	DifferenceKey     string          `json:"difference_key,omitempty"`
+	PredictionGap     float64         `json:"prediction_gap,omitempty"`
+	AttentionPressure float64         `json:"attention_pressure,omitempty"`
 }
 
 type Lease struct {
@@ -200,6 +239,8 @@ type ActionState struct {
 	LeaseID      string `json:"lease_id"`
 	CommitmentID string `json:"commitment_id,omitempty"`
 	Kind         string `json:"kind"`
+	OrganID      string `json:"organ_id,omitempty"`
+	Operation    string `json:"operation,omitempty"`
 	Request      string `json:"request"`
 	Status       string `json:"status"`
 	StartedAt    string `json:"started_at"`
@@ -247,6 +288,10 @@ type UsageRecord struct {
 	RetryAfter        string `json:"retry_after,omitempty"`
 	RequestID         string `json:"request_id,omitempty"`
 	GatewayDate       string `json:"gateway_date,omitempty"`
+	BilledUSD         string `json:"billed_usd,omitempty"`
+	BillingStatus     string `json:"billing_status,omitempty"`
+	BillingPrice      string `json:"billing_price_version,omitempty"`
+	BillingCurrency   string `json:"billing_currency,omitempty"`
 }
 
 type CognitiveResourceState struct {
@@ -297,28 +342,29 @@ type AffectiveState struct {
 }
 
 type Concern struct {
-	ID                string  `json:"id"`
-	OriginKind        string  `json:"origin_kind,omitempty"`
-	WithinConcernID   string  `json:"within_concern_id,omitempty"`
-	ClosureCondition  string  `json:"closure_condition,omitempty"`
-	CommitmentID      string  `json:"commitment_id,omitempty"`
-	Subject           string  `json:"subject"`
-	Meaning           string  `json:"meaning"`
-	Strength          float64 `json:"strength"`
-	Difference        float64 `json:"difference"`
-	Ownership         float64 `json:"ownership"`
-	Value             float64 `json:"value"`
-	Urgency           float64 `json:"urgency"`
-	Answerability     float64 `json:"answerability"`
-	Activation        float64 `json:"activation"`
-	Certainty         float64 `json:"certainty"`
-	LastSourceID      string  `json:"last_source_id"`
-	UpdatedAt         string  `json:"updated_at"`
-	LastFocusedAt     string  `json:"last_focused_at,omitempty"`
-	Resolution        string  `json:"resolution,omitempty"`
-	WaitModel         string  `json:"wait_model,omitempty"`
-	LastCommitErr     string  `json:"last_commit_error,omitempty"`
-	CognitionAttempts int     `json:"cognition_attempts,omitempty"`
+	ID                string          `json:"id"`
+	OriginKind        string          `json:"origin_kind,omitempty"`
+	WithinConcernID   string          `json:"within_concern_id,omitempty"`
+	ClosureCondition  string          `json:"closure_condition,omitempty"`
+	CommitmentID      string          `json:"commitment_id,omitempty"`
+	Subject           string          `json:"subject"`
+	Meaning           string          `json:"meaning"`
+	Strength          float64         `json:"strength"`
+	Difference        float64         `json:"difference"`
+	Ownership         float64         `json:"ownership"`
+	Value             float64         `json:"value"`
+	Values            LifeValueVector `json:"values"`
+	Urgency           float64         `json:"urgency"`
+	Answerability     float64         `json:"answerability"`
+	Activation        float64         `json:"activation"`
+	Certainty         float64         `json:"certainty"`
+	LastSourceID      string          `json:"last_source_id"`
+	UpdatedAt         string          `json:"updated_at"`
+	LastFocusedAt     string          `json:"last_focused_at,omitempty"`
+	Resolution        string          `json:"resolution,omitempty"`
+	WaitModel         string          `json:"wait_model,omitempty"`
+	LastCommitErr     string          `json:"last_commit_error,omitempty"`
+	CognitionAttempts int             `json:"cognition_attempts,omitempty"`
 }
 
 type JournalRecord struct {
@@ -343,10 +389,15 @@ type EnvironmentInput struct {
 	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
+type GenerationDeadlineInput struct {
+	PlannedEnd string `json:"planned_end"`
+}
+
 type RuntimeCommand struct {
 	Kind        string
 	Mentor      MentorInput
 	Environment EnvironmentInput
+	Deadline    GenerationDeadlineInput
 	MessageID   string
 	Reply       chan CommandReply
 }
@@ -377,20 +428,23 @@ type CognitiveResult struct {
 }
 
 type CandidateAppraisal struct {
-	CandidateID   string  `json:"candidate_id"`
-	Meaning       string  `json:"meaning"`
-	Difference    float64 `json:"d"`
-	Ownership     float64 `json:"o"`
-	Value         float64 `json:"v"`
-	Urgency       float64 `json:"u"`
-	Answerability float64 `json:"a"`
-	Certainty     float64 `json:"certainty"`
-	Resolution    string  `json:"resolution"`
+	CandidateID   string          `json:"candidate_id"`
+	Meaning       string          `json:"meaning"`
+	Difference    float64         `json:"d"`
+	Ownership     float64         `json:"o"`
+	Value         float64         `json:"v"`
+	Values        LifeValueVector `json:"values"`
+	Urgency       float64         `json:"u"`
+	Answerability float64         `json:"a"`
+	Certainty     float64         `json:"certainty"`
+	Resolution    string          `json:"resolution"`
 }
 
 type CognitiveAction struct {
 	Kind          string `json:"kind"`
-	Command       string `json:"command,omitempty"`
+	OrganID       string `json:"organ_id,omitempty"`
+	Operation     string `json:"operation,omitempty"`
+	Input         string `json:"input,omitempty"`
 	Text          string `json:"text,omitempty"`
 	ReplyTo       string `json:"reply_to,omitempty"`
 	Intent        string `json:"intent,omitempty"`
@@ -413,6 +467,7 @@ type CognitiveCommit struct {
 	ResourceChoice             CognitiveResourceChoice `json:"resource_choice"`
 	ExperienceUpdates          []ExperienceUpdate      `json:"experience_updates"`
 	NarrativeUpdate            string                  `json:"narrative_update"`
+	ValueOrientationUpdate     LifeValueVector         `json:"value_orientation_update"`
 }
 
 type ActionCommitment struct {
@@ -434,42 +489,61 @@ type ActionCommitment struct {
 	ExperienceID      string           `json:"experience_id,omitempty"`
 }
 
-type EndogenousValues struct {
+type LifeValueVector struct {
 	Continuance  float64 `json:"continuance"`
+	Exploration  float64 `json:"exploration"`
+	Agency       float64 `json:"agency"`
+	Vitality     float64 `json:"vitality"`
 	Relatedness  float64 `json:"relatedness"`
-	Expansion    float64 `json:"expansion"`
+	Contribution float64 `json:"contribution"`
+}
+
+type LifeValues struct {
+	Continuance  float64 `json:"continuance"`
+	Exploration  float64 `json:"exploration"`
+	Agency       float64 `json:"agency"`
+	Vitality     float64 `json:"vitality"`
+	Relatedness  float64 `json:"relatedness"`
+	Contribution float64 `json:"contribution"`
 	SelfEndorsed float64 `json:"self_endorsed"`
 }
 
+type LifeValueField struct {
+	Orientation LifeValueVector `json:"orientation"`
+	Activation  LifeValueVector `json:"activation"`
+	Satiation   LifeValueVector `json:"satiation"`
+	UpdatedAt   string          `json:"updated_at,omitempty"`
+}
+
 type ExperienceUpdate struct {
-	CommitmentID         string           `json:"commitment_id"`
-	PredictionDifference float64          `json:"prediction_difference"`
-	Meaning              string           `json:"meaning"`
-	Values               EndogenousValues `json:"values"`
-	ExperiencedCost      float64          `json:"experienced_cost"`
-	Lesson               string           `json:"lesson"`
-	Significance         string           `json:"significance"`
-	MethodUpdate         string           `json:"method_update"`
-	MethodSlot           int              `json:"method_slot"`
+	CommitmentID         string     `json:"commitment_id"`
+	PredictionDifference float64    `json:"prediction_difference"`
+	Meaning              string     `json:"meaning"`
+	Values               LifeValues `json:"values"`
+	ExperiencedCost      float64    `json:"experienced_cost"`
+	Lesson               string     `json:"lesson"`
+	Significance         string     `json:"significance"`
+	MethodUpdate         string     `json:"method_update"`
+	MethodSlot           int        `json:"method_slot"`
 }
 
 type Experience struct {
-	ID                   string           `json:"id"`
-	CommitmentID         string           `json:"commitment_id"`
-	FocusID              string           `json:"focus_id"`
-	SourceKind           string           `json:"source_kind,omitempty"`
-	ActionKind           string           `json:"action_kind"`
-	EnactedRequest       string           `json:"enacted_request,omitempty"`
-	ObservedAt           string           `json:"observed_at"`
-	PredictionDifference float64          `json:"prediction_difference"`
-	RemainingDifference  float64          `json:"remaining_difference"`
-	Meaning              string           `json:"meaning"`
-	Values               EndogenousValues `json:"values"`
-	ExperiencedCost      float64          `json:"experienced_cost"`
-	Lesson               string           `json:"lesson,omitempty"`
-	Significance         string           `json:"significance"`
-	MethodUpdate         string           `json:"method_update,omitempty"`
-	MethodSlot           int              `json:"method_slot,omitempty"`
+	ID                   string     `json:"id"`
+	CommitmentID         string     `json:"commitment_id"`
+	FocusID              string     `json:"focus_id"`
+	SourceKind           string     `json:"source_kind,omitempty"`
+	ActionKind           string     `json:"action_kind"`
+	EnactedRequest       string     `json:"enacted_request,omitempty"`
+	ObservedAt           string     `json:"observed_at"`
+	PredictionDifference float64    `json:"prediction_difference"`
+	RemainingDifference  float64    `json:"remaining_difference"`
+	Meaning              string     `json:"meaning"`
+	Values               LifeValues `json:"values"`
+	ExperiencedCost      float64    `json:"experienced_cost"`
+	Lesson               string     `json:"lesson,omitempty"`
+	Significance         string     `json:"significance"`
+	MethodUpdate         string     `json:"method_update,omitempty"`
+	MethodSlot           int        `json:"method_slot,omitempty"`
 }
 
 type SelfState struct {
@@ -498,14 +572,17 @@ type ModelReservation struct {
 	ReservedMicrousd     int64            `json:"reserved_microusd"`
 }
 
-type ShellActionRequest struct {
+type OrganActionRequest struct {
 	ActionID       string
-	Command        string
+	OrganID        string
+	Operation      string
+	Input          string
 	TimeoutSeconds int
 }
 
 type ActionResultNotice struct {
 	ActionID string
+	Status   string
 	Result   string
 }
 

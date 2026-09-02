@@ -6,17 +6,19 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 )
 
 const (
-	maxCommitments        = 32
-	maxExperiences        = 128
-	maxExperienceContext  = 8
-	maxSelfMethods        = 8
-	maxSelfMethodBytes    = 512
-	maxSelfNarrativeBytes = 4096
-	settledDifference     = 0.25
+	maxCommitments                  = 32
+	maxExperiences                  = 128
+	maxExperienceContext            = 5
+	maxOperationalExperienceContext = 8
+	maxSelfMethods                  = 8
+	maxSelfMethodBytes              = 512
+	maxSelfNarrativeBytes           = 4096
+	settledDifference               = 0.25
 )
 
 func (r *Runtime) syncSelfFromFiles() error {
@@ -94,18 +96,6 @@ func (r *Runtime) validateExperienceUpdates(commit CognitiveCommit) error {
 	if err := validateExperienceUpdate(update); err != nil {
 		return err
 	}
-	if strings.TrimSpace(update.MethodUpdate) != "" && len(r.state.Self.Methods) >= maxSelfMethods {
-		duplicate := false
-		for _, method := range r.state.Self.Methods {
-			if method == strings.TrimSpace(update.MethodUpdate) {
-				duplicate = true
-				break
-			}
-		}
-		if !duplicate && (update.MethodSlot < 0 || update.MethodSlot >= len(r.state.Self.Methods)) {
-			return fmt.Errorf("durable methods are full; method_slot must select 0..%d", len(r.state.Self.Methods)-1)
-		}
-	}
 	return nil
 }
 
@@ -117,7 +107,15 @@ func validateExperienceUpdate(update ExperienceUpdate) error {
 		update.ExperiencedCost < 0 || update.ExperiencedCost > 1 {
 		return errors.New("experience unit values must remain within 0..1")
 	}
-	values := []float64{update.Values.Continuance, update.Values.Relatedness, update.Values.Expansion, update.Values.SelfEndorsed}
+	values := []float64{
+		update.Values.Continuance,
+		update.Values.Exploration,
+		update.Values.Agency,
+		update.Values.Vitality,
+		update.Values.Relatedness,
+		update.Values.Contribution,
+		update.Values.SelfEndorsed,
+	}
 	for _, value := range values {
 		if value < -1 || value > 1 {
 			return errors.New("experience endogenous values must remain within -1..1")
@@ -183,6 +181,8 @@ func (r *Runtime) applyExperienceUpdates(commit CognitiveCommit) error {
 	}
 	r.state.Experiences = append(r.state.Experiences, experience)
 	r.state.TotalExperiences++
+	r.learnDifferenceFromExperience(*commitment, experience)
+	r.satiateLifeValues(experience)
 	if len(r.state.Experiences) > maxExperiences {
 		r.state.Experiences = append([]Experience(nil), r.state.Experiences[len(r.state.Experiences)-maxExperiences:]...)
 	}
@@ -196,6 +196,7 @@ func (r *Runtime) applyExperienceUpdates(commit CognitiveCommit) error {
 		}
 	}
 
+	methodChanged := false
 	if experience.MethodUpdate != "" {
 		methods := make([]string, 0, maxSelfMethods)
 		for _, method := range r.state.Self.Methods {
@@ -206,15 +207,18 @@ func (r *Runtime) applyExperienceUpdates(commit CognitiveCommit) error {
 		updated := truncate(experience.MethodUpdate, maxSelfMethodBytes)
 		if len(methods) < maxSelfMethods {
 			methods = append(methods, updated)
+			methodChanged = true
 		} else {
-			if experience.MethodSlot < 0 || experience.MethodSlot >= len(methods) {
-				return fmt.Errorf("durable methods are full; method_slot must select 0..%d", len(methods)-1)
+			if experience.MethodSlot >= 0 && experience.MethodSlot < len(methods) {
+				methods[experience.MethodSlot] = updated
+				methodChanged = true
 			}
-			methods[experience.MethodSlot] = updated
 		}
-		r.state.Self.Methods = methods
+		if methodChanged {
+			r.state.Self.Methods = methods
+		}
 	}
-	if experience.MethodUpdate != "" {
+	if methodChanged {
 		r.state.Self.UpdatedAt = nowUTC()
 		if err := r.store.SaveSelf(r.state.Self); err != nil {
 			return err
@@ -263,15 +267,279 @@ func (r *Runtime) applyExperienceUpdates(commit CognitiveCommit) error {
 	}); err != nil {
 		return err
 	}
+	if err := r.maybeOpenOperationalSelfDifference(); err != nil {
+		return err
+	}
 	return r.enqueueConcernContribution(strings.TrimSpace(commit.ContributesToConcernID), *commitment, experience)
+}
+
+// maybeOpenOperationalSelfDifference lets the existing self-model loop notice
+// a whole-life pattern that no single successful action can expose. Several
+// ordinary micro-closures can each return real facts while collectively
+// spending attention on the same small causal forms without producing a new
+// method or a changed self-understanding. The kernel reports only those
+// embodied facts. AIP still decides whether the pattern is valuable work,
+// fatigue, caution, avoidance, or something else, and what—if anything—to do.
+func (r *Runtime) maybeOpenOperationalSelfDifference() error {
+	if r.state.Stage < 10 || r.selfModelDifferenceCandidateActive() {
+		return nil
+	}
+	baseline := r.selfRegulationBaseline()
+	recent := make([]Experience, 0, maxOperationalExperienceContext)
+	for index := len(r.state.Experiences) - 1; index >= 0 && len(recent) < maxOperationalExperienceContext; index-- {
+		experience := r.state.Experiences[index]
+		if !timeAfter(experience.ObservedAt, baseline) {
+			break
+		}
+		recent = append(recent, experience)
+	}
+	if len(recent) < 6 {
+		return nil
+	}
+
+	concerns := make(map[string]bool)
+	patterns := make(map[string]int)
+	ordinary := 0
+	for _, experience := range recent {
+		if experience.Significance == "ordinary" {
+			ordinary++
+		}
+		if commitment := r.commitmentByID(experience.CommitmentID); commitment != nil && commitment.ConcernID != "" {
+			concerns[commitment.ConcernID] = true
+		}
+		patterns[experienceActionPattern(experience)]++
+	}
+	repeatedPatterns := 0
+	dominantPatternCount := 0
+	for _, count := range patterns {
+		if count >= 2 {
+			repeatedPatterns++
+		}
+		if count > dominantPatternCount {
+			dominantPatternCount = count
+		}
+	}
+	spent, calls := r.cognitiveSpendAfter(baseline)
+	minimumSpend := r.config.CognitiveResource.RollingHourLimitMicrousd / 25
+	// One dominant causal form repeated three times is already an embodied
+	// pattern, even when the surrounding shell verbs vary. Requiring two
+	// separately repeated command shapes missed narrow loops made of create,
+	// inspect and restate operations over the same small surface.
+	if len(concerns) < 3 || ordinary < len(recent)-1 || (repeatedPatterns < 2 && dominantPatternCount < 3) || calls < len(recent) || spent < minimumSpend {
+		return nil
+	}
+
+	evidenceIDs := make([]string, 0, len(recent))
+	for index := len(recent) - 1; index >= 0; index-- {
+		evidenceIDs = append(evidenceIDs, recent[index].ID)
+	}
+	r.state.SelfModelTension = maxFloat(r.state.SelfModelTension, r.config.Dynamics.AttentionThreshold)
+	payload, _ := json.Marshal(map[string]any{
+		"difference_kind":          "attention_yield_balance",
+		"current_narrative":        r.state.Self.Narrative,
+		"experience_count":         len(recent),
+		"ordinary_count":           ordinary,
+		"distinct_concern_count":   len(concerns),
+		"repeated_action_forms":    patterns,
+		"dominant_action_count":    dominantPatternCount,
+		"cognition_calls":          calls,
+		"cognition_spend_microusd": spent,
+		"affective_state":          r.state.AffectiveState,
+		"integrity_debt":           r.state.IntegrityDebt,
+		"evidence_experience_ids":  evidenceIDs,
+	})
+	return r.enqueueSelfModelDifference(
+		"self_model_difference",
+		"endogenous",
+		"近期多项已完成活动的注意投入、现实结果与持久改变之间形成了一次值得理解的自我运行差异。",
+		evidenceIDs[len(evidenceIDs)-1],
+		payload,
+		true,
+	)
+}
+
+// maybeOpenAffectiveSelfDifference exposes sustained high activation with low
+// control as an interoceptive fact. Mere non-action is deliberately absent:
+// understanding or releasing a real object can be a complete cognition, and a
+// counter that demands a new body consequence rewards cheap artifact creation.
+// Repetitive enacted behavior is handled separately from actual Experiences.
+func (r *Runtime) maybeOpenAffectiveSelfDifference() error {
+	if r.state.Stage < 10 || r.selfModelDifferenceCandidateActive() || r.state.PendingAction != nil || r.hasUnassimilatedCommitment() {
+		return nil
+	}
+	threshold := r.config.Dynamics.AttentionThreshold
+	affectiveStrain := r.state.AffectiveState.Activation * (1 - r.state.AffectiveState.Control)
+	if affectiveStrain >= threshold &&
+		attentionDue(r.state.LastAttentionAt, time.Now().UTC(), 60) &&
+		!r.selfModelDifferenceObservedWithin(5*time.Minute) {
+		r.state.SelfModelTension = maxFloat(r.state.SelfModelTension, threshold)
+		payload, _ := json.Marshal(map[string]any{
+			"difference_kind":         "affective_control_balance",
+			"current_narrative":       r.state.Self.Narrative,
+			"affective_state":         r.state.AffectiveState,
+			"affective_strain":        affectiveStrain,
+			"integrity_debt":          r.state.IntegrityDebt,
+			"evidence_experience_ids": []string{},
+		})
+		return r.enqueueSelfModelDifference(
+			"self_model_difference",
+			"endogenous",
+			"持续的高激活与较低控制感已经形成一次值得自己理解的内在运行差异。",
+			"affective-control",
+			payload,
+			true,
+		)
+	}
+	return nil
+}
+
+func (r *Runtime) selfModelDifferenceObservedWithin(window time.Duration) bool {
+	cutoff := time.Now().UTC().Add(-window)
+	for index := len(r.state.Background) - 1; index >= 0; index-- {
+		event := r.state.Background[index]
+		if event.Kind != "self_model_difference" {
+			continue
+		}
+		observed, err := time.Parse(time.RFC3339Nano, event.ObservedAt)
+		return err == nil && observed.After(cutoff)
+	}
+	return false
+}
+
+func (r *Runtime) selfRegulationBaseline() string {
+	baseline := r.state.T0
+	if timeAfter(r.state.Self.UpdatedAt, baseline) {
+		baseline = r.state.Self.UpdatedAt
+	}
+	for index := len(r.state.Background) - 1; index >= 0; index-- {
+		event := r.state.Background[index]
+		if event.Kind != "self_model_difference" {
+			continue
+		}
+		if timeAfter(event.ObservedAt, baseline) {
+			baseline = event.ObservedAt
+		}
+		break
+	}
+	return baseline
+}
+
+func (r *Runtime) cognitiveSpendAfter(baseline string) (int64, int) {
+	var spent int64
+	calls := 0
+	for _, usage := range r.state.Usage {
+		// A paid response remains metabolic expenditure when its cognitive commit
+		// is unusable.  Excluding schema-invalid work made precisely the most
+		// wasteful kind of thought invisible to self-regulation.
+		if !usage.CostConfirmed || usage.ActualMicrousd <= 0 || !timeAfter(usage.Time, baseline) {
+			continue
+		}
+		spent += usage.ActualMicrousd
+		calls++
+	}
+	return spent, calls
+}
+
+func experienceActionPattern(experience Experience) string {
+	if experience.ActionKind != "organ_action" {
+		return experience.ActionKind
+	}
+	var request struct {
+		OrganID   string `json:"organ_id"`
+		Operation string `json:"operation"`
+		Input     string `json:"input"`
+	}
+	if json.Unmarshal([]byte(experience.EnactedRequest), &request) != nil {
+		return experience.ActionKind
+	}
+	pattern := experience.ActionKind + ":" + request.OrganID + ":" + request.Operation
+	if request.OrganID != "system" || request.Operation != "exec" {
+		return pattern
+	}
+	leading, _ := leadingShellCommand(request.Input)
+	fields := strings.Fields(leading)
+	if len(fields) == 0 {
+		return pattern
+	}
+	return pattern + ":" + fields[0]
+}
+
+func timeAfter(candidate, baseline string) bool {
+	if strings.TrimSpace(candidate) == "" {
+		return false
+	}
+	if strings.TrimSpace(baseline) == "" {
+		return true
+	}
+	candidateTime, candidateErr := time.Parse(time.RFC3339Nano, candidate)
+	baselineTime, baselineErr := time.Parse(time.RFC3339Nano, baseline)
+	return candidateErr == nil && baselineErr == nil && candidateTime.After(baselineTime)
 }
 
 // enqueueConcernContribution gives a real child Experience one bounded route
 // back into a broader Concern that Alice selected while assimilating the
-// result. It creates no
-// meaning, reward, priority, or prescribed response: the new candidate merely
-// makes the factual relationship available to the next single attention pulse.
+// result. It creates no meaning, reward, priority, or prescribed response: the
+// new candidate merely makes the factual relationship available to a later
+// single attention pulse.
 func (r *Runtime) enqueueConcernContribution(parentID string, commitment ActionCommitment, experience Experience) error {
+	payload, _ := json.Marshal(map[string]any{
+		"experience_id":     experience.ID,
+		"commitment_id":     commitment.ID,
+		"child_concern_id":  commitment.ConcernID,
+		"parent_concern_id": parentID,
+	})
+	journalPayload := map[string]any{
+		"experience_id":     experience.ID,
+		"commitment_id":     commitment.ID,
+		"child_concern_id":  commitment.ConcernID,
+		"parent_concern_id": parentID,
+	}
+	return r.enqueueConcernContributionFact(
+		parentID,
+		experience.ID,
+		"experience",
+		"一项或多项由你自主关联的独立行动已经产生真实 Experience；最新后果现在可以重新参与同一上位 Concern 的判断。",
+		payload,
+		journalPayload,
+	)
+}
+
+// enqueueObservedConcernContribution lets an independent Reality fact gain
+// causal power over a Concern without losing its own identity or directly
+// rewriting the Concern. Alice chooses the link; the kernel only preserves one
+// bounded wake-up surface for the target.
+func (r *Runtime) enqueueObservedConcernContribution(parentID string, source Event) error {
+	payloadObject := map[string]any{
+		"source_event_id":   source.ID,
+		"source_kind":       source.Kind,
+		"source_summary":    truncate(strings.TrimSpace(source.Summary), 4096),
+		"parent_concern_id": strings.TrimSpace(parentID),
+	}
+	if len(source.Payload) > 0 && len(source.Payload) <= 16*1024 {
+		var sourcePayload any
+		if json.Unmarshal(source.Payload, &sourcePayload) == nil {
+			payloadObject["source_payload"] = sourcePayload
+		}
+	}
+	payload, _ := json.Marshal(payloadObject)
+	return r.enqueueConcernContributionFact(
+		parentID,
+		source.ID,
+		"observed",
+		"一项由你自主关联的现实事实已经出现；这项事实现在可以重新参与原 Concern 对稳定闭合条件的判断。",
+		payload,
+		payloadObject,
+	)
+}
+
+func (r *Runtime) enqueueConcernContributionFact(
+	parentID string,
+	correlationID string,
+	source string,
+	summary string,
+	payload []byte,
+	journalPayload map[string]any,
+) error {
 	parentID = strings.TrimSpace(parentID)
 	if parentID == "" {
 		return nil
@@ -280,12 +548,6 @@ func (r *Runtime) enqueueConcernContribution(parentID string, commitment ActionC
 	if parent == nil || parent.Resolution != "hold" || parent.Ownership < r.config.Dynamics.AttentionThreshold {
 		return nil
 	}
-	payload, _ := json.Marshal(map[string]any{
-		"experience_id":     experience.ID,
-		"commitment_id":     commitment.ID,
-		"child_concern_id":  commitment.ConcernID,
-		"parent_concern_id": parentID,
-	})
 	for index := range r.state.Background {
 		existing := &r.state.Background[index]
 		if existing.Kind != "concern_contribution" {
@@ -300,7 +562,7 @@ func (r *Runtime) enqueueConcernContribution(parentID string, commitment ActionC
 		// one current signal regardless of how many children advanced. Reusing even
 		// a previously processed signal prevents several candidates from mapping to
 		// the same Concern in one single-focus pulse.
-		existing.CorrelationID = experience.ID
+		existing.CorrelationID = correlationID
 		existing.Payload = payload
 		existing.ObservedAt = nowUTC()
 		if existing.Status != "in_focus" && existing.Status != "model_wait" {
@@ -308,18 +570,13 @@ func (r *Runtime) enqueueConcernContribution(parentID string, commitment ActionC
 			existing.LastCommitErr = ""
 			existing.CognitionAttempts = 0
 		}
-		return r.journal("concern_contribution_refreshed", existing.ID, map[string]any{
-			"experience_id":     experience.ID,
-			"commitment_id":     commitment.ID,
-			"child_concern_id":  commitment.ConcernID,
-			"parent_concern_id": parentID,
-		})
+		return r.journal("concern_contribution_refreshed", existing.ID, journalPayload)
 	}
 	return r.addEvent(
 		"concern_contribution",
-		"experience",
-		"一项或多项由你自主关联的独立行动已经产生真实 Experience；最新后果现在可以重新参与同一上位 Concern 的判断。",
-		experience.ID,
+		source,
+		summary,
+		correlationID,
 		payload,
 		true,
 		parentID,
@@ -357,6 +614,23 @@ func (r *Runtime) validateNarrativeUpdate(commit CognitiveCommit) error {
 		return fmt.Errorf("narrative focus %q is unavailable", commit.FocusID)
 	}
 	if candidate.Kind == "self_model_difference" {
+		if r.state.Stage >= 10 {
+			var payload struct {
+				DifferenceKind        string   `json:"difference_kind"`
+				EvidenceExperienceIDs []string `json:"evidence_experience_ids"`
+			}
+			if json.Unmarshal(candidate.Payload, &payload) == nil &&
+				strings.TrimSpace(payload.DifferenceKind) != "" &&
+				len(payload.EvidenceExperienceIDs) == 0 {
+				// An operational interoceptive signal is real evidence that
+				// something in the current regulation loop deserves attention, but
+				// it is not yet lived evidence of how Alice actually regulates it.
+				// Let the signal change appraisal, attention or action. Narrative
+				// waits for subsequent Reality to become Experience, so paraphrasing
+				// "I will wait/change" cannot clear the very gap being observed.
+				return errors.New("an operational self-model signal without lived Experience may guide appraisal or action, while Narrative changes after its regulation produces Reality")
+			}
+		}
 		return nil
 	}
 	if commitmentIDFromEvent(candidate) == "" || len(commit.ExperienceUpdates) != 1 {
@@ -430,7 +704,7 @@ func (r *Runtime) accrueSelfModelTension(experience Experience, narrativeUpdated
 	before := r.state.SelfModelTension
 	r.state.SelfModelTension = clamp01(before + r.config.Dynamics.ConcernGrowthGain*contribution)
 	threshold := r.config.Dynamics.AttentionThreshold
-	if threshold <= 0 || r.state.SelfModelTension < threshold || r.selfModelDifferenceActive() {
+	if threshold <= 0 || r.state.SelfModelTension < threshold || r.selfModelDifferenceCandidateActive() {
 		return nil
 	}
 	evidence := r.recentSelfModelEvidence(4)
@@ -445,7 +719,7 @@ func (r *Runtime) accrueSelfModelTension(experience Experience, narrativeUpdated
 		"evidence":                evidence,
 		"evidence_experience_ids": evidenceIDs,
 	})
-	return r.addEvent(
+	return r.enqueueSelfModelDifference(
 		"self_model_difference",
 		"endogenous",
 		"近期真实经历已经积累成一次值得理解的自我模型差异。",
@@ -473,18 +747,38 @@ func (r *Runtime) recentSelfModelEvidence(limit int) []Experience {
 	return selected
 }
 
-func (r *Runtime) selfModelDifferenceActive() bool {
+// selfModelDifferenceCandidateActive prevents duplicate simultaneous attention
+// surfaces. A held self-model Concern is intentionally not included: long-lived
+// questions about identity or life rhythm must remain able to receive new
+// operational evidence. Otherwise the first durable self question would make
+// later fatigue, low-yield attention, and contradictory Experience invisible.
+func (r *Runtime) selfModelDifferenceCandidateActive() bool {
 	for _, event := range r.state.Background {
 		if event.Kind == "self_model_difference" && eventChainActive(event.Status) {
 			return true
 		}
 	}
-	for _, concern := range r.state.Concerns {
+	return false
+}
+
+func (r *Runtime) heldSelfModelConcernID() string {
+	for index := len(r.state.Concerns) - 1; index >= 0; index-- {
+		concern := r.state.Concerns[index]
 		if concern.OriginKind == "self_model_difference" && concern.Resolution == "hold" {
-			return true
+			return concern.ID
 		}
 	}
-	return false
+	return ""
+}
+
+// enqueueSelfModelDifference keeps one durable self question while allowing
+// later evidence to wake it again. The kernel contributes only current facts;
+// AIP still decides whether they confirm, change, or release the Concern.
+func (r *Runtime) enqueueSelfModelDifference(kind, source, summary, correlationID string, payload json.RawMessage, candidate bool) error {
+	if concernID := r.heldSelfModelConcernID(); concernID != "" {
+		return r.addEvent(kind, source, summary, correlationID, payload, candidate, concernID)
+	}
+	return r.addEvent(kind, source, summary, correlationID, payload, candidate)
 }
 
 func (r *Runtime) formActionCommitment(leaseID string, profile CognitiveProfile, commit CognitiveCommit, action *CognitiveAction) error {
@@ -529,7 +823,7 @@ func (r *Runtime) formActionCommitment(leaseID string, profile CognitiveProfile,
 
 // validateActionProgress gives assimilated reality two small, factual
 // consequences. A settled request cannot be replayed as apparent progress for
-// an unchanged concern, and an exactly repeated deterministic shell failure is
+// an unchanged concern, and an exactly repeated failed organ action is
 // not a new experiment merely because a different concern names it. Alice still
 // chooses the next substantive action and may use any genuinely changed request.
 func (r *Runtime) validateActionProgress(focusID string, action CognitiveAction, effectiveConcernIDs ...string) error {
@@ -562,8 +856,8 @@ func (r *Runtime) validateActionProgress(focusID string, action CognitiveAction,
 		if r.materialRealityAfter(reality.Seq, kind, request) {
 			return nil
 		}
-		if kind == "body_shell" && shellRequestFailed(previousAction) {
-			return errors.New("the exact shell request already returned a non-zero or timed-out result; use the assimilated reality to form a genuinely changed request")
+		if actionRequestFailed(previousAction) {
+			return errors.New("the exact organ request already failed or returned an unknown result; inspect reality and form a genuinely changed request")
 		}
 		if experience.RemainingDifference > settledDifference {
 			return nil
@@ -578,8 +872,8 @@ func (r *Runtime) validateActionProgress(focusID string, action CognitiveAction,
 
 func cognitiveActionRequest(action CognitiveAction) (string, string) {
 	switch action.Kind {
-	case "body_shell":
-		return action.Kind, normalizeEnactedRequest(action.Kind, action.Command)
+	case "organ_action":
+		return action.Kind, normalizedOrganRequest(action.OrganID, action.Operation, action.Input)
 	case "mentor_send":
 		return action.Kind, normalizeEnactedRequest(action.Kind, action.Text)
 	default:
@@ -597,23 +891,13 @@ func (r *Runtime) realityForCommitment(commitmentID string) (*Event, *ActionStat
 		if json.Unmarshal(event.Payload, &action) != nil || action.CommitmentID != commitmentID {
 			continue
 		}
-		return event, &action, action.Kind, normalizeEnactedRequest(action.Kind, action.Request)
+		return event, &action, action.Kind, normalizedActionStateRequest(action)
 	}
 	return nil, nil, "", ""
 }
 
-func shellRequestFailed(action *ActionState) bool {
-	if action == nil || action.Kind != "body_shell" {
-		return false
-	}
-	var result struct {
-		ExitCode int  `json:"exit_code"`
-		TimedOut bool `json:"timed_out"`
-	}
-	if json.Unmarshal([]byte(action.Result), &result) != nil {
-		return false
-	}
-	return result.ExitCode != 0 || result.TimedOut
+func actionRequestFailed(action *ActionState) bool {
+	return action != nil && action.Kind == "organ_action" && (action.Status == "failed" || action.Status == "unknown")
 }
 
 func (r *Runtime) experienceForCommitment(commitmentID string) *Experience {
@@ -644,28 +928,38 @@ func (r *Runtime) materialRealityAfter(seq uint64, repeatedKind, repeatedRequest
 			return true
 		}
 		var action ActionState
-		if json.Unmarshal(event.Payload, &action) != nil || action.Kind != repeatedKind || normalizeEnactedRequest(action.Kind, action.Request) != repeatedRequest {
+		if json.Unmarshal(event.Payload, &action) != nil || action.Kind != repeatedKind || normalizedActionStateRequest(action) != repeatedRequest {
 			return true
 		}
 	}
 	return false
 }
 
-// genericExplorationMentorContactAvailable keeps two motivational sources
-// distinct. General exploration may use one first outbound message to make the
-// available mentor relationship real. Later conversation is still fully
-// available when a mentor message, a situated experience, a feeling, or a
-// concrete relationship concern is the actual focus. What cannot happen is for
-// objectless exploration pressure to turn every reciprocal mentor reply into
-// another generic status send. That would make reliable social acknowledgement
-// the easiest endlessly renewable substitute for contact with the world.
-func genericExplorationMentorContactAvailable(commitments []ActionCommitment) bool {
-	for _, commitment := range commitments {
-		if commitment.ActionKind == "mentor_send" {
-			return false
+func normalizedActionStateRequest(action ActionState) string {
+	if action.Kind == "organ_action" {
+		return normalizedOrganRequest(action.OrganID, action.Operation, action.Request)
+	}
+	return normalizeEnactedRequest(action.Kind, action.Request)
+}
+
+func normalizedOrganRequest(organID, operation, input string) string {
+	input = strings.TrimSpace(input)
+	if organID == "system" && operation == "exec" {
+		input = normalizeEnactedRequest("system_exec", input)
+	} else {
+		var value any
+		if json.Unmarshal([]byte(input), &value) == nil {
+			if encoded, err := json.Marshal(value); err == nil {
+				input = string(encoded)
+			}
 		}
 	}
-	return true
+	encoded, _ := json.Marshal(struct {
+		OrganID   string `json:"organ_id"`
+		Operation string `json:"operation"`
+		Input     string `json:"input"`
+	}{strings.TrimSpace(organID), strings.TrimSpace(operation), input})
+	return string(encoded)
 }
 
 // normalizeEnactedRequest identifies the embodied operation rather than inert
@@ -674,7 +968,7 @@ func genericExplorationMentorContactAvailable(commitments []ActionCommitment) bo
 // settled request into apparent progress.
 func normalizeEnactedRequest(kind, request string) string {
 	request = strings.ReplaceAll(request, "\r\n", "\n")
-	if kind != "body_shell" {
+	if kind != "system_exec" {
 		return strings.TrimSpace(request)
 	}
 	request = strings.TrimSpace(request)
@@ -835,7 +1129,13 @@ func selectContextExperiences(experiences []Experience, candidates []Event) []Ex
 		if seen[experience.ID] {
 			continue
 		}
-		text := strings.Join([]string{experience.Meaning, experience.Lesson, experience.MethodUpdate}, " ")
+		// Causal recall needs what the body actually did, not only the meaning
+		// later written about it. A delayed regression often names the affected
+		// path or setting more precisely than the Experience summary; retaining
+		// the enacted request in similarity lets Alice reconnect a present body
+		// change to her own earlier intervention without the kernel declaring a
+		// cause or choosing a correction.
+		text := strings.Join([]string{experience.EnactedRequest, experience.Meaning, experience.Lesson, experience.MethodUpdate}, " ")
 		scored = append(scored, scoredExperience{experience: experience, score: memorySimilarity(query, text), index: index})
 	}
 	sort.SliceStable(scored, func(left, right int) bool {

@@ -28,7 +28,11 @@ def numeric_leaf_count(value) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--xconfig", type=Path, default=ROOT.parent / "xconfig.yaml")
+    parser.add_argument(
+        "--xconfig",
+        type=Path,
+        default=ROOT.parent / "xconfigs" / "hominal" / "xconfig.yaml",
+    )
     args = parser.parse_args()
 
     required = [
@@ -40,6 +44,9 @@ def main() -> int:
         ROOT / "lab/protocol/mentor.md",
         ROOT / "lab/protocol/experiment.yaml",
         ROOT / "body/tools/hominal-browser.mjs",
+        ROOT / "body/organs/browser.json",
+        ROOT / "body/cmd/hominal-system/main.go",
+        ROOT / "body/organs/system.json",
         ROOT / "deploy/hominal-generation-stop",
         ROOT / "deploy/desktop/chrome-autostart.desktop",
         ROOT / "docs/mvp-architecture.md",
@@ -68,8 +75,13 @@ def main() -> int:
         errors.append("seed genesis stage must be proto_hominal")
 
     adjustable = {key: value for key, value in dynamics.items() if key not in {"schema", "dynamics_id", "time_unit", "bounds"}}
-    if numeric_leaf_count(adjustable) != 20:
-        errors.append("dynamics must contain exactly 20 adjustable numeric parameters")
+    if numeric_leaf_count(adjustable) != 28:
+        errors.append("dynamics must contain exactly 28 adjustable numeric parameters")
+    difference = dynamics.get("difference", {})
+    for key in ("accumulation_decay_rate", "learning_rate"):
+        value = difference.get(key)
+        if not isinstance(value, (int, float)) or isinstance(value, bool) or not 0 < value <= 1:
+            errors.append(f"difference.{key} must remain within (0, 1]")
     if dynamics.get("attention", {}).get("revisit_seconds") != 10:
         errors.append("idle exploration must return to attention within 10 seconds")
 
@@ -111,12 +123,21 @@ def main() -> int:
             or mentor.get("context_mode") != "isolated"
         ):
             errors.append("xconfig mentor transport and context isolation have drifted")
-        if runtime.get("initial_profile") != {"model": "terra", "reasoning_effort": "medium"}:
-            errors.append("xconfig initial cognitive profile must be terra/medium")
+        if runtime.get("initial_profile") != {"model": "terra", "reasoning_effort": "none"}:
+            errors.append("xconfig initial cognitive profile must be terra/none")
         models = llm.get("models", {})
-        expected_models = {"luna": "gpt-5.6-luna", "terra": "gpt-5.6-terra", "sol": "gpt-5.6-sol"}
+        expected_models = {"luna": "codex-luna", "terra": "codex-terra", "sol": "codex-sol"}
         if {name: value.get("id") for name, value in models.items()} != expected_models:
             errors.append("xconfig cognitive model catalog must contain only luna, terra and sol")
+        provider_name = llm.get("provider")
+        provider = llm.get("providers", {}).get(provider_name, {})
+        if provider_name != "llmserver" or provider.get("adapter") != "llmserver":
+            errors.append("xconfig active cognitive provider must be the llmserver adapter")
+        if provider.get("base_url") != "http://192.168.124.161:4815":
+            errors.append("xconfig llmserver must use the fixed LAN endpoint")
+        credential_file = provider.get("credential_file")
+        if not credential_file or not (args.xconfig.parent / credential_file).resolve().is_file():
+            errors.append("xconfig llmserver credential_file is unavailable")
         resource = llm.get("cognitive_resource", {})
         if resource.get("rolling_hour_usd") != 5.0 or resource.get("rolling_day_usd") != 50.0:
             errors.append("xconfig cognitive resource limits must be 5 USD/hour and 50 USD/day")

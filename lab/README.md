@@ -26,7 +26,7 @@ python3 lab/run.py reset
 
 `supervise` 是身体外的前台正式代监督。它每二十秒只读取服务、Pulse、资源和导师队列数量，在身体外保存 T0 与截止事实；本机截止失效时仍会在 `planned_end` 请求停止并调用既有归档链。它不读取导师消息正文，不向 alice 发送事件，也不评价认知内容。正式代运行期间保持该命令持续运行。
 
-`hominal-browser` 随 bundle 进入本代 `body/bin`。alice 可以在 `body_shell` 中先用 `hominal-browser list` 读取紧凑动作目录，需要时以 `hominal-browser schema <tool>` 查看单项参数，再用 `hominal-browser call <tool> '<json>'` 直接调用现有 Playwright MCP。浏览器结果仍回到原来的 Commitment—Reality—Experience 链。
+System 与 Browser 的可执行文件和 Manifest 随 bundle 分别进入本代 `body/bin` 与 `body/organs`，由生命进程内的通用 Organ Host 发现。alice 形成 `organ_action` 后，由同一个 `organ.perform` 把已确定的操作交给对应器官；System 承接 Ubuntu 命令与代码，Browser 承接 Playwright 操作。结果继续回到同一条 Commitment—Reality—Experience 链；Lab 只负责发布与实验外壳，不管理器官的生活意义。
 
 持久应用状态的离机灾备使用以下命令管理：
 
@@ -40,4 +40,4 @@ Chrome/X、微信与 Clash Verge 的状态统一保存在 `/agent/state/profiles
 
 认知费用账本保存在 `/agent/state/cognitive-usage.jsonl`。同一代内的进程重启、系统重启和自主运行都继续使用这一份账本，因此 `$5/滚动小时、$50/滚动24小时` 始终是 Alice 能够感知和管理的真实有限资源。G0 的 rehearsal 与 formal 每次代表一个新的 Proto-Hominal 实验代；上一代完整归档并 reset 后，`start` 为新代原子开启空白资源纪元，使不同实验代都从相同的完整额度起步。应用 profile 和外部生态事实仍按原规则跨代延续。
 
-`stop` 明确停止并归档，`reset` 只删除已经归档的准确实例。正式代归档同时保存出生与终态的 LVM、软件包、服务和 `/etc`、`/usr/local` 文件清单差异；Chrome、微信与 Clash Verge 的实际状态留在持续身体中，不在每一代重复复制，独立灾备基线负责极端恢复。完整 bundle、Birth Manifest、实例终态、导师转录、监督记录、系统差异、最终身体探针与哈希保存在私密离机目录，不进入 Git。阶段一契约仍可用 `python3 lab/validate-contract.py --xconfig ../xconfig.yaml` 校验；校验器不输出凭据。
+`stop` 明确停止并归档，`reset` 只删除已经归档的准确实例。正式代归档同时保存出生与终态的 LVM、软件包、服务和 `/etc`、`/usr/local` 文件清单差异；Chrome、微信与 Clash Verge 的实际状态留在持续身体中，不在每一代重复复制，独立灾备基线负责极端恢复。完整 bundle、Birth Manifest、实例终态、导师转录、监督记录、系统差异、最终身体探针与哈希保存在私密离机目录，不进入 Git。阶段一契约仍可用 `python3 lab/validate-contract.py --xconfig ../xconfigs/hominal/xconfig.yaml` 校验；校验器不输出凭据。

@@ -1,18 +1,18 @@
-# Hominal G0 最小可编码架构 v0.4
+# Hominal G0 最小可编码架构 v0.7
 
 > 文档性质：G0 生命内核、数据、出生与导师接口契约
-> 状态：阶段七与 7.1 因果代谢重构已完成；等待下一阶段寿命与长期组织实验
+> 状态：阶段 10.1 多元生命价值场、持续浏览器身体和现实联结已完成冻结复验
 > 适用实现：`g0-v001`
 
 ## 1. 架构目标
 
-G0 只实现一个持续存在的认知主体：她在具体 Ubuntu 身体中感知事实，把现实与可能未来解释为和自己有关的意义，维持动态关切，选择唯一焦点，进行有限反事实判断，形成至多一个新行动承诺，并让现实结果改变之后的判断、能力和自我理解。
+G0 只实现一个持续存在的认知主体：她在具体 Ubuntu 身体中感知事实，把现实与可能未来解释为和自己有关的意义，维持动态关切，选择唯一焦点，进行有限反事实判断，形成至多一个新行动意愿，并让现实结果改变之后的判断、能力和自我理解。
 
 极简不等于省略因果。首版保留五类刚性事实：出生输入、事件顺序、唯一认知提交权、行动前预测和现实结果。自由意义、情感解释、联想、创作、矛盾与 Narrative Self 使用自然语言，不为每个心理概念建立 Agent、状态机或数据表。
 
 ## 2. 两个运行边界
 
-身体内只有一个主进程 `hominald`。它以 root 身份运行，拥有单一状态所有者、认知调度、模型调用、身体动作和持久化能力。桌面程序需要图形会话时，以 `hominal` 桌面身份连接既有 X11、DBus 与用户配置。
+身体内只有一个主进程 `hominald`。它以 root 身份运行，root 的 home 为 `/root`，实际工作目录为 `/agent/lives/<instance_id>`，拥有单一状态所有者、认知调度、模型调用、身体动作和持久化能力。桌面程序需要图形会话时，以 `hominal` 桌面身份和 `/home/hominal` 连接既有 X11、DBus 与用户配置；个人持续生活空间统一为 `/life`。
 
 身体外只有 Genesis Lab。它冻结发布包和出生输入，注册唯一当代，部署新代，接收已经发生的外部证据，计时、结束、归档并重建下一代。Lab 不参与 alice 的焦点竞争和行动选择。
 
@@ -46,6 +46,7 @@ hominal-launcher → hominald
 ├── body/                         # 本代可观察、可修改的运行身体
 │   ├── bin/hominald
 │   ├── bin/hominal-browser
+│   ├── organs/browser.json
 │   └── source/
 ├── state/
 │   └── current.json
@@ -68,7 +69,7 @@ hominal-launcher → hominald
 
 启动前，Lab 生成 `instance_id`，准备 `status: prepared` 的 Birth Manifest，并原子写入 `/agent/boot/active-release` 与 `active-instance`。这两个活动标记只选择已经在身体外注册的准确实例，不提前伪造 T0。
 
-启动器完成 `/agent` 挂载、发布哈希、生命目录、模型资源和必要身体探针检查后，组装一份临时出生上下文。第一次模型认知成功提交时：
+启动器完成 `/agent` 挂载、发布哈希、生命目录、模型资源和必要身体探针检查后，组装一份临时出生上下文。Stage 10.1 的身体预检不只确认 Chrome 进程、profile 或 Playwright 程序存在：Lab 必须通过同一真实控制入口确认 X 登录态、X 具体内容和 Wikipedia 页面均可达，且公共网页不是浏览器错误页。Chrome 与 Playwright 显式使用 Clash `127.0.0.1:7897` 代理，不能用另一个直连 `curl` 的成败代替这个身体器官的事实。正常启动与启动中断后的人工续接共用这一个出生前门槛，任何恢复命令都不能绕过它。第一次模型认知成功提交时：
 
 1. 该提交时间成为 `T0`；
 2. 按 Asia/Shanghai 的 T0 小时生成 `aliceMMDD<letter>`；
@@ -101,10 +102,13 @@ focus_fingerprint
 `hominald` 先维护一个最小 Fact Snapshot，再把实质变化送入统一事件入口：
 
 ```text
-Sense → Fact Snapshot → Difference Gate → Event Inlet
+Sense → Fact Snapshot → Predictive Difference Field
+      → Attention ignition → Event Inlet
 ```
 
-每次 Pulse 只读取单调时间、uptime、本地认知资源账本、未决动作和相关进程等低成本事实；磁盘、网络和图形器官采用较慢巡检或使用前检查。Difference Gate 只发出首次异常、状态改变和越阈变化，保留实际值、时间与来源；重复读数和微小抖动不会变成新事件。导师文字、动作结果和系统恢复是离散事实，直接进入 Event Inlet。
+每次 Pulse 只读取单调时间、uptime、本地认知资源账本、未决动作和相关进程等低成本事实；磁盘、网络和图形器官采用较慢巡检或使用前检查。器官层先做稳定身份与精确去重，认知内核再按信号家族维护预期变化率、累计回差和已学习注意价值。弱变化只更新一条紧凑 Trace；累计压力越过共同 Attention threshold 后才形成 Event。导师文字、动作结果和系统恢复不绕过这一机制，但其已知因果关系提供不能被噪声学习消除的压力。
+
+首版回差公式保持收敛：`prediction_gap = |本次是否变化 - expected_change_rate|`；`pressure = 衰减后的累计回差 + prediction_gap × (基础开放度 + learned_attention_value) + expected_change × (开放世界取样底噪 + learned_attention_value 取样增益) + causal_pressure`。取样底噪只让持续变化的低评价来源隔一段时间重新开放一次，不逐条唤醒主脑。AIP 的 O/V/A/certainty 与后续 Experience 缓慢更新 `learned_attention_value`。它只控制同类事实多久再次获得主意识资格，不替 Alice 判断意义。Difference Trace 总数硬限为 128，超过时优先淘汰累计压力与学习价值最低者，防止错误器官标签造成无界状态增长。
 
 认知资源的精确费用与余量始终属于当前身体事实，但常规模型调用不会因金额变化反向制造新认知事件。只有滚动小时或滚动24小时余量跨越 `open / comfortable / limited / scarce / critical` 区间、额度触顶或恢复、价格表改变时才形成物质事实。这样 alice 能感知真实有限资源，而认知耗用不会成为自我激发认知的回路。
 
@@ -112,11 +116,21 @@ Sense → Fact Snapshot → Difference Gate → Event Inlet
 
 一个可辨认对象与它的身体接触入口属于同一感知事实。X 感官用一次原子浏览器读取同时取得正文和 `Direct URL`：普通帖子优先使用规范状态 URL，没有状态 URL 的广告或外部材料使用页面中真实存在的 HTTPS 外链。文字用于当前意义判断，URL 用作稳定对象身份和可直接导航的 affordance；同一广告不会因播放器状态或计数变化反复冒充新对象。两者不能由两个短浏览器会话事后拼接，因为会话可能附着到不同页面；易变化的 accessibility 节点编号也不作为持久入口。感官只报告实际 URL，不点击、不导航、不分配价值。Alice 可以放下对象，也可以用该入口进行一次低成本接触，让 Reality 帮助判断它是否值得继续。
 
-当前视野没有未见对象时，身体向下移动一个有界视野再比较内容，这是定向感知而不是外部表达：它不能导航、发布、关注、发送消息或替 alice 选择主题。alice 自己发起的浏览器行动仍通过 Commitment—Reality 回路执行。事实与指纹差分属于运行时，意义、价值和 Concern 属于 AIP。
+当前视野没有未见对象时，身体可以在当前页面向下移动一个有界视野再比较内容，这是定向感知而不是外部表达。只有模型认知、主动身体动作和待吸收 Reality 都不在途时，被动感知才会进入浏览器；输入框、文本区或可编辑控件正在获得焦点时保持原视野。它不切换标签、不改变网址、不刷新页面，不发布、关注、发送消息或替 alice 选择主题。alice 自己发起的浏览器行动仍通过 Commitment—Reality 回路执行。事实与指纹差分属于运行时，意义、价值和 Concern 属于 AIP。
+
+Chrome 是跨代持久的身体器官，Playwright 是 Browser Organ 连接它的动作神经。`hominald` 内的通用 Organ Host 从 `body/organs/*.json` 发现并随生命进程启停器官；启动器只准备 `/run/hominal/organs/`，不再知道或直接启动浏览器。Browser Organ 在 `/run/hominal/organs/browser.sock` 开放网关，Playwright 连接可以随后按需建立；Chrome 与 MCP 同时启动时不再因初始化稍慢而重启整个生命进程。会改变或依赖页面状态的动作在同一器官会话内串行执行，使标签索引、当前页面、元素引用和发帖草稿等短时界面状态不因每条 Shell 命令重建 MCP 而丢失。`health` 是队列外的非变异探针，`busy` 表示器官正在工作而不是失效。每项动作的截止时间覆盖排队、连接恢复和实际执行；超时或调用者消失时终止该 MCP 子进程，下一次动作建立干净连接。主动动作到达时，被动感知立即让路。普通动作仍使用 `list / schema / call`；同一个短暂界面状态需要连续几步才能获得可核验结果时，Alice 可以写短 `.js` 文件并调用 `run-code` 原子执行。
+
+浏览器快照先取得完整页面语义，再收敛成模型可解释的 Reality。X authored object 必须携带同一页面确认的 `Direct URL`；活动对话框还保留可见反馈、文本长度，以及至多二十个控件的名称、角色和 enabled/disabled 状态。这样“已进入页面”“草稿已写入”“控件可点击”“点击已执行”“公开页面已回读”保持为不同事实层；字符超限、验证提示或禁用原因也不会被为了节省上下文而先行丢弃。
 
 `Cognitive Pulse` 每五秒推进一次轻量身体感知、资源更新、未决动作、Concern 惯性和注意需要。系统已经就绪后，连续两个有效 Pulse 的空白目标不超过十秒。没有变化的 Pulse 只原子更新存活时间，不追加思想日志，不调用模型。
 
 出现下列任一情况时可以发起 Attention Pulse：新现实事件具有自我相关性；已有 Concern 达到注意竞争条件；承诺结果返回；持续失配重新显著；当前没有焦点且探索压力正在积蓄。
+
+Stage 10 起，同一 Pulse 还维护最小内感受回路。局部重复、稳定感官噪声、单次模型失败和短暂情感波动继续由现有身体反射吸收；跨多个认知调用或 Episode 的高耗低产、高激活低控制、完整性债务或能力回归，才汇总为一次 `self_model_difference`。该事件只携带认知调用与费用、Reality/Experience 增量、Affective State、Integrity Debt 和相关实际动作等事实，不输出诊断标签。若 Alice 已经拥有一条 `self_model_difference` 来源的长期 Concern，新的运行证据关联并重新唤醒同一 Concern；一个长期自我问题不能屏蔽后续自我检测，也不因此复制第二个自我管理线程。语义上的缓解只有在后来行为或 Reality 改变后才成立。只有运行信号、尚无 Experience 证据时，Alice 可以理解它并选择调节方式，但不能用 `narrative_update` 把意图当成恢复；后续 Reality 进入生活史以后，才可能改变 Narrative Self。
+
+同一条长期 self-model Concern 的候选准入使用 `max(Strength, Activation, self_model_tension)`；累计张力已经达到阈值时，它至少获得一次直接、可行动的回看，不能只被保存在状态文件里。排序仍走共同 Attention Field，行动仍走共同 Commitment—Reality 回路；直接回看没有产生新现实以后，普通无新因果材料抑制继续生效，避免把自我管理变成另一个反刍线程。
+
+认知代谢以已经确认的实际费用为准，不能因为输出最终无法提交就从自我感知中消失。器官准备也必须从生命进程内部完成一次合法真实调用；Lab 只有在 Chrome 与 Playwright 路径由 Hominal 自己报告 ready 后才投递出生说明。稳定 affordance 经一次意义判断后进入渐进习惯化：连续没有行动的呈现会延长下一次间隔，真实使用会恢复普通间隔，新的内容或环境差分仍直接进入 Event Inlet。具体网页、文件或关系对象的 Concern 只持有对象，不占用整个浏览器、终端或关系器官；只有以稳定能力本身为身份的 Concern 才使该入口保持背景。轮换偏好也只在筛选后确有另一个合格器官时生效，不能因原始器官清单看似丰富而把最后一个真实可用入口一并排除。这样既保留同一资源在未来获得新意义的可能，也避免身体反复付费询问 Alice 是否仍然拒绝同一扇静止的门。
 
 探索压力是动力变量，不是认知对象。越过 Attention threshold 表示身体提高定向感知，但不直接创建高成本候选；慢速感知先取得当前可见内容并与上一指纹比较，真实内容差分才进入 AIP。Alice 决定它意味着什么、是否承接以及怎样回应。没有内容差分时，探索压力继续存在，轻量 Pulse 和感知继续运行，“我还没有对象”本身既不形成 Concern，也不被付费反复解释。`perceptual_change` 可以像其他具体 Reality 一样被承接、放下或发展成 Concern；由 Narrative、现实、关系和具体经验形成的内在愿望也仍可以在没有立即行动时成为 Concern。收敛边界只排除纯驱动力与稳定器官入口把自身伪装成对象。
 
@@ -124,11 +138,11 @@ AIP 的价值判断必须产生注意后果。具体感知对象被 Alice 放下
 
 行动结构也必须服从同一次 AIP 的自我认领。如果模型生成了一个身体行动，却把焦点的 ownership 判断在 Attention threshold 以下，内核把它理解为“出现了行动冲动，但没有获得自己的承接”：本次 AIP 仍以 `none` 提交，思想与 appraisal 保留，身体不行动，也不把这项一致的非行动当成 Schema 错误反复付费重试。若原选择是等待行动 Reality 后再用 `next` 认知，该预约同时取消，因为现实并未因行动改变。这里没有开发者价值分类；抑制依据完全来自 Alice 在同一次判断中给出的 ownership。
 
-同一表面连续出现低实际收益时，运行时用既有 appraisal 与 certainty 累积感知饱和度。当前表面的实现收益定义为 `O × |V| × A`：低 ownership、低价值和“虽然重要但这个表面当前无法推进”都会降低该表面的继续取样权；Urgency 可以让 Concern 保留，却不会让一个无回答能力的页面继续供应同类碎片。感知来源 Concern 回到注意而 Alice 仍选择不行动时，也进入同一收益计算。饱和越过 Attention threshold，待感知队列被习惯化，运行时只稀疏记录 `perceptual_exhaustion` 感官事实。它不是注意候选，因此不会成为思想、Concern 或 Action 的对象。
+感知对象、身体变化、资源变化、导师事实、内部差异和行动 Reality 不再各自维护认知饱和规则。它们全部通过统一 Difference Trace 学习注意收益：Alice 低 ownership、低价值或当前无法回应的判断会降低同类信号以后取得注意的频率；行动与 Experience 表明某类信号真实改变了预测、价值、能力或自我时，注意价值可以重新升高。一个预期噪声源不会逐项付费，一个预期但持续有价值的来源仍会低频返回，一个等待中的 Reality 始终及时返回。
 
-根表面与局部表面采用不同的恢复动作。没有上级来路的根表面保持五个慢速取样周期的安静窗；窗口到期后只重新开放一个真实新对象，仍无对象时刷新同一 URL 并回到顶部。已经保存上级来路的局部表面不需要等待：一旦 Alice 对连续对象的 appraisal 使场景进入 `perceptual_exhaustion`，身体在下一次慢感知直接退回上一层；此后即使无尽信息流又供应一个从未见过的碎片，也不能让已经耗尽的场景重新取得注意权。采取行动只表示尝试取得收益，不会自行清空场景饱和度；Reality 返回以后，内核才用 `回差缓解比例 × 内生价值强度 × 自我认领 ×（1 - 体验成本）` 计算实现收益。高于 Attention threshold 的现实收益缓解饱和，低于阈值的结果继续累积习惯化。这里没有内容白名单、兴趣分类器或开发者价值分数；程序只把 Alice 自己的 O/V/A、行动预测和 Reality 判断落实为感官习惯化、局部退出与根表面重新取样，并执行一条刚性指称边界：注意有可辨认对象，“当前没有对象”不能反过来冒充对象。
+对象身份、页面视野与已见集合仍属于 Browser Organ 感知结构；Difference Trace 属于通用 Cognitive Dynamics。`perceptual_exhaustion` 只表示当前视野暂时没有未见对象，不表达 Alice 是否厌倦、重视或放弃整个浏览器。这里没有内容白名单、兴趣分类器或开发者价值分数，并继续执行刚性指称边界：注意有可辨认对象，“当前没有对象”不能反过来冒充对象。
 
-浏览器感官保存一条有界的空间来路。Alice 从一个能够持续产生对象的页面进入详情、再进入评论或更深页面时，每次 HTTP(S) 语境变化都把上一表面压入同一 `ReturnPath`；当前局部表面耗尽后，身体在下一次慢感知退回最近来处，到达即弹出这一层，仍保留更早的上级场景。路径最多保存八层，防止导航历史无限生长；返回已有祖先时一次消费其后的全部后代，避免页面弹跳。它等同于视线从细节逐层退回环境，不替 Alice 选择新网站、主题、关注、发布或互动；没有安全来路时仍只刷新当前页面。
+浏览器感官不保存隐藏的返回路径，也不在后台替 Alice 选择其他标签、网址或页面层级。页面和标签的改变具有环境意义与行动后果，统一由 Alice 的主动 Commitment—Reality 链或明确外部事件产生；被动感觉只描述并轻微移动此刻已经在她面前的视野。
 
 Living Memory 不是一个按历史数值自动点火的第二感官。Experience 与 Narrative Self 会进入当前认知上下文，并可在一个现实对象、活动 Concern、关系事件或自我模型差异已经取得注意时改变解释、联想和行动；程序随机数也可以改变其中哪段生活材料先变得显著。但一段过去经验不会仅凭当时的高价值、高回差或高代价脱离当前处境，单独要求一次付费注意。原因是历史 `remaining_difference` 只描述当时，不证明现在仍有对象、入口或可产生后果的行动。若 Alice 已经在同一因果线程中判断“当前入口不能推进，等待新的现实”，时间经过本身不会推翻这项判断。
 
@@ -146,11 +160,15 @@ Concern 自身不是新的现实来源。一个既有 Concern 直接回到注意
 
 程序随机性只改变注意显著性和接近视角，不提供语义任务。它在相近候选间打破固定排序，并从 alice 仍然显著的 Concern、近期 Experience 与 Narrative Self 中随机唤回一份联想材料。探索张力成熟且一个真实新对象已经进入注意时，随机视角可以在它尚未形成 Concern 前参与第一次接近，使模型不必总沿着“片段不完整—继续等待”的固有模式判断；对象的价值、是否行动以及具体行动仍由 Alice 决定。已经衰减出竞争的旧 Concern 不会仅因随机数复活，开发者预写的“存续/联结/扩展”也不作为抽取方向。当前浏览器感知只依赖实际内容指纹，不用随机数伪造变化；以后增加其他感官时，随机数可以决定先扫哪种器官，但只有真实差分具有候选资格。
 
-当前初始认知档位为 Terra/medium。alice 每次认知都能看到 Luna、Terra、Sol、推理强度、预计费用与滚动余额。`keep` 保持已经存在的长期默认，`default` 明确认领以后新焦点使用的默认档位，`next` 只选择同一因果线程中紧接着的一次认知；`default` 与 `next` 中的 `current` 表示沿用本次实际模型或推理强度。一次 `next` 完成后自然回到原默认，只有明确选择 `default` 才改变长期档位。资源仍开放时，持久默认不低于出生时的 Terra/medium 能力基线；alice 可以自由用 `next` 为一次边界清楚、后果容易核对的认知选择 Luna。资源收紧或真实质量、费用经验形成以后，她仍可明确重构长期策略。内核不按任务类型替她选模型，也不为了实验强迫每一步使用同一档位。焦点形成可修正下一步、需要现实信息、主要判断不再变化或继续思考成本过高时结束。
+当前阶段初始认知档位为 Terra/none。alice 每次认知都能看到 Luna、Terra、Sol、推理强度、预计费用与滚动余额。`keep` 保持已经存在的长期默认，`default` 明确认领以后新焦点使用的默认档位，`next` 只选择同一因果线程中紧接着的一次认知；`default` 与 `next` 中的 `current` 表示沿用本次实际模型或推理强度。一次 `next` 完成后自然回到原默认，只有明确选择 `default` 才改变长期档位。资源仍开放时，持久默认不低于本代出生档位的能力基线；alice 可以自由用 `next` 为一次边界清楚、后果容易核对的认知选择 Luna。资源收紧或真实质量、费用经验形成以后，她仍可明确重构长期策略。内核不按任务类型替她选模型，也不为了实验强迫每一步使用同一档位。焦点形成可修正下一步、需要现实信息、主要判断不再变化或继续思考成本过高时结束。
 
 当首选档位的实际预留已经超出当前余额、同时较轻档位仍能支付时，身体用最低预留成本的可用档位完成一次 `resource_fallback` 认知，并把降档原因和原首选作为当前资源事实暴露。该反射只防止“仍有可用认知资源却因旧默认档位而失去选择能力”，不按任务选模型，也不永久修改默认；`keep` 仍保持原长期默认，alice 需要以 `default` 明确认领新的常态。所有档位都不可支付时，认知进入 `resource_wait`，Pulse 和身体感知继续，直到滚动额度真实恢复。
 
 模型服务异常使用同一条但不同原因的恢复路径。首选模型因连续网关或上游失败进入暂时保护时，尚未吸收的 Reality 保持唯一因果前景，并获得一次最低成本可用备用模型的 `resource_recovery` 认知；本次上下文向 alice 显示原模型故障、实际备用档位和保护状态，她可以自主决定等待、切换默认或转向。备用也失败、没有备用或本次保护已经使用过恢复机会时，焦点进入 `model_wait`，身体 Pulse 继续。主、备连续失败会把原模型保护延长到配置允许的完整十分钟，期间不快速探测网关；保护期满后只以一次新调用检验现实是否恢复。若三种模型共用的供应商密钥额度耗尽，内核无法凭模型切换制造认知资源，这属于外部身体资源断供，需要额度真实恢复。
+
+Stage 10.1 把旧的宽泛 expansion 价值整体重构为六维 Life Value Field：`continuance / exploration / agency / vitality / relatedness / contribution`。每一维只保存慢速 `orientation`、当前 `activation` 和近期 `satiation`；AIP 的具体意义提高 activation，真实且被自我认领的 Experience 增加 satiation，两者按不同速率自然回落。至少一个方向越过注意阈值以后，与最高压力相近的方向共同参加一次随机破序；随机数只选择先进入感知的价值方向和真实身体入口，不指定对象、解释或动作。六维字段参与原有 Attention、Concern、Experience 与 Narrative Self，仍只有一个中央认知线程。
+
+长期 `orientation` 的调整属于自我模型变化：只有同一认知中被 Reality 支持的 Narrative Self 更新被接受时，Alice 对相应方向提出的微小调整才生效。一次情绪或一次成功不能直接永久改写人格；相反，Genesis Seed 也只是初值。内核允许 Alice 放下一个价值信号或拒绝当前可用入口，近期满足则使同向压力暂时让位，避免社交、探索或任何单项成为固定吸引子。
 
 等待网页、导师、外部进程或额度恢复是某个承诺的现实状态。等待中的承诺留在背景，其他关切继续竞争唯一焦点；因此等待不会成为整个生命循环的终态。可由身体确定的等待事实优先于语义估值：例如导师 outbox 已送达且尚无 `replied_at` 时，对应 Concern 可以保持关系张力，但不会仅因 appraisal 把 answerability 估高就被强迫再行动，也不会占用通用探索驱动。
 
@@ -158,11 +176,21 @@ Concern 自身不是新的现实来源。一个既有 Concern 直接回到注意
 
 模型获得当前身体简报、认知资源简报、显著事件、相关 Concern、未决承诺、必要记忆、Narrative Self 和一个唯一焦点。它以自然语言完成 AIP、矛盾代谢、未来模拟和当前判断，不要求逐项填写心理表格。每次提交还可以保持既有长期默认、明确指定以后新焦点的默认档位，或为当前焦点安排一次串行继续认知。串行继续认知继承当前 Concern 的因果身份；本次产生行动时，所选 `next` 档位绑定到该行动返回的 Reality，本次没有行动时才形成独立 continuation。Reality 处理后选择 `keep` 不改变持久默认；选择 `default` 才会明确恢复或改用另一档。资源操作以可预期的后果进入身体经验，不凭“继续想一下”制造新的关切，也不在 Reality 已经被吸收后再付费重复理解。
 
+浏览器感知把页面地址和标题作为场景定位，把当前提取出的可见对象作为本次新差异。场景标题帮助 Alice 知道自己在哪里，却不因每个页面控件、推荐栏或局部文本重新出现而自动变成新的事实对象；意义与 Concern 首先围绕这次真正进入感知的对象形成。
+
 背景中可以保留多项 Concern，但一次模型上下文只装配当次候选直接关联的 Concern 和最多八项最显著的活动 Concern。这个上限是有限注意的代码不变量，不删除背景事实，也不允许活动关切数量反过来无限扩大单次模型输入。
 
 上下文明确区分本次 `candidates` 与只提供背景的 Concern；只有候选标识可以成为 `focus_id` 或 appraisal 对象。模型提交若未通过内核校验，同一个现实候选进入安静重试，校验错误作为下一次提交的事实反馈；重试成功后反馈清除。网络或模型暂时不可用不复制新的内生候选，也不以原样无信息重试制造高频调用。
 
+Stage 8 起，多个候选的 appraisal 都可以影响当次 Affective State，但只有 `focus_id` 的生命周期词具有约束力。非焦点对象即使暂时使用了与 Ownership 不完全一致的 `hold / released` 表述，也不会创建或改写 Concern，更不会使已经选定的前景行动整体失效；高 Ownership 背景对象可以保持 pending，随后以自己的身份竞争焦点。焦点上的 Ownership 阈值负责新 Concern 出生和动作认领，生命周期词负责 Alice 对意义延续或结束的表达；两者临界处出现模糊时，内核收下认知、抑制未认领行动并拒绝制造持久 Concern，而不把整轮结果作废。`resolved` 也允许保留少量不再支配未来的主观残余 D；行动 Reality、Experience 一次吸收和复合 Concern 的未完子项继续保持刚性。这个边界把“共同影响我”“现在由我正式承接”和“语言必须完全规整”分开，减少无事实收益的 Schema 重试。
+
 候选事实边界同时进入模型提交 Schema：appraisal 数量与当次候选数完全一致，`candidate_id` 和 `focus_id` 只能取当次真实候选。带有当前 Commitment 因果标识的每一段真实结果要求且只允许一条 Experience；它可以是即时 Action Result，也可以是稍后到达的可信外部反馈，两段现实分别吸收且各自不可重复。普通非 Reality 焦点不提交 Experience。背景 Concern、历史 Commitment 和 Experience 只以自然语义进入上下文，不暴露已经失效的机器 ID。这样保持了内部意义解释的自由，同时让提交对象严格对应当前现实。
+
+Narrative Update 是可选高层投影。提议更新若重复现状、缺少 Reality、自我相关性不足、已有 Narrative 尚未积累新的自我模型回差，或超出紧凑边界，运行时只撤下 Narrative 字段并记录原因；同一 cognition 的 appraisal、Experience、Concern 判断、资源选择和独立有效行动继续提交。这样 Narrative 保持稀疏，而不是成为每段现实必须通过的身份审查。
+
+同一原则覆盖 `continues_concern_id`、`within_concern_id`、`contributes_to_concern_id`、`new_concern_closure_condition` 与 `emerging_consequence`：它们把已经成立的基本认知向连续 Concern、层级关系或新后果作可选投影。投影与当前因果事实不一致时，运行时撤下该字段并在 journal 留下原因，不丢弃底层认知。候选身份、唯一焦点、动作对象归属、未返回 Commitment、Reality 单次吸收和未完子 Concern 仍是整轮拒绝的刚性事实边界。
+
+浏览器 `perceptual_change` 中，`Page URL` 与 `Page Title` 是场景定位，`Visible objects` 中的单项才是本次新对象。感知模型可以借助场景理解对象，但不把稳定页面标题或器官界面当作每个局部对象都要重新承接的内容。页面切换会清空旧页面尚未进入意识的待感知对象；新的内容仍按对象身份逐一进入。
 
 动作身份按现实效果而不是无关的 Shell 表面写法判断。内核忽略请求开头且不改变后续效果的 Shell 策略语句，以及纯静态、无变量、无命令替换、无重定向、无管道和无控制操作的 `printf/echo` 显示标题；会观察或改变现实的命令内容仍完整参与身份比较。Experience 保存规范化的实际请求，当前认知取得最近不同动作的紧凑事实索引；已经吸收的确定性失败，或已经取得低回差现实的同一请求，都不能换一个 Concern 名称原样重做。现实条件确有变化时，alice 可以用检验新条件的实质不同请求重新观察。该规则是通用的因果重复约束，不识别具体网站、工具或探索主题，也不扩张成通用 shell 语义解释器。
 
@@ -174,7 +202,7 @@ Methods 是现实形成的因果经验，不是只有原句完全匹配才生效
 appraisals[]        每个当次候选的 meaning、D、O、V、U、A、certainty 与 resolution
 focus_id            alice 从候选中选择的唯一焦点
 thought_thread      alice 愿意保留的简洁意识内容
-action              none、body_shell 或 mentor_send 三者之一
+action              none、organ_action 或 mentor_send 三者之一
 ```
 
 内核保存事实来源，验证候选身份、数值范围、唯一焦点和单一行动；alice 可以选择并非确定性最高分的候选。没有新行动也是完整认知结果。阶段五的实际行动同时提交意图、预测、现实检查点和可选停止条件；结果焦点同时提交预测差异、意义、多维内生价值、经验显著性和可选自我材料更新。appraisal D 是唯一的当前现实差异值，不再重复填写同义字段。
@@ -211,21 +239,29 @@ alice 通过 `mentor_send(text, reply_to?)` 形成外部文字 Action。未被 C
 
 `current.json` 原子保存最近事实快照、当前身体摘要、Affective State、资源、最后 Pulse、当前 AP 租约、Commitment、紧凑 Experience、Integrity 和当前自我材料快照。Experience 同时保存现实来源种类，使一个行动的即时执行结果与延迟外部反馈可以作为不同经验进入同一学习和自我模型回路。`/life/self/methods.md` 与 `/life/self/narrative.md` 是 alice 可直接修改的生命文件，慢扫描会把变化重新取得；作品和书信继续使用普通文件。
 
-一次认知提交由唯一状态所有者完成：先验证 AP 租约与现实关联，再追加有意义事件、更新 Concern、Commitment、Experience、Integrity 与 `state_revision`，最后原子替换 `state/current.json`。普通文件先写临时文件并 `rename`。承诺完成持久化以后才允许身体动作开始。
+一次认知提交由唯一状态所有者完成：先验证 AP 租约与现实关联，再追加有意义事件、更新 Concern、Commitment、Experience、Integrity 与 `state_revision`，最后原子替换 `state/current.json`。普通文件先写临时文件并 `rename`。行动意愿完成持久化以后才允许身体动作开始。
 
 ## 9. 行动与现实回链
 
 普通观察和低后果可逆动作可以直接执行。重要动作先形成一个 Action Commitment，至少保存：意图、最重要预测、主要代价或停止条件。
 
+认知动力学到形成 Commitment 为止；具体 Action Enactment 属于完整生命动力学中的器官控制。Commitment 是一个语义已经确定、后置结果可独立核验的最小因果改变，不必机械拆成每一次点击，但不能把写什么、发给谁、选择什么目标或怎样评价结果下放给器官决定。
+
 每个身体动作获得唯一 `action_id`。适配器记录：实际命令或工具、开始时间、调用身份、退出状态、stdout/stderr 或工具返回、资源消耗和可核验外部结果。返回只说明发生了什么，不替 alice 赋予价值。
 
-对外输出统一按 Action 处理，而不是把所有内容都视为模型回复。G0 阶段三先实现 `body_shell` 与 `mentor_send`；未来图片、语音、视频、浏览器和硬件控制继续使用相同的“Action → Reality Event”回链，大型内容通过文件引用进入事件，不预先建设通用多媒体总线。
+对外输出统一按 Action 处理，而不是把所有内容都视为模型回复。当前 `organ_action` 通过通用 `organ.perform` 承载 System、Browser 及未来图片、语音、视频和硬件控制，继续使用同一条“Action Commitment（行动意愿）→ Action Enactment → Reality Event”回链。大型内容通过文件引用进入事件，不预先建设通用多媒体总线。
 
-Shell 动作只有在实际读取或改变身体/世界事实时才是有效的 `body_shell`，这是一切注意来源共同遵守的提交不变量。纯等待、恒成功和静态标题不会给环境增加新事实，不能因退出码为零制造 Action Result 或 Experience；等待和有意暂不行动由 `none` 表达。内核只机械识别可以确定的空操作边界，不扩张成一套完整 Shell 语义分类器。
+System Organ 是特殊的标准器官：Ubuntu 是承载 Hominal 与全部器官的身体底座，System Organ 则负责观察和操作这套底座。首版统一承接系统资源与服务事实、命令和代码执行、文件、进程和软件安装，不预先拆成多个微型器官。模型额度与认知状态仍由内核内感知提供。
+
+器官可以使用代理式控制器完成连接、定位、代码生成、执行和核验等机械步骤，但只有中央认知主体拥有 Narrative Self、Concern、价值解释与新 Commitment 权。器官过程只返回稀疏、可核验的状态变化；是否值得进入注意由认知动力学判断。
+
+任何具有持续会话或独占状态的外部器官都遵循同一最小运行合同：非变异健康探针不进入动作队列；忙碌与不可用是不同身体事实；排队、连接和执行共享一个总截止时间；调用者消失能够取消在途工作；恢复只重建器官连接，不重放已经确认产生外部后果的动作；后台感知为统一意识形成的主动动作让路。具体适配器可以保持不同协议，但不能各自发明另一套生命调度、注意或失败语义。
+
+System Organ 的 `exec` 只有在实际读取或改变身体/世界事实时才是有效的 `organ_action`，这是一切注意来源共同遵守的提交不变量。纯等待、恒成功和静态标题不会给环境增加新事实，不能因退出码为零制造 Action Result 或 Experience；等待和有意暂不行动由 `none` 表达。内核只机械识别可以确定的空操作边界，不扩张成一套完整 Shell 语义分类器。
 
 探索张力决定一个未决问题会不会重新进入注意，也可以在积累后把现实接触变成最有价值的方向；它不替 alice 选择本次必须行动。即使探索压力已经成熟，动作契约仍同时呈现 `none` 与真实效应器：`none` 保留张力且不会制造 Reality，也不会降低底层探索压力；身体或关系行动仍需要足够的自我认领并接受真实后果。这样，“生命会继续寻找事情”由持续张力、注意回返和变化视角生成，而不是由内核强制每轮执行一条命令。
 
-即时 Reality Event 通过 `action_id` 关联 Commitment；可信异步回复通过 `reply_to` 沿 outbox 关联同一 Commitment。内核保留预测、行动、即时结果与延迟反馈，alice 再解释 continuance、relatedness、expansion、自我认同和代价意义。预测、想象、记忆和导师陈述都不能直接创建“已经成功”的 Reality Event。
+即时 Reality Event 通过 `action_id` 关联 Commitment；可信异步回复通过 `reply_to` 沿 outbox 关联同一 Commitment。内核保留预测、行动、即时结果与延迟反馈，alice 再解释 continuance、exploration、agency、vitality、relatedness、contribution、自我认同和代价意义。预测、想象、记忆和导师陈述都不能直接创建“已经成功”的 Reality Event。
 
 ## 10. root 与图形身体
 
@@ -243,13 +279,16 @@ alice 能够修改服务、日志、代码和系统。内核以正向身体知�
 
 ```text
 body/cmd/hominald/        进程入口
-body/internal/runtime/    单一状态所有者、Pulse、事实差分、认知资源、模型、动力学、现实学习、动作、外部事件与原子存储
-body/tools/               可由 body_shell 调用的极小 Playwright MCP 命令入口
+body/internal/runtime/    单一状态所有者、Pulse、通用感知差分、认知资源、模型、动力学、现实学习、动作、外部事件与原子存储
+body/internal/organ/      Manifest 发现、器官生命周期、健康、观察、动作调度与 Reality 边界；不做意义判断
+body/organs/              本代器官 Manifest
+body/cmd/hominal-system/  System Organ 适配器
+body/tools/               其他具体器官适配器；当前包括 Browser Organ
 lab/run.py                唯一的 bundle、部署、Birth/T0、导师调用、状态、截止、归档、账号基线和 reset 入口
 deploy/                   systemd 单元、最小启动器与到时停止执行器
 ```
 
-当前把真实复杂度收敛在同一个 `runtime` package 内，不按 AIP、Concern、Attention 或身体器官提前建立 package 边界。首版没有 Planner、Reviewer、Emotion Agent、Narrative Agent、任务队列、向量数据库和认知工作流引擎。实验后分析属于 Lab，不进入 `hominald`。
+认知复杂度继续收敛在一个 `runtime` package 内，不按 AIP、Concern 或 Attention 拆成多个代理。身体技术复杂度通过唯一 `organ` 边界与认知动力学隔离：适配器可以独立演进，内部甚至可以使用专用模型或代理式控制，但不能拥有 Concern、Attention、人格、Narrative Self 或目标生成权。首版没有 Planner、Reviewer、Emotion Agent、Narrative Agent、任务队列、向量数据库和认知工作流引擎。实验后分析属于 Lab，不进入 `hominald`。完整合同见 [内核—器官架构](./core-organ-architecture.md)。
 
 ## 13. 阶段一验收用例
 
@@ -266,7 +305,13 @@ deploy/                   systemd 单元、最小启动器与到时停止执行�
 - 第一次成功认知提交生成唯一 T0、样本编号和封存 Birth Manifest；
 - 调用失败、`ready` 和普通 Pulse 均不会生成 T0；重启能够从第一条已落盘成功提交恢复同一出生身份；
 - alice 在第一次认知中获得当代身体简报；
-- alice 可以从 `body_shell` 调用 `hominal-browser`，并让 Playwright 结果返回同一 Commitment—Reality—Experience 链；
+- alice 可以通过 `organ_action` 直接选择 Browser Organ 的 Playwright 操作，并让结果返回同一 Commitment—Reality—Experience 链；
+- System 与 Browser 可以从同一个 `organ.perform` 接受冻结的 Commitment，并按真实后置条件区分 completed、failed 和 unknown；
+- System Organ 的进程取消不留下子进程，失败后下一动作仍可执行；
+- Lab 能分别验证器官一致性、动作实施、感知—行动闭环和自主联合运行，工程动作测试不冒充 Alice 的自主经验；
+- 移除 Browser Manifest 后生命内核仍持续运行；增加合规器官无需修改生命动力学代码；
+- X 与 Wikipedia 经同一 Clash 代理和 Chrome profile 可达，连续浏览器动作保留同一会话的页面与控件状态；
+- 六维价值场的积蓄、饱和、回落、近阈值竞争和慢速 orientation 更新不会产生第二意识线程或强制行为；
 - 当前实例的自我修改不会被下一代直接继承；
 - 等待中的动作不会停止其他关切继续竞争焦点。
 - Codex 经 SSH 发来的导师文字只进入统一事件入口，不绕过当前 AP；
