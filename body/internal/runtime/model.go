@@ -26,6 +26,7 @@ type ModelClient struct {
 
 type apiResponse struct {
 	ID               string            `json:"id"`
+	Status           string            `json:"status"`
 	Model            string            `json:"model"`
 	OutputText       string            `json:"output_text"`
 	Output           []apiOutputItem   `json:"output"`
@@ -1506,7 +1507,7 @@ func (m *ModelClient) call(ctx context.Context, request CognitiveRequest, notice
 	if err := json.Unmarshal(responseData, &raw); err == nil {
 		decoded.OutputRaw = raw.Output
 	}
-	if decoded.Error != nil {
+	if decoded.Error != nil && adapter != "llmserver" {
 		fact := modelFailureFact(request, "api_error", response.StatusCode, response.Header.Get("Retry-After"), requestIDFromHeader(response.Header), response.Header.Get("Date"))
 		_ = settleUnknownUsage(ctx, notices, request, reserved, fact)
 		return apiResponse{}, &ModelCallError{Fact: fact, Message: "model API error: " + truncate(decoded.Error.Message, 512)}
@@ -1619,13 +1620,20 @@ func acknowledgeUsage(ctx context.Context, notices chan<- WorkerNotice, request 
 	status := "completed"
 	failureCategory := ""
 	requestID := response.RequestID
+	terminalFailureCategory := ""
+	terminalFailureMessage := ""
 	if modelGatewayAdapter(request.Config.ModelGateway) == "llmserver" {
+		terminalFailureCategory, terminalFailureMessage = llmserverTerminalFailure(response)
 		billed, parseErr := decimalUSDMicrousd(response.Billing.Charges.Total)
 		billingMatchesHeader := response.RequestID == "" || response.Billing.RequestID == "" || response.RequestID == response.Billing.RequestID
 		confirmed = parseErr == nil && response.Billing.SettlementStatus == "confirmed" &&
 			response.Billing.Currency == "USD" && billingMatchesHeader
 		if confirmed {
 			actual = billed
+			if terminalFailureCategory != "" {
+				status = "failed"
+				failureCategory = terminalFailureCategory
+			}
 		} else {
 			actual = 0
 			status = "completed_billing_unconfirmed"
@@ -1670,9 +1678,45 @@ func acknowledgeUsage(ctx context.Context, notices chan<- WorkerNotice, request 
 	}
 	if failureCategory != "" {
 		fact := modelFailureFact(request, failureCategory, http.StatusOK, "", requestID, "")
-		return &ModelCallError{Fact: fact, Message: "llmserver response did not contain a matching confirmed USD settlement"}
+		if confirmed {
+			fact.CostStatus = "confirmed"
+		}
+		message := "llmserver response did not contain a matching confirmed USD settlement"
+		if terminalFailureCategory != "" && confirmed {
+			message = terminalFailureMessage
+		}
+		return &ModelCallError{Fact: fact, Message: message}
 	}
 	return nil
+}
+
+// llmserver may return a fully billed HTTP 200 response whose Responses
+// terminal status is failed.  It is a paid model-output failure, not an
+// uncertain transport result.  Successful responses must explicitly carry the
+// completed terminal state documented by the unified gateway contract.
+func llmserverTerminalFailure(response apiResponse) (string, string) {
+	switch response.Status {
+	case "completed":
+		if response.Error == nil {
+			return "", ""
+		}
+		return "response_failed", "llmserver completed response contained an error"
+	case "failed":
+		if response.Error != nil && response.Error.Code == "invalid_function_output" {
+			message := "llmserver model output did not form a valid function response"
+			if strings.TrimSpace(response.Error.Message) != "" {
+				message += ": " + truncate(strings.TrimSpace(response.Error.Message), 512)
+			}
+			return "invalid_function_output", message
+		}
+		message := "llmserver returned response.failed"
+		if response.Error != nil && strings.TrimSpace(response.Error.Message) != "" {
+			message += ": " + truncate(strings.TrimSpace(response.Error.Message), 512)
+		}
+		return "response_failed", message
+	default:
+		return "invalid_response_status", "llmserver response did not contain status=completed"
+	}
 }
 
 // decimalUSDMicrousd preserves the server's decimal bill without converting it

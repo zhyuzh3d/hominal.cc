@@ -157,6 +157,10 @@ func (r *Runtime) handleModelNotice(notice WorkerNotice) error {
 		lastSpend := usage
 		r.state.CognitiveResource.LastSpend = &lastSpend
 		if usage.FailureCategory != "" {
+			costStatus := "unconfirmed"
+			if usage.CostConfirmed {
+				costStatus = "confirmed"
+			}
 			failure := ModelFailureFact{
 				ObservedAt:  usage.Time,
 				Model:       usage.RequestedModel,
@@ -165,7 +169,7 @@ func (r *Runtime) handleModelNotice(notice WorkerNotice) error {
 				RetryAfter:  usage.RetryAfter,
 				RequestID:   usage.RequestID,
 				GatewayDate: usage.GatewayDate,
-				CostStatus:  "unconfirmed",
+				CostStatus:  costStatus,
 			}
 			r.state.CognitiveResource.LastFailure = &failure
 		}

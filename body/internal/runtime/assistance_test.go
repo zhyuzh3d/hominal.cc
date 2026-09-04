@@ -85,7 +85,7 @@ func TestAssistanceNativeCallAndSharedAccounting(t *testing.T) {
 					t.Error("low-tier output is not compact")
 				}
 				_ = json.NewEncoder(w).Encode(map[string]any{
-					"id": "result", "model": request.Config.CognitiveResource.Models[model].ID,
+					"id": "result", "status": "completed", "model": request.Config.CognitiveResource.Models[model].ID,
 					"output":            []map[string]any{{"type": "function_call", "name": "assistance_result", "call_id": "call-1", "arguments": `{"answer":"条件不足，需要第三项事实。"}`}},
 					"usage":             map[string]any{"input_tokens": 120, "output_tokens": 20, "total_tokens": 140},
 					"llmserver_billing": map[string]any{"request_id": "bill-1", "settlement_status": "confirmed", "currency": "USD", "charges": map[string]any{"total": "0.001"}},

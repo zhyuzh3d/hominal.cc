@@ -591,7 +591,7 @@ func checkNativeFunctionCognitionAndBill(t *testing.T, stage int) {
 		}
 		writer.Header().Set("X-LLMServer-Request-ID", "req-confirmed")
 		_ = json.NewEncoder(writer).Encode(map[string]any{
-			"id": "response-local", "model": "codex-terra",
+			"id": "response-local", "status": "completed", "model": "codex-terra",
 			"output": []map[string]any{{"type": "function_call", "name": "cognitive_commit", "call_id": "call-native", "arguments": string(arguments)}},
 			"usage":  map[string]any{"input_tokens": 100, "output_tokens": 20, "total_tokens": 120},
 			"llmserver_billing": map[string]any{
@@ -662,6 +662,51 @@ func TestLLMServerUnconfirmedBillRejectsCognitionWithoutInventingSpend(t *testin
 	usage := <-usageSeen
 	if usage.ActualMicrousd != 0 || usage.CostConfirmed || usage.Status != "completed_billing_unconfirmed" || usage.FailureCategory != "billing_unconfirmed" {
 		t.Fatalf("unconfirmed settlement became invented spend: %#v", usage)
+	}
+}
+
+func TestLLMServerConfirmedFailedResponseSettlesCostAndRejectsCognition(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("X-LLMServer-Request-ID", "req-failed-confirmed")
+		_ = json.NewEncoder(writer).Encode(map[string]any{
+			"id": "response-failed", "status": "failed", "model": "codex-terra",
+			"error": map[string]any{"code": "invalid_function_output", "message": "model did not form a function call"},
+			"usage": map[string]any{"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+			"llmserver_billing": map[string]any{
+				"request_id": "req-failed-confirmed", "settlement_status": "confirmed", "price_version": "price-test",
+				"currency": "USD", "charges": map[string]any{"total": "0.0000034"},
+			},
+		})
+	}))
+	defer server.Close()
+
+	config := testConfig(20)
+	config.ModelGateway.Adapter = "llmserver"
+	config.ModelGateway.BaseURL = server.URL
+	profile := CognitiveProfile{Model: "terra", ReasoningEffort: "none"}
+	request := CognitiveRequest{
+		Lease: Lease{ID: "lease-failed-confirmed", Profile: profile, PulseID: 9}, Stage: 20,
+		Focus:      Event{ID: "focus-failed-confirmed", Kind: "body_delta", Status: "pending"},
+		Candidates: []Event{{ID: "focus-failed-confirmed", Kind: "body_delta", Status: "pending"}},
+		State:      State{InstanceID: "llmserver-life"}, Config: config, Profile: profile,
+	}
+	notices := make(chan WorkerNotice)
+	usageSeen := make(chan UsageRecord, 1)
+	go func() {
+		reservation := <-notices
+		reservation.Ack <- NoticeAck{Accepted: true}
+		usageNotice := <-notices
+		usageSeen <- usageNotice.Payload.(UsageRecord)
+		usageNotice.Ack <- NoticeAck{Accepted: true}
+	}()
+	result := NewModelClient().Run(context.Background(), request, notices)
+	var failure *ModelCallError
+	if !errors.As(result.Error, &failure) || failure.Fact.Category != "invalid_function_output" || failure.Fact.CostStatus != "confirmed" {
+		t.Fatalf("confirmed response.failed was not retained as a paid output failure: %#v", result.Error)
+	}
+	usage := <-usageSeen
+	if usage.Status != "failed" || usage.FailureCategory != "invalid_function_output" || !usage.CostConfirmed || usage.ActualMicrousd != 4 || usage.RequestID != "req-failed-confirmed" {
+		t.Fatalf("confirmed response.failed was settled incorrectly: %#v", usage)
 	}
 }
 

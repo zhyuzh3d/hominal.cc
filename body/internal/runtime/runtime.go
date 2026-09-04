@@ -1738,7 +1738,12 @@ func modelInfrastructureFailure(category string) bool {
 // it does not establish that other cognitive requests cannot use the model.
 // Billing uncertainty is retained independently in the usage ledger.
 func modelOutputContractFailure(category string) bool {
-	return category == "invalid_provider_tool_call"
+	switch category {
+	case "invalid_provider_tool_call", "invalid_function_output", "invalid_response_status", "response_failed":
+		return true
+	default:
+		return false
+	}
 }
 
 func cloneState(state State) State {
