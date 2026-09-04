@@ -162,7 +162,7 @@ func (r *Runtime) decayLifeValueField(minutes float64) {
 }
 
 func (r *Runtime) accumulateIdleLifeValues(minutes float64) {
-	if minutes <= 0 || r.config.Dynamics.ValueIdleGrowth <= 0 || r.state.Lease != nil || r.state.PendingAction != nil {
+	if minutes <= 0 || r.config.Dynamics.ValueIdleGrowth <= 0 || r.state.Lease != nil {
 		return
 	}
 	growth := r.config.Dynamics.ValueIdleGrowth * minutes
@@ -196,10 +196,10 @@ func (r *Runtime) activateLifeValues(appraisal CandidateAppraisal) {
 	r.state.ValueField.UpdatedAt = nowUTC()
 }
 
-func (r *Runtime) satiateLifeValues(experience Experience) {
-	endorsement := clamp01(maxFloat(0, experience.Values.SelfEndorsed))
-	quality := endorsement * (1 - experience.ExperiencedCost) * (1 - 0.5*experience.PredictionDifference)
-	delta := mapLifeValueVector(lifeValuesVector(experience.Values), func(value float64) float64 {
+func (r *Runtime) satiateLifeValues(memory Memory) {
+	endorsement := clamp01(maxFloat(0, memory.Values.SelfEndorsed))
+	quality := endorsement * (1 - memory.ExperiencedCost) * (1 - 0.5*memory.PredictionDifference)
+	delta := mapLifeValueVector(lifeValuesVector(memory.Values), func(value float64) float64 {
 		return r.config.Dynamics.ValueSatiationGain * maxFloat(0, value) * quality
 	})
 	r.state.ValueField.Satiation = combineLifeValueVectors(

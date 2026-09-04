@@ -118,6 +118,17 @@ func Load(instanceRoot string) (*Registry, error) {
 				recordFault(errors.New("action organ must publish a valid operation catalog"))
 				continue
 			}
+			inputContractsValid := true
+			for operation, input := range description.OperationInputs {
+				if !seen[operation] || strings.TrimSpace(input) == "" {
+					recordFault(fmt.Errorf("organ returned invalid input contract for operation %q", operation))
+					inputContractsValid = false
+					break
+				}
+			}
+			if !inputContractsValid {
+				continue
+			}
 		}
 		installed.description = description
 		registry.organs[manifest.ID] = installed
@@ -255,6 +266,10 @@ func (r *Registry) SetEnvironment(values map[string]string) {
 }
 
 func (r *Registry) Snapshot() map[string]Snapshot {
+	return r.SnapshotContext(context.Background())
+}
+
+func (r *Registry) SnapshotContext(parent context.Context) map[string]Snapshot {
 	result := make(map[string]Snapshot, len(r.organs)+len(r.faults))
 	for id, snapshot := range r.faults {
 		result[id] = snapshot
@@ -263,7 +278,7 @@ func (r *Registry) Snapshot() map[string]Snapshot {
 		organ := r.organs[id]
 		health := Health{Status: "unavailable"}
 		if organ.startupError == "" {
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			ctx, cancel := context.WithTimeout(parent, 2*time.Second)
 			observed, err := r.Health(ctx, id)
 			cancel()
 			if err == nil {
@@ -276,10 +291,22 @@ func (r *Registry) Snapshot() map[string]Snapshot {
 		}
 		result[id] = Snapshot{
 			Name: organ.description.Name, Command: organ.description.Command,
-			Capabilities: append([]string{}, organ.description.Capabilities...),
-			Operations:   append([]string{}, organ.description.Operations...),
-			Guidance:     guidance, Status: health.Status, Accepting: health.Accepting,
+			Capabilities:    append([]string{}, organ.description.Capabilities...),
+			Operations:      append([]string{}, organ.description.Operations...),
+			OperationInputs: cloneStringMap(organ.description.OperationInputs),
+			Guidance:        guidance, Status: health.Status, Accepting: health.Accepting,
 		}
+	}
+	return result
+}
+
+func cloneStringMap(source map[string]string) map[string]string {
+	if len(source) == 0 {
+		return nil
+	}
+	result := make(map[string]string, len(source))
+	for key, value := range source {
+		result[key] = value
 	}
 	return result
 }
@@ -356,10 +383,24 @@ func (r *Registry) Perform(ctx context.Context, id string, request ActionRequest
 		return ActionResult{}, err
 	}
 	if result.Schema != ActionResultSchema || result.OrganID != id || result.ActionID != request.ActionID ||
-		!validActionStatus(result.Status) || strings.TrimSpace(result.ObservedAt) == "" || strings.TrimSpace(result.Summary) == "" {
+		!validActionStatus(result.Status) || !validActionEffect(result.Effect) ||
+		strings.TrimSpace(result.ObservedAt) == "" || strings.TrimSpace(result.Summary) == "" {
 		return ActionResult{}, errors.New("organ returned an invalid action result envelope")
 	}
+	if result.Observation != nil && (result.Observation.Schema != ObservationSchema ||
+		result.Observation.OrganID != id || strings.TrimSpace(result.Observation.SurfaceID) == "") {
+		return ActionResult{}, errors.New("organ returned an invalid action result observation")
+	}
 	return result, nil
+}
+
+func validActionEffect(effect string) bool {
+	switch effect {
+	case "observed", "oriented", "changed", "unknown":
+		return true
+	default:
+		return false
+	}
 }
 
 func (r *Registry) Description(id string) (Description, bool) {

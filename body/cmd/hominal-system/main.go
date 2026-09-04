@@ -22,7 +22,11 @@ import (
 	"hominal.cc/hominal/body/internal/organ"
 )
 
-const maximumActionOutput = 32 * 1024
+// System actions may encounter an effectively unbounded reality surface (process
+// arguments, logs, recursive listings, and so on).  The organ reports a bounded
+// sample plus the size/truncation facts; the main brain can then choose a more
+// precise follow-up instead of silently paying to absorb an accidental dump.
+const maximumActionStreamOutput = 8 * 1024
 
 func main() {
 	id := envOr("HOMINAL_ORGAN_ID", "system")
@@ -33,9 +37,10 @@ func main() {
 	case "describe":
 		write(organ.Description{
 			Schema: organ.DescriptionSchema, ID: id, Name: "Ubuntu system", Command: "system",
-			Capabilities: []string{"observe", "perform", "cancel", "body_state", "filesystem", "process", "network", "software"},
-			Operations:   []string{"exec"},
-			Guidance:     "system 提供 Ubuntu 主机、存储、网络、桌面与进程事实。行动时从 operations 选择 exec，并在 input 中写入以 root 身份执行的 bash 源码。",
+			Capabilities:    []string{"observe", "perform", "cancel", "body_state", "filesystem", "process", "network", "software"},
+			Operations:      []string{"exec"},
+			OperationInputs: map[string]string{"exec": "直接填写完整 bash 源码字符串，例如：pwd；不要包成 JSON 对象。"},
+			Guidance:        "system 提供 Ubuntu 主机、存储、网络、桌面与进程事实。行动时从 operations 选择 exec，并在 input 中写入以 root 身份执行的 bash 源码。",
 		})
 	case "health":
 		write(organ.Health{Schema: organ.HealthSchema, ID: id, Status: "ready", Accepting: true})
@@ -52,11 +57,13 @@ func main() {
 }
 
 func observe(id string) organ.Observation {
+	network := probeNetwork(os.Getenv("HOMINAL_NETWORK_PROBE_URL"))
 	facts := map[string]any{
 		"uptime_seconds":      readUptime(),
 		"root_free_bytes":     freeBytes("/"),
 		"agent_free_bytes":    freeBytes("/agent"),
-		"network_available":   networkAvailable(os.Getenv("HOMINAL_NETWORK_PROBE_URL")),
+		"network_available":   network.Reachable,
+		"network_probe":       network,
 		"desktop_available":   commandSucceeds(2*time.Second, "systemctl", "is-active", "--quiet", "lightdm"),
 		"wechat_running":      commandSucceeds(2*time.Second, "pgrep", "-f", "(^|/)wechat( |$)"),
 		"clash_verge_running": commandSucceeds(2*time.Second, "systemctl", "is-active", "--quiet", "clash-verge-service.service"),
@@ -80,6 +87,7 @@ func perform(id, encoded string) organ.ActionResult {
 	}
 	result := organ.ActionResult{
 		Schema: organ.ActionResultSchema, OrganID: id, ActionID: request.ActionID,
+		Effect:     "unknown",
 		ObservedAt: time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	if request.Operation != "exec" {
@@ -121,8 +129,10 @@ func execute(source string, timeout time.Duration) (string, string) {
 	command.WaitDelay = 2 * time.Second
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	command.Stdout = &limitedWriter{writer: &stdout, remaining: maximumActionOutput}
-	command.Stderr = &limitedWriter{writer: &stderr, remaining: maximumActionOutput}
+	stdoutWriter := &limitedWriter{writer: &stdout, remaining: maximumActionStreamOutput}
+	stderrWriter := &limitedWriter{writer: &stderr, remaining: maximumActionStreamOutput}
+	command.Stdout = stdoutWriter
+	command.Stderr = stderrWriter
 
 	signals := make(chan os.Signal, 1)
 	var externallyCancelled atomic.Bool
@@ -157,6 +167,8 @@ func execute(source string, timeout time.Duration) (string, string) {
 	}
 	return status, compactJSON(map[string]any{
 		"operation": "exec", "exit_code": exitCode, "stdout": stdout.String(), "stderr": stderr.String(),
+		"stdout_bytes": stdoutWriter.received, "stdout_truncated": stdoutWriter.truncated,
+		"stderr_bytes": stderrWriter.received, "stderr_truncated": stderrWriter.truncated,
 		"timed_out": timedOut, "cancelled": externallyCancelled.Load(),
 	})
 }
@@ -175,14 +187,19 @@ func killGroup(command *exec.Cmd) error {
 type limitedWriter struct {
 	writer    io.Writer
 	remaining int
+	received  int
+	truncated bool
 }
 
 func (w *limitedWriter) Write(data []byte) (int, error) {
 	original := len(data)
+	w.received += original
 	if w.remaining <= 0 {
+		w.truncated = w.truncated || original > 0
 		return original, nil
 	}
 	if len(data) > w.remaining {
+		w.truncated = true
 		data = data[:w.remaining]
 	}
 	_, err := w.writer.Write(data)
@@ -219,23 +236,36 @@ func freeBytes(path string) uint64 {
 	return stats.Bavail * uint64(stats.Bsize)
 }
 
-func networkAvailable(baseURL string) bool {
+type networkProbe struct {
+	Target     string `json:"target"`
+	ObservedAt string `json:"observed_at"`
+	Reachable  bool   `json:"reachable"`
+	HTTPStatus int    `json:"http_status,omitempty"`
+	Error      string `json:"error,omitempty"`
+}
+
+func probeNetwork(baseURL string) networkProbe {
+	result := networkProbe{Target: baseURL, ObservedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 	parsed, err := url.Parse(baseURL)
 	if err != nil || parsed.Hostname() == "" {
-		return false
+		result.Error = "network probe target is not a valid URL"
+		return result
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 	request, err := http.NewRequestWithContext(ctx, http.MethodHead, parsed.String(), nil)
 	if err != nil {
-		return false
+		result.Error = err.Error()
+		return result
 	}
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
-		return false
+		result.Error = err.Error()
+		return result
 	}
 	_ = response.Body.Close()
-	return true
+	result.Reachable, result.HTTPStatus = true, response.StatusCode
+	return result
 }
 
 func commandSucceeds(timeout time.Duration, name string, arguments ...string) bool {

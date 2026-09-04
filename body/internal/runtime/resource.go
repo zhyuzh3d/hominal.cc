@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -138,7 +139,7 @@ func mergeUsageRecords(groups ...[]UsageRecord) []UsageRecord {
 			if record.LeaseID == "" {
 				continue
 			}
-			latest[record.LeaseID] = record
+			latest[usageKey(record)] = record
 		}
 	}
 	merged := make([]UsageRecord, 0, len(latest))
@@ -152,7 +153,11 @@ func mergeUsageRecords(groups ...[]UsageRecord) []UsageRecord {
 func resourceSpend(state State, config CognitiveResourceConfig, now time.Time) (hourSpent, daySpent, inflight int64) {
 	hourSpent = spendInWindow(state.Usage, resourceHourWindow, now)
 	daySpent = spendInWindow(state.Usage, resourceDayWindow, now)
-	if state.Lease != nil {
+	if len(state.ModelReservations) > 0 {
+		for _, call := range state.ModelReservations {
+			inflight += call.Reservation.ReservedMicrousd
+		}
+	} else if state.Lease != nil {
 		inflight = state.Lease.ReservedMicrousd
 	}
 	return
@@ -186,18 +191,33 @@ func resourceBand(hourRemaining, hourLimit, dayRemaining, dayLimit int64) string
 }
 
 func updateResourceSnapshot(snapshot *BodySnapshot, state State, config CognitiveResourceConfig, now time.Time) {
-	hourSpent, daySpent, _ := resourceSpend(state, config, now)
+	hourSpent, daySpent, inflight := resourceSpend(state, config, now)
 	snapshot.CognitiveHourSpentMicrousd = hourSpent
-	snapshot.CognitiveHourRemainingMicrousd = maxInt64(config.RollingHourLimitMicrousd-hourSpent, 0)
+	snapshot.CognitiveHourRemainingMicrousd = maxInt64(config.RollingHourLimitMicrousd-hourSpent-inflight, 0)
 	snapshot.CognitiveDaySpentMicrousd = daySpent
-	snapshot.CognitiveDayRemainingMicrousd = maxInt64(config.RollingDayLimitMicrousd-daySpent, 0)
+	snapshot.CognitiveDayRemainingMicrousd = maxInt64(config.RollingDayLimitMicrousd-daySpent-inflight, 0)
 	snapshot.CognitiveResourceBand = resourceBand(
-		snapshot.CognitiveHourRemainingMicrousd,
+		maxInt64(config.RollingHourLimitMicrousd-hourSpent, 0),
 		config.RollingHourLimitMicrousd,
-		snapshot.CognitiveDayRemainingMicrousd,
+		maxInt64(config.RollingDayLimitMicrousd-daySpent, 0),
 		config.RollingDayLimitMicrousd,
 	)
 	snapshot.CognitivePriceTableVersion = config.PriceTableVersion
+}
+
+// Spend is a durable resource change; a reservation only temporarily occupies
+// funds. Every writer refreshes through this owner so settling a request cannot
+// erase the baseline before the next sensor compares it.
+func (r *Runtime) refreshResourceBody(now time.Time) error {
+	previous := r.state.Body.CognitiveResourceBand
+	updateResourceSnapshot(&r.state.Body, r.state, r.config.CognitiveResource, now)
+	current := r.state.Body.CognitiveResourceBand
+	if previous == "" || previous == current {
+		return nil
+	}
+	payload, _ := json.Marshal(map[string]any{"previous_band": previous, "current_band": current,
+		"hour_spent_microusd": r.state.Body.CognitiveHourSpentMicrousd, "day_spent_microusd": r.state.Body.CognitiveDaySpentMicrousd})
+	return r.addEvent("cognitive_resource_change", "interoception", "已结算认知资源档位由 "+previous+" 变为 "+current+"；可支配余额另计在途预留。", "", payload, r.state.Stage >= 4)
 }
 
 func activeProfile(state State, config CognitiveResourceConfig, focusID string) CognitiveProfile {
@@ -212,6 +232,18 @@ func activeProfileDecision(state State, config CognitiveResourceConfig, focusID 
 			source = "next"
 		}
 		return state.CognitiveResource.NextProfile.Profile, source, state.CognitiveResource.NextProfile.Purpose
+	}
+	// Consuming NextProfile starts a lease, not completion of the request.
+	// Recover the same local contract on an infrastructure retry or restart.
+	if state.Stage >= 10 {
+		for _, event := range state.Background {
+			if event.ID == focusID && event.Kind == "cognition_continuation" && eventChainActive(event.Status) {
+				var contract assistanceContract
+				if json.Unmarshal(event.Payload, &contract) == nil && contract.Task != "" && validateProfile(config, contract.Profile) == nil {
+					return contract.Profile, "next", contract.Purpose
+				}
+			}
+		}
 	}
 	if state.CognitiveResource.DefaultProfile.Model != "" {
 		return state.CognitiveResource.DefaultProfile, "default", ""
@@ -307,7 +339,7 @@ func (r *Runtime) affordableResourceFallback(reservation ModelReservation, now t
 			continue
 		}
 		effort := ""
-		for _, candidate := range []string{"low", "none", "medium"} {
+		for _, candidate := range []string{"none", "low", "medium"} {
 			profile := CognitiveProfile{Model: modelName, ReasoningEffort: candidate}
 			if validateProfile(r.config.CognitiveResource, profile) == nil {
 				effort = candidate
@@ -341,6 +373,79 @@ func modelProtected(state State, model string, now time.Time) (bool, time.Time) 
 	return true, until
 }
 
+type gatewayRetryState struct {
+	Failures      int       `json:"consecutive_failures"`
+	Cause         string    `json:"cause,omitempty"`
+	Until         time.Time `json:"retry_at"`
+	ProbeInFlight bool      `json:"probe_in_flight"`
+}
+
+// The shared physical request ledger is the source of recovery state, including
+// after restart. Changing cognitive focus or inference role cannot reset it.
+func gatewayRetry(state State, config CognitiveResourceConfig) gatewayRetryState {
+	var result gatewayRetryState
+	var latest UsageRecord
+	var quotaUntil time.Time
+	maximum := time.Duration(config.ModelProtectionMinutes) * time.Minute
+	if maximum < cognitionRetryDelay {
+		maximum = cognitionRetryDelay
+	}
+	for index := len(state.Usage) - 1; index >= 0; index-- {
+		usage := state.Usage[index]
+		if modelInfrastructureFailure(usage.FailureCategory) {
+			at, err := time.Parse(time.RFC3339Nano, usage.Time)
+			if err != nil {
+				continue
+			}
+			if result.Failures == 0 {
+				latest = usage
+			}
+			result.Failures++
+			if usage.FailureCategory == "gateway_quota" {
+				// A later in-flight transport failure cannot shorten a known
+				// exhausted key's recovery interval. One successful response can.
+				hold := max(maximum, retryAfterDuration(usage.RetryAfter, usage.Time, at))
+				if until := at.Add(hold); until.After(quotaUntil) {
+					quotaUntil = until
+				}
+			}
+		} else if usage.FailureCategory == "" && (usage.Status == "completed" || usage.Status == "unusable") {
+			// A semantic validation error is not a gateway outage. A cancelled
+			// call with unknown billing, however, is not evidence of recovery.
+			break
+		}
+	}
+	if result.Failures == 0 {
+		return result
+	}
+	delay := cognitionRetryDelay
+	for index := 1; index < result.Failures && delay < maximum; index++ {
+		delay *= 2
+	}
+	observed, _ := time.Parse(time.RFC3339Nano, latest.Time)
+	if delay > maximum {
+		delay = maximum
+	}
+	// Anchor Retry-After to the response and honor even a longer server window.
+	delay = max(delay, retryAfterDuration(latest.RetryAfter, latest.Time, observed))
+	result.Until = observed.Add(delay)
+	result.Cause = latest.FailureCategory
+	if !quotaUntil.IsZero() {
+		result.Cause = "gateway_quota"
+		if quotaUntil.After(result.Until) {
+			result.Until = quotaUntil
+		}
+	}
+	result.ProbeInFlight = len(state.ModelReservations) > 0
+	return result
+}
+
+func (gate gatewayRetryState) allows(now time.Time, main bool) bool {
+	// Recovery gives the next ordinary main-brain request one chance. Local
+	// interpretation resumes with healthy service, preserving the shared budget.
+	return gate.Failures == 0 || (main && !now.Before(gate.Until) && !gate.ProbeInFlight)
+}
+
 func resourceView(request CognitiveRequest, inputTokenEstimate int) map[string]any {
 	now := time.Now().UTC()
 	hourSpent, daySpent, inflight := resourceSpend(request.State, request.Config.CognitiveResource, now)
@@ -354,7 +459,11 @@ func resourceView(request CognitiveRequest, inputTokenEstimate int) map[string]a
 	actionAssistProfile := CognitiveProfile{Model: "sol", ReasoningEffort: "low"}
 	actionAssist := cognitiveProfileResourceView(request.Config, actionAssistProfile, inputTokenEstimate)
 	actionAssist["role"] = "action_assistance"
-	actionAssist["use"] = "主力认知已固定对象、目标和内容后，对精确命令、代码或工具步骤的一次性实现协助"
+	actionAssist["use"] = "主脑对复杂逻辑、代码、命令或工具实现把握不足时的一次性协助；结果交还主脑采用"
+	actionAssist["context"] = "默认仅问题和必要材料；implementation 增加操作契约；include_self:true 时增加当前叙事参考"
+	local := cognitiveProfileResourceView(request.Config, CognitiveProfile{Model: "luna", ReasoningEffort: "none"}, 600)
+	local["use"] = "极简单的局部逻辑判断；next/luna/none、task:reasoning，短问题与必要材料，最多200输出token"
+	local["context"] = "局部材料，无自动自我叙事或个人回忆"
 	view := map[string]any{
 		"current_profile": map[string]any{
 			"profile": request.Profile,
@@ -376,14 +485,22 @@ func resourceView(request CognitiveRequest, inputTokenEstimate int) map[string]a
 		"roles": map[string]any{
 			"main":              main,
 			"action_assistance": actionAssist,
+			"local_reasoning":   local,
+			"organ_instinct": map[string]any{
+				"profile":               CognitiveProfile{Model: "luna", ReasoningEffort: "none"},
+				"use":                   "器官按需解释局部含糊材料，共用身体额度，由器官自动请求",
+				"model_choice_required": false,
+			},
 			"body_reflex": map[string]any{
 				"implementation":        "deterministic_kernel",
 				"use":                   "脉搏、计费、重试、排序、状态保存与其他可确定的机械工作",
 				"model_choice_required": false,
 			},
 		},
-		"last_spend":       request.State.CognitiveResource.LastSpend,
-		"protected_models": request.State.CognitiveResource.ProtectedModels,
+		"reserved_microusd": inflight,
+		"last_spend":        request.State.CognitiveResource.LastSpend,
+		"protected_models":  request.State.CognitiveResource.ProtectedModels,
+		"gateway_retry":     gatewayRetry(request.State, request.Config.CognitiveResource),
 	}
 	return view
 }

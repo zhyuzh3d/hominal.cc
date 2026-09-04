@@ -31,24 +31,26 @@ while (( SECONDS < drain_deadline )); do
   if [[ -r "$state_file" ]] && python3 - "$state_file" <<'PY'
 import json
 import sys
+from datetime import datetime
 
 with open(sys.argv[1], encoding="utf-8") as handle:
     state = json.load(handle)
 open_statuses = {"formed", "acting", "reality_available", "reality_unknown"}
 open_commitment = any(item.get("status") in open_statuses for item in state.get("commitments", []))
+def arrived_before_end(item):
+    if not state.get("planned_end") or not item.get("observed_at"):
+        return True
+    return datetime.fromisoformat(item["observed_at"].replace("Z", "+00:00")) <= datetime.fromisoformat(state["planned_end"].replace("Z", "+00:00"))
+
 open_feedback = any(
-    item.get("kind") == "mentor_received"
+    item.get("kind") in {"mentor_received", "cognition_assistance_result"}
     and item.get("status") in {"pending", "in_focus", "retry_wait"}
-    and isinstance(item.get("payload"), dict)
-    and item["payload"].get("commitment_id")
+    and (item.get("kind") == "cognition_assistance_result" or arrived_before_end(item))
     for item in state.get("background", [])
 )
-open_outbox = any(
-    item.get("status") in {"queued", "delivered"}
-    and not item.get("replied_at")
-    for item in state.get("mentor", {}).get("outbox", [])
-)
-raise SystemExit(1 if state.get("lease") or state.get("pending_action") or open_commitment or open_feedback or open_outbox else 0)
+# Enqueueing is complete. A human's future reading/reply is not an in-flight
+# body operation; already arrived feedback and actual work still drain.
+raise SystemExit(1 if state.get("lease") or state.get("pending_action") or open_commitment or open_feedback else 0)
 PY
   then
     drain_completed=true

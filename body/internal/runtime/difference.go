@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"strings"
+	"time"
 )
 
 const (
@@ -35,13 +36,38 @@ func (r *Runtime) admitDifference(event Event) (Event, bool) {
 	}
 
 	digest := differenceDigest(event)
+	content := ""
+	if event.Kind == "perceptual_change" {
+		var p struct {
+			Content string `json:"content"`
+		}
+		_ = json.Unmarshal(event.Payload, &p)
+		content = p.Content
+	}
 	changed := 1.0
 	predictionGap := 1.0
 	if trace.Observations > 0 {
 		if digest == trace.LastDigest {
 			changed = 0
+		} else if content != "" && trace.LastContent != "" {
+			changed = perceptualChangeMagnitude(trace.LastContent, content)
 		}
 		predictionGap = absFloat(changed - trace.ExpectedChangeRate)
+		if content != "" && trace.LastContent != "" {
+			// A tiny ticker/control change is a real change, but not an entire
+			// unfamiliar world. It accumulates without a semantic veto.
+			predictionGap *= changed
+		}
+	}
+	if event.Kind == "operation_condition" && trace.Operation != nil {
+		if trace.Operation.Status != "recovered" {
+			// A failed passive operation begins as a small bodily discrepancy.
+			// Persistence accumulates via the existing pressure/decay mechanism;
+			// this is attention eligibility, never an estimate of actual harm.
+			predictionGap = 1 / (1 + float64(trace.Operation.ConsecutiveFailures))
+		} else {
+			predictionGap = 1 // A real recovery changes the available route.
+		}
 	}
 	learningRate := r.config.Dynamics.DifferenceLearningRate
 	trace.ExpectedChangeRate = clamp01(
@@ -49,6 +75,7 @@ func (r *Runtime) admitDifference(event Event) (Event, bool) {
 	)
 	trace.Observations++
 	trace.LastDigest = digest
+	trace.LastContent = content
 	trace.LastObservedAt = event.ObservedAt
 	trace.LastPredictionGap = predictionGap
 
@@ -63,7 +90,13 @@ func (r *Runtime) admitDifference(event Event) (Event, bool) {
 	// appearances changed Alice's understanding or action.
 	openSamplingEvidence := 0.03 * changed
 	expectedValueEvidence := 0.12 * trace.AttentionValue * changed
-	evidence := predictionGap*contextGain + openSamplingEvidence + expectedValueEvidence + differenceCausalPressure(event.Kind)
+	// Below-threshold sampling must not oscillate forever while the conscious
+	// stream is genuinely quiet.  Wall-clock continuity contributes a bounded
+	// gain only when a real current perceptual object or value doorway is present;
+	// it can make that referent noticeable, never invent a subject or an action.
+	continuityEvidence := r.lifeContinuityAttentionEvidence(event)
+	evidence := predictionGap*contextGain + openSamplingEvidence + expectedValueEvidence +
+		differenceCausalPressure(event.Kind) + continuityEvidence
 	pressure := clamp01(trace.Accumulated + evidence)
 	event.DifferenceKey = key
 	event.PredictionGap = predictionGap
@@ -77,6 +110,71 @@ func (r *Runtime) admitDifference(event Event) (Event, bool) {
 	trace.Accumulated = pressure
 	r.state.DifferenceField[key] = trace
 	return event, false
+}
+
+func perceptualChangeMagnitude(previous, current string) float64 {
+	if previous == current {
+		return 0
+	}
+	left, right := recallTerms(previous), recallTerms(current)
+	common := 0
+	for term := range left {
+		if right[term] {
+			common++
+		}
+	}
+	union := len(left) + len(right) - common
+	if union == 0 {
+		return 1
+	}
+	return 1 - float64(common)/float64(union)
+}
+
+func (r *Runtime) lifeContinuityAttentionEvidence(event Event) float64 {
+	if r.state.Stage < 10 || !eventCarriesRealAttentionReferent(event) {
+		return 0
+	}
+	now := time.Now().UTC()
+	if observed, err := time.Parse(time.RFC3339Nano, event.ObservedAt); err == nil {
+		now = observed
+	}
+	quiet, ok := r.attentionQuietDuration(now)
+	if !ok {
+		return 0
+	}
+	idle := r.config.Dynamics.AttentionMaximumIdleSeconds
+	if idle <= 0 {
+		idle = 10
+	}
+	boundary := time.Duration(idle) * time.Second
+	if quiet <= boundary {
+		return 0
+	}
+	// The gain rises from zero after the ordinary idle boundary to one complete
+	// attention threshold after two additional windows, then stays bounded.
+	progress := clamp01(float64(quiet-boundary) / float64(2*boundary))
+	return r.config.Dynamics.AttentionThreshold * progress
+}
+
+func eventCarriesRealAttentionReferent(event Event) bool {
+	switch event.Kind {
+	case "perceptual_change":
+		var payload struct {
+			ObjectID string `json:"object_id"`
+			Content  string `json:"content"`
+		}
+		return json.Unmarshal(event.Payload, &payload) == nil &&
+			strings.TrimSpace(payload.ObjectID) != "" && strings.TrimSpace(payload.Content) != ""
+	case "value_signal":
+		var payload struct {
+			AffordanceKey string `json:"affordance_key"`
+			Surface       string `json:"surface"`
+		}
+		return json.Unmarshal(event.Payload, &payload) == nil &&
+			strings.TrimSpace(payload.AffordanceKey) != "" && strings.TrimSpace(payload.Surface) != ""
+	default:
+		return false
+	}
 }
 
 // evictDifferenceTrace keeps the pre-conscious field physically bounded even
@@ -108,9 +206,9 @@ func (r *Runtime) evictDifferenceTrace() {
 // good or bad; birth is the active genesis fact; a reply is addressed input.
 func differenceCausalPressure(kind string) float64 {
 	switch kind {
-	case "action_result", "birth_orientation":
+	case "action_result", "action_boundary", "birth_orientation":
 		return 1
-	case "cognition_continuation":
+	case "cognition_continuation", "cognition_assistance_result":
 		return 0.75
 	case "mentor_received", "mentor_content", "concern_contribution":
 		return 0.55
@@ -131,6 +229,7 @@ func differenceFamilyKey(event Event) string {
 		Direction      string `json:"value_direction"`
 		AffordanceKey  string `json:"affordance_key"`
 		DifferenceKind string `json:"difference_kind"`
+		MemoryID       string `json:"memory_id"`
 	}
 	var payload signalPayload
 	_ = json.Unmarshal(event.Payload, &payload)
@@ -138,12 +237,14 @@ func differenceFamilyKey(event Event) string {
 	switch event.Kind {
 	case "perceptual_change":
 		parts = append(parts, payload.OrganID, payload.SurfaceID)
-	case "action_result":
+	case "action_result", "operation_condition":
 		parts = append(parts, payload.OrganID, payload.Operation)
 	case "value_signal":
 		parts = append(parts, payload.Direction, payload.AffordanceKey)
 	case "self_model_difference":
 		parts = append(parts, payload.DifferenceKind)
+	case "lived_recall":
+		parts = append(parts, payload.MemoryID)
 	}
 	for index := range parts {
 		parts[index] = strings.TrimSpace(parts[index])
@@ -196,7 +297,7 @@ func (r *Runtime) learnDifferenceFromAppraisal(candidate Event, appraisal Candid
 	r.learnDifferenceAttentionValue(candidate.DifferenceKey, trace, target)
 }
 
-func (r *Runtime) learnDifferenceFromExperience(commitment ActionCommitment, experience Experience) {
+func (r *Runtime) learnDifferenceFromMemory(commitment ActionCommitment, memory Memory) {
 	candidate, exists := r.backgroundEvent(commitment.FocusID)
 	if !exists || candidate.DifferenceKey == "" {
 		return
@@ -205,18 +306,18 @@ func (r *Runtime) learnDifferenceFromExperience(commitment ActionCommitment, exp
 	if !exists {
 		return
 	}
-	consequence := maxLifeValueMagnitude(lifeValuesVector(experience.Values))
-	consequence = maxFloat(consequence, absFloat(experience.Values.SelfEndorsed))
+	consequence := maxLifeValueMagnitude(lifeValuesVector(memory.Values))
+	consequence = maxFloat(consequence, absFloat(memory.Values.SelfEndorsed))
 	memoryGain := 0.0
-	if experience.Significance == "reusable" {
+	if memory.Significance == "reusable" {
 		memoryGain = 0.5
-	} else if experience.Significance == "self_defining" {
+	} else if memory.Significance == "self_defining" {
 		memoryGain = 1
 	}
 	target := clamp01(
-		0.35*experience.PredictionDifference +
+		0.35*memory.PredictionDifference +
 			0.35*consequence +
-			0.15*(1-experience.ExperiencedCost) +
+			0.15*(1-memory.ExperiencedCost) +
 			0.15*memoryGain,
 	)
 	r.learnDifferenceAttentionValue(candidate.DifferenceKey, trace, target)

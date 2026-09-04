@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -13,6 +15,19 @@ import (
 
 	"hominal.cc/hominal/body/internal/organ"
 )
+
+func TestNetworkProbePreservesSpecificResponseAndFailure(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(404) }))
+	probe := probeNetwork(s.URL)
+	if !probe.Reachable || probe.HTTPStatus != 404 || probe.Target != s.URL || probe.ObservedAt == "" {
+		t.Fatalf("HTTP fact lost: %#v", probe)
+	}
+	s.Close()
+	probe = probeNetwork(s.URL)
+	if probe.Reachable || probe.Error == "" || probe.Target != s.URL {
+		t.Fatalf("failure fact lost: %#v", probe)
+	}
+}
 
 func TestPerformDistinguishesCompletedAndFailed(t *testing.T) {
 	encode := func(actionID, source string) string {
@@ -74,4 +89,25 @@ func TestExecuteTimeoutStopsDescendantProcesses(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("descendant process %d survived the system organ deadline", pid)
+}
+
+func TestExecuteBoundsEachRealityStreamAndReportsTruncation(t *testing.T) {
+	status, resultText := execute("head -c 20000 /dev/zero | tr '\\0' x; head -c 9000 /dev/zero | tr '\\0' y >&2", time.Second)
+	var result struct {
+		Stdout          string `json:"stdout"`
+		Stderr          string `json:"stderr"`
+		StdoutBytes     int    `json:"stdout_bytes"`
+		StderrBytes     int    `json:"stderr_bytes"`
+		StdoutTruncated bool   `json:"stdout_truncated"`
+		StderrTruncated bool   `json:"stderr_truncated"`
+	}
+	if err := json.Unmarshal([]byte(resultText), &result); err != nil {
+		t.Fatal(err)
+	}
+	if status != "completed" || len(result.Stdout) != maximumActionStreamOutput || len(result.Stderr) != maximumActionStreamOutput {
+		t.Fatalf("unexpected bounded result: status=%s stdout=%d stderr=%d", status, len(result.Stdout), len(result.Stderr))
+	}
+	if result.StdoutBytes != 20000 || result.StderrBytes != 9000 || !result.StdoutTruncated || !result.StderrTruncated {
+		t.Fatalf("system organ hid truncation facts: %#v", result)
+	}
 }

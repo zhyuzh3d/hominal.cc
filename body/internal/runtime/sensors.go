@@ -26,23 +26,28 @@ type perceptualObservation struct {
 }
 
 func collectSnapshot(config Config, state State, slow bool, organs *organ.Registry) BodySnapshot {
-	current := BodySnapshot{ObservedAt: nowUTC()}
+	return collectSnapshotContext(context.Background(), config, state, slow, organs)
+}
+
+func collectSnapshotContext(parent context.Context, config Config, state State, slow bool, organs *organ.Registry) BodySnapshot {
+	current := mergeFastSnapshot(state.Body, BodySnapshot{ObservedAt: nowUTC()})
 	updateResourceSnapshot(&current, state, config.CognitiveResource, time.Now().UTC())
 	if !slow {
 		return current
 	}
 	current.Organs = make(map[string]OrganSnapshot)
 	if organs != nil {
-		for id, snapshot := range organs.Snapshot() {
+		for id, snapshot := range organs.SnapshotContext(parent) {
 			current.Organs[id] = OrganSnapshot{
 				Name: snapshot.Name, Command: snapshot.Command,
-				Capabilities: append([]string{}, snapshot.Capabilities...),
-				Operations:   append([]string{}, snapshot.Operations...), Guidance: snapshot.Guidance,
+				Capabilities:    append([]string{}, snapshot.Capabilities...),
+				Operations:      append([]string{}, snapshot.Operations...),
+				OperationInputs: cloneRuntimeStringMap(snapshot.OperationInputs), Guidance: snapshot.Guidance,
 				Status: snapshot.Status, Accepting: snapshot.Accepting,
 			}
 		}
 		for _, id := range organs.BodyStateIDs() {
-			ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+			ctx, cancel := context.WithTimeout(parent, 12*time.Second)
 			observation, err := organs.Observe(ctx, id)
 			cancel()
 			if err == nil {
@@ -53,11 +58,23 @@ func collectSnapshot(config Config, state State, slow bool, organs *organ.Regist
 	return current
 }
 
+func cloneRuntimeStringMap(source map[string]string) map[string]string {
+	if len(source) == 0 {
+		return nil
+	}
+	result := make(map[string]string, len(source))
+	for key, value := range source {
+		result[key] = value
+	}
+	return result
+}
+
 func mergeFastSnapshot(previous, fast BodySnapshot) BodySnapshot {
 	fast.UptimeSeconds = previous.UptimeSeconds
 	fast.RootFreeBytes = previous.RootFreeBytes
 	fast.AgentFreeBytes = previous.AgentFreeBytes
 	fast.NetworkAvailable = previous.NetworkAvailable
+	fast.NetworkProbe = previous.NetworkProbe
 	fast.DesktopAvailable = previous.DesktopAvailable
 	fast.Organs = previous.Organs
 	fast.WechatRunning = previous.WechatRunning
@@ -70,6 +87,7 @@ func applyBodyFacts(snapshot *BodySnapshot, facts map[string]json.RawMessage) {
 	decodeBodyFact(facts, "root_free_bytes", &snapshot.RootFreeBytes)
 	decodeBodyFact(facts, "agent_free_bytes", &snapshot.AgentFreeBytes)
 	decodeBodyFact(facts, "network_available", &snapshot.NetworkAvailable)
+	decodeBodyFact(facts, "network_probe", &snapshot.NetworkProbe)
 	decodeBodyFact(facts, "desktop_available", &snapshot.DesktopAvailable)
 	decodeBodyFact(facts, "wechat_running", &snapshot.WechatRunning)
 	decodeBodyFact(facts, "clash_verge_running", &snapshot.ClashVergeRunning)
@@ -108,10 +126,15 @@ func perceptualSurfaceKey(organID, surfaceID string) string {
 
 func queuePerceptualNovelty(previous PerceptualTrace, observation perceptualObservation) PerceptualTrace {
 	contextChanged := len(previous.Context) > 0 && perceptualContextKey(previous.Context) != perceptualContextKey(observation.Context)
-	if contextChanged || previous.OrganID != observation.OrganID || previous.SurfaceID != observation.SurfaceID {
+	surfaceChanged := previous.OrganID != observation.OrganID || previous.SurfaceID != observation.SurfaceID
+	realityChanged := previous.Digest != "" && previous.Digest != observation.Digest
+	if contextChanged || surfaceChanged {
 		previous.Pending = nil
 		previous.ExhaustedContext = ""
 		previous.ExhaustedAt = ""
+		previous.SettledByAttention = false
+	} else if realityChanged {
+		previous.SettledByAttention = false
 	}
 	known := make(map[string]bool, len(previous.Seen)+len(previous.Pending)+len(observation.Objects))
 	for _, id := range previous.Seen {
@@ -138,6 +161,7 @@ func queuePerceptualNovelty(previous PerceptualTrace, observation perceptualObse
 		Context: append([]string{}, observation.Context...), Pending: pending,
 		Seen:             append([]string{}, previous.Seen...),
 		ExhaustedContext: previous.ExhaustedContext, ExhaustedAt: previous.ExhaustedAt,
+		SettledByAttention: previous.SettledByAttention,
 	}
 }
 
@@ -158,6 +182,17 @@ func takePerceptualNovelty(trace PerceptualTrace) (PerceptualTrace, PerceptualOb
 }
 
 func perceptualResampleDue(trace PerceptualTrace, now time.Time, revisitSeconds int) bool {
+	if trace.SettledByAttention {
+		// Conscious settlement closes the current object, not the living sensory
+		// surface forever.  Keep the scene quiet for the same embodied refractory
+		// interval, then permit one bounded reorientation.  A genuinely changed
+		// digest still reopens immediately through queuePerceptualNovelty.
+		if revisitSeconds <= 0 || trace.ExhaustedAt == "" {
+			return false
+		}
+		settledAt, err := time.Parse(time.RFC3339Nano, trace.ExhaustedAt)
+		return err != nil || now.Sub(settledAt) >= time.Duration(revisitSeconds)*time.Second
+	}
 	contextKey := perceptualContextKey(trace.Context)
 	return contextKey != "" && len(trace.Pending) == 0 && perceptualExhaustionDue(trace, contextKey, now, revisitSeconds)
 }
@@ -184,6 +219,7 @@ func perceptualContextKey(contextLines []string) string {
 func reopenPerceptualSampling(trace PerceptualTrace) PerceptualTrace {
 	trace.ExhaustedContext = ""
 	trace.ExhaustedAt = ""
+	trace.SettledByAttention = false
 	return trace
 }
 
@@ -197,6 +233,97 @@ func discardPendingPerception(trace PerceptualTrace) PerceptualTrace {
 		trace.Seen = append([]string{}, trace.Seen[len(trace.Seen)-maximumSeenObjects:]...)
 	}
 	return trace
+}
+
+// habituateSettledPerception closes one consciously focused sensory object.
+// An action_result settles the preceding Action Commitment; any concrete
+// objects newly revealed by that action remain distinct environmental facts
+// and receive their own later opportunity to enter attention. Treating the
+// whole post-action surface as settled here made a read-only navigation's stop
+// condition silently suppress every person, post or document it exposed.
+func (r *Runtime) habituateSettledPerception(candidate Event, appraisal CandidateAppraisal, actionKind, now string) error {
+	if actionKind != "none" || (appraisal.Resolution != "released" && appraisal.Resolution != "resolved") {
+		return nil
+	}
+	var observed struct {
+		OrganID   string `json:"organ_id"`
+		SurfaceID string `json:"surface_id"`
+		Digest    string `json:"digest"`
+	}
+	switch candidate.Kind {
+	case "perceptual_change":
+		if json.Unmarshal(candidate.Payload, &observed) != nil {
+			return nil
+		}
+	case "action_result":
+		var action ActionState
+		if json.Unmarshal(candidate.Payload, &action) != nil || action.Status != "completed" {
+			return nil
+		}
+		observed.OrganID = action.OrganID
+		observed.SurfaceID = action.ObservedSurfaceID
+		observed.Digest = action.ObservedDigest
+		if observed.SurfaceID == "" && action.Effect == "observed" {
+			// A targeted read may return a fact rather than a full Observation.
+			// Its latest known unchanged surface can settle only when no object on
+			// that surface is still waiting for its own attention.
+			latestObservedAt := ""
+			for _, trace := range r.state.Perception {
+				if trace.OrganID != action.OrganID || trace.SurfaceID == "" || trace.Digest == "" ||
+					(latestObservedAt != "" && !timeAfter(trace.ObservedAt, latestObservedAt)) {
+					continue
+				}
+				observed.SurfaceID = trace.SurfaceID
+				observed.Digest = trace.Digest
+				latestObservedAt = trace.ObservedAt
+			}
+		}
+	default:
+		return nil
+	}
+	if observed.OrganID == "" || observed.SurfaceID == "" {
+		return nil
+	}
+	surface := perceptualSurfaceKey(observed.OrganID, observed.SurfaceID)
+	trace, exists := r.state.Perception[surface]
+	if !exists || observed.Digest == "" || trace.Digest != observed.Digest {
+		return nil
+	}
+	if candidate.Kind == "action_result" && len(trace.Pending) > 0 {
+		return nil
+	}
+	trace = discardPendingPerception(trace)
+	trace.ExhaustedContext = perceptualContextKey(trace.Context)
+	trace.ExhaustedAt = now
+	trace.SettledByAttention = true
+	r.state.Perception[surface] = trace
+	return r.journal("perceptual_habituation", candidate.ID, map[string]any{
+		"organ_id": observed.OrganID, "surface_id": observed.SurfaceID,
+		"digest": observed.Digest, "resolution": appraisal.Resolution, "source_kind": candidate.Kind,
+	})
+}
+
+// assimilateActionObservation joins intentional action feedback and passive
+// sensing at one factual boundary without merging their causal roles. The
+// action_result lets Alice settle what the organ did; newly exposed concrete
+// objects stay pending so each may independently compete for attention. The
+// objects become Seen only when one actually enters attention, or when a later
+// intentional action supersedes the old surface.
+func (r *Runtime) assimilateActionObservation(observation perceptualObservation) int {
+	surface := perceptualSurfaceKey(observation.OrganID, observation.SurfaceID)
+	trace := queuePerceptualNovelty(r.state.Perception[surface], observation)
+	newlyAvailable := len(trace.Pending)
+	// This surface has just changed or been sampled through a real action. It is
+	// immediately eligible for object-level attention; no hidden orientation is
+	// needed first.
+	trace.ExhaustedContext = ""
+	trace.ExhaustedAt = ""
+	trace.SettledByAttention = false
+	if r.state.Perception == nil {
+		r.state.Perception = make(map[string]PerceptualTrace)
+	}
+	r.state.Perception[surface] = trace
+	return newlyAvailable
 }
 
 func bodyDifferences(previous, current BodySnapshot, initial bool) []string {
@@ -229,7 +356,7 @@ func bodyDifferences(previous, current BodySnapshot, initial bool) []string {
 			differences = append(differences, fmt.Sprintf("%s changed from %t to %t", label, before, after))
 		}
 	}
-	booleanDifference("network availability", previous.NetworkAvailable, current.NetworkAvailable)
+	booleanDifference("network probe reachability", previous.NetworkAvailable, current.NetworkAvailable)
 	booleanDifference("desktop availability", previous.DesktopAvailable, current.DesktopAvailable)
 	booleanDifference("wechat running", previous.WechatRunning, current.WechatRunning)
 	booleanDifference("clash verge running", previous.ClashVergeRunning, current.ClashVergeRunning)

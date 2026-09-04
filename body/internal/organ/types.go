@@ -20,13 +20,14 @@ type Manifest struct {
 }
 
 type Description struct {
-	Schema       string   `json:"schema"`
-	ID           string   `json:"id"`
-	Name         string   `json:"name"`
-	Command      string   `json:"command"`
-	Capabilities []string `json:"capabilities"`
-	Operations   []string `json:"operations,omitempty"`
-	Guidance     string   `json:"guidance"`
+	Schema          string            `json:"schema"`
+	ID              string            `json:"id"`
+	Name            string            `json:"name"`
+	Command         string            `json:"command"`
+	Capabilities    []string          `json:"capabilities"`
+	Operations      []string          `json:"operations,omitempty"`
+	OperationInputs map[string]string `json:"operation_inputs,omitempty"`
+	Guidance        string            `json:"guidance"`
 }
 
 type Health struct {
@@ -51,6 +52,13 @@ type Observation struct {
 	Context    []string                   `json:"context,omitempty"`
 	Objects    []Object                   `json:"objects,omitempty"`
 	Facts      map[string]json.RawMessage `json:"facts,omitempty"`
+	Interpret  *InterpretationRequest     `json:"interpret,omitempty"`
+}
+
+// An organ may ask for one local interpretation; it never supplies a life goal.
+type InterpretationRequest struct {
+	Question string `json:"question"`
+	Material string `json:"material"`
 }
 
 type Orientation struct {
@@ -74,17 +82,23 @@ type ActionResult struct {
 	OrganID    string `json:"organ_id"`
 	ActionID   string `json:"action_id"`
 	Status     string `json:"status"`
+	Effect     string `json:"effect"`
 	ObservedAt string `json:"observed_at"`
 	Summary    string `json:"summary"`
 	Output     string `json:"output,omitempty"`
+	// Observation is present when the action result itself exposed the current
+	// sensory surface. It lets the life kernel remember that Alice has already
+	// encountered those objects instead of rediscovering them as passive novelty.
+	Observation *Observation `json:"observation,omitempty"`
 }
 
 type Snapshot struct {
-	Name         string   `json:"name"`
-	Command      string   `json:"command"`
-	Capabilities []string `json:"capabilities,omitempty"`
-	Operations   []string `json:"operations,omitempty"`
-	Guidance     string   `json:"guidance,omitempty"`
-	Status       string   `json:"status"`
-	Accepting    bool     `json:"accepting"`
+	Name            string            `json:"name"`
+	Command         string            `json:"command"`
+	Capabilities    []string          `json:"capabilities,omitempty"`
+	Operations      []string          `json:"operations,omitempty"`
+	OperationInputs map[string]string `json:"operation_inputs,omitempty"`
+	Guidance        string            `json:"guidance,omitempty"`
+	Status          string            `json:"status"`
+	Accepting       bool              `json:"accepting"`
 }

@@ -22,7 +22,7 @@ attention:
   resource_cost_weight: 0.25
   trigger_threshold: 0.45
   revisit_seconds: 10
-  maximum_idle_seconds: 30
+  maximum_idle_seconds: 10
 
 difference:
   accumulation_decay_rate: 0.35
@@ -37,7 +37,7 @@ value_field:
   activation_gain: 0.30
   activation_return_rate: 0.08
   satiation_gain: 0.25
-  satiation_return_rate: 0.05
+  satiation_return_rate: 0.15
   orientation_gain: 0.03
 
 integrity:

@@ -10,15 +10,31 @@ import (
 	"unicode"
 )
 
+// actionProgressBoundary is not a malformed cognitive response. It is a
+// factual boundary between intention and embodiment: the proposed request has
+// already produced usable Reality and therefore cannot honestly create a new
+// causal step. The runtime returns this boundary to attention instead of
+// buying repeated validation retries for the same intention.
+type actionProgressBoundary struct {
+	reason string
+}
+
+func (e *actionProgressBoundary) Error() string { return e.reason }
+
+func newActionProgressBoundary(reason string) error {
+	return &actionProgressBoundary{reason: reason}
+}
+
 const (
-	maxCommitments                  = 32
-	maxExperiences                  = 128
-	maxExperienceContext            = 5
-	maxOperationalExperienceContext = 8
-	maxSelfMethods                  = 8
-	maxSelfMethodBytes              = 512
-	maxSelfNarrativeBytes           = 4096
-	settledDifference               = 0.25
+	maxCommitments              = 32
+	maxMemories                 = 128
+	maxMemoryContext            = 5
+	maxOperationalMemoryContext = 8
+	maxSelfMethods              = 8
+	maxSelfMethodBytes          = 512
+	maxSelfNarrativeBytes       = 4096
+	mentorCausalReplayWindow    = 30 * time.Minute
+	settledDifference           = 0.25
 )
 
 func (r *Runtime) syncSelfFromFiles() error {
@@ -49,26 +65,26 @@ func equalStrings(left, right []string) bool {
 	return true
 }
 
-func (r *Runtime) validateExperienceUpdates(commit CognitiveCommit) error {
+func (r *Runtime) validateRealityUpdates(commit CognitiveCommit) error {
 	if r.state.Stage < 5 {
-		if len(commit.ExperienceUpdates) != 0 {
-			return errors.New("experience updates become available in stage five")
+		if len(commit.RealityUpdates) != 0 {
+			return errors.New("memory updates become available in stage five")
 		}
 		return nil
 	}
 	expected := r.commitmentIDForFocus(commit.FocusID)
 	if expected == "" {
-		if len(commit.ExperienceUpdates) != 0 {
+		if len(commit.RealityUpdates) != 0 {
 			return errors.New("this focus has no completed commitment to assimilate")
 		}
 		return nil
 	}
-	if len(commit.ExperienceUpdates) != 1 {
-		return errors.New("a focused action result requires one experience update")
+	if len(commit.RealityUpdates) != 1 {
+		return errors.New("a focused action result requires one memory update")
 	}
-	update := commit.ExperienceUpdates[0]
+	update := commit.RealityUpdates[0]
 	if update.CommitmentID != expected {
-		return fmt.Errorf("experience commitment %q does not match reality %q", update.CommitmentID, expected)
+		return fmt.Errorf("memory commitment %q does not match reality %q", update.CommitmentID, expected)
 	}
 	commitment := r.commitmentByID(expected)
 	if commitment == nil {
@@ -76,36 +92,36 @@ func (r *Runtime) validateExperienceUpdates(commit CognitiveCommit) error {
 	}
 	candidate, exists := r.activeCandidates[commit.FocusID]
 	if !exists {
-		return fmt.Errorf("experience focus %q is unavailable", commit.FocusID)
+		return fmt.Errorf("memory focus %q is unavailable", commit.FocusID)
 	}
 	switch candidate.Kind {
 	case "action_result":
-		if commitment.ExperienceID != "" || (commitment.Status != "reality_available" && commitment.Status != "reality_unknown") {
+		if commitment.MemoryID != "" || (commitment.Status != "reality_available" && commitment.Status != "reality_unknown") {
 			return fmt.Errorf("commitment %q no longer has an unassimilated reality", expected)
 		}
 	case "mentor_received":
-		if commitment.ActionKind != "mentor_send" || commitment.ExperienceID == "" || commitment.Status != "assimilated" {
+		if commitment.ActionKind != "mentor_send" || commitment.MemoryID == "" || commitment.Status != "assimilated" {
 			return fmt.Errorf("mentor feedback for commitment %q arrived before its enacted send reality was assimilated", expected)
 		}
-		if r.experienceForFocus(commit.FocusID) != nil {
+		if r.memoryForFocus(commit.FocusID) != nil {
 			return fmt.Errorf("mentor feedback %q has already been assimilated", commit.FocusID)
 		}
 	default:
 		return fmt.Errorf("focus kind %q is not an assimilable commitment reality", candidate.Kind)
 	}
-	if err := validateExperienceUpdate(update); err != nil {
+	if err := validateRealityUpdate(update); err != nil {
 		return err
 	}
 	return nil
 }
 
-func validateExperienceUpdate(update ExperienceUpdate) error {
+func validateRealityUpdate(update RealityUpdate) error {
 	if strings.TrimSpace(update.Meaning) == "" {
-		return errors.New("experience meaning is required")
+		return errors.New("memory meaning is required")
 	}
 	if update.PredictionDifference < 0 || update.PredictionDifference > 1 ||
 		update.ExperiencedCost < 0 || update.ExperiencedCost > 1 {
-		return errors.New("experience unit values must remain within 0..1")
+		return errors.New("memory unit values must remain within 0..1")
 	}
 	values := []float64{
 		update.Values.Continuance,
@@ -118,22 +134,22 @@ func validateExperienceUpdate(update ExperienceUpdate) error {
 	}
 	for _, value := range values {
 		if value < -1 || value > 1 {
-			return errors.New("experience endogenous values must remain within -1..1")
+			return errors.New("memory endogenous values must remain within -1..1")
 		}
 	}
 	switch update.Significance {
 	case "ordinary", "reusable", "self_defining":
 	default:
-		return fmt.Errorf("unknown experience significance %q", update.Significance)
+		return fmt.Errorf("unknown memory significance %q", update.Significance)
 	}
 	if len([]rune(update.Meaning)) > 1000 || len([]rune(update.Lesson)) > 1000 ||
 		len(update.MethodUpdate) > maxSelfMethodBytes {
-		return errors.New("experience update exceeds the compact memory boundary")
+		return errors.New("memory update exceeds the compact memory boundary")
 	}
 	return nil
 }
 
-func effectiveExperienceSignificance(update ExperienceUpdate, narrativeUpdated bool) string {
+func effectiveMemorySignificance(update RealityUpdate, narrativeUpdated bool) string {
 	if narrativeUpdated {
 		return "self_defining"
 	}
@@ -143,11 +159,11 @@ func effectiveExperienceSignificance(update ExperienceUpdate, narrativeUpdated b
 	return "ordinary"
 }
 
-func (r *Runtime) applyExperienceUpdates(commit CognitiveCommit) error {
-	if len(commit.ExperienceUpdates) == 0 {
+func (r *Runtime) applyRealityUpdates(commit CognitiveCommit) error {
+	if len(commit.RealityUpdates) == 0 {
 		return nil
 	}
-	update := commit.ExperienceUpdates[0]
+	update := commit.RealityUpdates[0]
 	commitment := r.commitmentByID(update.CommitmentID)
 	if commitment == nil {
 		return fmt.Errorf("commitment %q disappeared before assimilation", update.CommitmentID)
@@ -161,8 +177,8 @@ func (r *Runtime) applyExperienceUpdates(commit CognitiveCommit) error {
 			break
 		}
 	}
-	experience := Experience{
-		ID:                   "experience-" + randomID(),
+	memory := Memory{
+		ID:                   "memory-" + commit.FocusID,
 		CommitmentID:         commitment.ID,
 		FocusID:              commit.FocusID,
 		SourceKind:           r.activeCandidates[commit.FocusID].Kind,
@@ -175,20 +191,22 @@ func (r *Runtime) applyExperienceUpdates(commit CognitiveCommit) error {
 		Values:               update.Values,
 		ExperiencedCost:      update.ExperiencedCost,
 		Lesson:               strings.TrimSpace(update.Lesson),
-		Significance:         effectiveExperienceSignificance(update, strings.TrimSpace(commit.NarrativeUpdate) != ""),
+		Significance:         effectiveMemorySignificance(update, strings.TrimSpace(commit.NarrativeUpdate) != ""),
 		MethodUpdate:         strings.TrimSpace(update.MethodUpdate),
 		MethodSlot:           update.MethodSlot,
+		Origin:               "observed",
+		SourceRefs:           []string{commit.FocusID},
 	}
-	r.state.Experiences = append(r.state.Experiences, experience)
-	r.state.TotalExperiences++
-	r.learnDifferenceFromExperience(*commitment, experience)
-	r.satiateLifeValues(experience)
-	if len(r.state.Experiences) > maxExperiences {
-		r.state.Experiences = append([]Experience(nil), r.state.Experiences[len(r.state.Experiences)-maxExperiences:]...)
+	r.state.Memories = append(r.state.Memories, memory)
+	r.state.TotalMemories++
+	r.learnDifferenceFromMemory(*commitment, memory)
+	r.satiateLifeValues(memory)
+	if len(r.state.Memories) > maxMemories {
+		r.state.Memories = append([]Memory(nil), r.state.Memories[len(r.state.Memories)-maxMemories:]...)
 	}
-	if experience.SourceKind == "action_result" {
+	if memory.SourceKind == "action_result" {
 		commitment.Status = "assimilated"
-		commitment.ExperienceID = experience.ID
+		commitment.MemoryID = memory.ID
 	}
 	for index := range r.state.Concerns {
 		if r.state.Concerns[index].CommitmentID == commitment.ID {
@@ -197,22 +215,18 @@ func (r *Runtime) applyExperienceUpdates(commit CognitiveCommit) error {
 	}
 
 	methodChanged := false
-	if experience.MethodUpdate != "" {
-		methods := make([]string, 0, maxSelfMethods)
-		for _, method := range r.state.Self.Methods {
-			if method != experience.MethodUpdate {
-				methods = append(methods, method)
-			}
-		}
-		updated := truncate(experience.MethodUpdate, maxSelfMethodBytes)
-		if len(methods) < maxSelfMethods {
-			methods = append(methods, updated)
-			methodChanged = true
-		} else {
-			if experience.MethodSlot >= 0 && experience.MethodSlot < len(methods) {
-				methods[experience.MethodSlot] = updated
+	if memory.MethodUpdate != "" {
+		updated := truncate(memory.MethodUpdate, maxSelfMethodBytes)
+		methods := append([]string(nil), r.state.Self.Methods...)
+		slot := memory.MethodSlot
+		if slot >= 0 && slot < len(methods) {
+			if methods[slot] != updated {
+				methods[slot] = updated
 				methodChanged = true
 			}
+		} else if len(methods) < maxSelfMethods && !methodProposalRedundant(updated, methods) {
+			methods = append(methods, updated)
+			methodChanged = true
 		}
 		if methodChanged {
 			r.state.Self.Methods = methods
@@ -226,8 +240,8 @@ func (r *Runtime) applyExperienceUpdates(commit CognitiveCommit) error {
 	}
 
 	previousDebt := r.state.IntegrityDebt
-	realityRepair := maxFloat(0, commitment.InitialDifference-experience.RemainingDifference)
-	realityFit := 1 - experience.RemainingDifference
+	realityRepair := maxFloat(0, commitment.InitialDifference-memory.RemainingDifference)
+	realityFit := 1 - memory.RemainingDifference
 	gap := maxFloat(0, resolutionRelief(resolution)-realityFit)
 	r.state.IntegrityDebt = clamp01(
 		r.config.Dynamics.IntegrityPersistence*previousDebt +
@@ -238,13 +252,13 @@ func (r *Runtime) applyExperienceUpdates(commit CognitiveCommit) error {
 	if threshold > 0 && previousDebt < threshold && r.state.IntegrityDebt >= threshold && !r.state.IntegrityMirrorOpen {
 		payload, _ := json.Marshal(map[string]any{
 			"integrity_debt": r.state.IntegrityDebt,
-			"experience_id":  experience.ID,
+			"memory_id":      memory.ID,
 		})
 		if err := r.addEvent(
 			"integrity_mirror",
 			"endogenous",
 			"现实完整性正在请求一次清醒回看：让解释重新贴近已经发生的事实。",
-			experience.ID,
+			memory.ID,
 			payload,
 			true,
 		); err != nil {
@@ -254,11 +268,11 @@ func (r *Runtime) applyExperienceUpdates(commit CognitiveCommit) error {
 	} else if r.state.IntegrityDebt < threshold*0.75 {
 		r.state.IntegrityMirrorOpen = false
 	}
-	if err := r.accrueSelfModelTension(experience, strings.TrimSpace(commit.NarrativeUpdate) != ""); err != nil {
+	if err := r.accrueSelfModelTension(memory, strings.TrimSpace(commit.NarrativeUpdate) != ""); err != nil {
 		return err
 	}
-	if err := r.journal("experience_assimilated", experience.ID, map[string]any{
-		"experience":       experience,
+	if err := r.journal("memory_assimilated", memory.ID, map[string]any{
+		"memory":           memory,
 		"integrity_before": previousDebt,
 		"integrity_after":  r.state.IntegrityDebt,
 		"reality_repair":   realityRepair,
@@ -267,47 +281,50 @@ func (r *Runtime) applyExperienceUpdates(commit CognitiveCommit) error {
 	}); err != nil {
 		return err
 	}
+	batch := learningBatch{Memories: []Memory{memory}}
+	if memory.Lesson != "" {
+		batch.Experiences = []Experience{{ID: "experience-" + memory.ID, Judgment: memory.Lesson, Context: memory.SourceKind, Evidence: []string{memory.ID}, UpdatedAt: memory.ObservedAt}}
+	}
+	if err := r.commitLearning(batch); err != nil {
+		return err
+	}
 	if err := r.maybeOpenOperationalSelfDifference(); err != nil {
 		return err
 	}
-	return r.enqueueConcernContribution(strings.TrimSpace(commit.ContributesToConcernID), *commitment, experience)
+	return r.enqueueConcernContribution(strings.TrimSpace(commit.ContributesToConcernID), *commitment, memory)
 }
 
 // maybeOpenOperationalSelfDifference lets the existing self-model loop notice
 // a whole-life pattern that no single successful action can expose. Several
-// ordinary micro-closures can each return real facts while collectively
-// spending attention on the same small causal forms without producing a new
-// method or a changed self-understanding. The kernel reports only those
-// embodied facts. AIP still decides whether the pattern is valuable work,
-// fatigue, caution, avoidance, or something else, and what—if anything—to do.
+// ordinary micro-closures can share an action form while producing very
+// different content and consequences. Repeated form and expenditure warrant
+// a look, not a verdict about yield. AIP interprets the actual results and may
+// preserve a useful method, learn a different one, or change its next choice.
 func (r *Runtime) maybeOpenOperationalSelfDifference() error {
 	if r.state.Stage < 10 || r.selfModelDifferenceCandidateActive() {
 		return nil
 	}
 	baseline := r.selfRegulationBaseline()
-	recent := make([]Experience, 0, maxOperationalExperienceContext)
-	for index := len(r.state.Experiences) - 1; index >= 0 && len(recent) < maxOperationalExperienceContext; index-- {
-		experience := r.state.Experiences[index]
-		if !timeAfter(experience.ObservedAt, baseline) {
-			break
-		}
-		recent = append(recent, experience)
-	}
-	if len(recent) < 6 {
+	recent := r.settledActionMemoriesAfter(baseline)
+	if len(recent) < 4 {
 		return nil
 	}
 
 	concerns := make(map[string]bool)
 	patterns := make(map[string]int)
 	ordinary := 0
-	for _, experience := range recent {
-		if experience.Significance == "ordinary" {
+	contactOnly := 0
+	for _, memory := range recent {
+		if memory.Significance == "ordinary" {
 			ordinary++
 		}
-		if commitment := r.commitmentByID(experience.CommitmentID); commitment != nil && commitment.ConcernID != "" {
+		if commitment := r.commitmentByID(memory.CommitmentID); commitment != nil && commitment.ConcernID != "" {
 			concerns[commitment.ConcernID] = true
 		}
-		patterns[experienceActionPattern(experience)]++
+		patterns[memoryActionPattern(memory)]++
+		if actionEffectIsContactOnly(r.memoryActionEffect(memory)) {
+			contactOnly++
+		}
 	}
 	repeatedPatterns := 0
 	dominantPatternCount := 0
@@ -320,12 +337,19 @@ func (r *Runtime) maybeOpenOperationalSelfDifference() error {
 		}
 	}
 	spent, calls := r.cognitiveSpendAfter(baseline)
-	minimumSpend := r.config.CognitiveResource.RollingHourLimitMicrousd / 25
-	// One dominant causal form repeated three times is already an embodied
-	// pattern, even when the surrounding shell verbs vary. Requiring two
-	// separately repeated command shapes missed narrow loops made of create,
-	// inspect and restate operations over the same small surface.
-	if len(concerns) < 3 || ordinary < len(recent)-1 || (repeatedPatterns < 2 && dominantPatternCount < 3) || calls < len(recent) || spent < minimumSpend {
+	// These are two observable patterns that can be reviewed. Read-only action
+	// says that the organ did not write to the world; it says nothing about the
+	// novelty, meaning or future value of what Alice learned from it.
+	fragmentedChurn := len(recent) >= 6 && len(concerns) >= 3 &&
+		(repeatedPatterns >= 2 || dominantPatternCount >= 3)
+	contactChurn := contactOnly >= len(recent)-1 && len(concerns) <= 2 &&
+		(repeatedPatterns >= 2 || dominantPatternCount >= 3)
+	// Calls and causal outcomes express attention metabolism independently of
+	// model price. A fixed USD gate made the same pattern visible after a few
+	// Terra thoughts but nearly invisible under Luna. Confirmed spend remains in
+	// the factual payload for Alice to interpret; it does not decide whether her
+	// own repeated operating pattern exists.
+	if (!fragmentedChurn && !contactChurn) || calls < len(recent) {
 		return nil
 	}
 
@@ -335,36 +359,100 @@ func (r *Runtime) maybeOpenOperationalSelfDifference() error {
 	}
 	r.state.SelfModelTension = maxFloat(r.state.SelfModelTension, r.config.Dynamics.AttentionThreshold)
 	payload, _ := json.Marshal(map[string]any{
-		"difference_kind":          "attention_yield_balance",
-		"current_narrative":        r.state.Self.Narrative,
-		"experience_count":         len(recent),
-		"ordinary_count":           ordinary,
-		"distinct_concern_count":   len(concerns),
-		"repeated_action_forms":    patterns,
-		"dominant_action_count":    dominantPatternCount,
-		"cognition_calls":          calls,
-		"cognition_spend_microusd": spent,
-		"affective_state":          r.state.AffectiveState,
-		"integrity_debt":           r.state.IntegrityDebt,
-		"evidence_experience_ids":  evidenceIDs,
+		"difference_kind":           "attention_yield_balance",
+		"current_narrative":         r.state.Self.Narrative,
+		"memory_count":              len(recent),
+		"ordinary_count":            ordinary,
+		"distinct_concern_count":    len(concerns),
+		"repeated_action_forms":     patterns,
+		"dominant_action_count":     dominantPatternCount,
+		"contact_only_action_count": contactOnly,
+		"cognition_calls":           calls,
+		"cognition_spend_microusd":  spent,
+		"affective_state":           r.state.AffectiveState,
+		"integrity_debt":            r.state.IntegrityDebt,
+		"evidence_memory_ids":       evidenceIDs,
 	})
 	return r.enqueueSelfModelDifference(
 		"self_model_difference",
 		"endogenous",
-		"近期多项已完成活动的注意投入、现实结果与持久改变之间形成了一次值得理解的自我运行差异。",
+		"近期多次使用了相同动作形式；这些活动的具体内容、现实结果与资源投入可供你判断这段经历的价值。",
 		evidenceIDs[len(evidenceIDs)-1],
 		payload,
 		true,
 	)
 }
 
+// One enacted commitment contributes one outcome to operational self-sensing.
+// Personal recollections, predictions and reinterpretations remain cognitive
+// material; multiplying them does not multiply completed body actions. Read
+// through the learning index so a rich fragment stream cannot evict the real
+// outcomes from this bounded operational window.
+func (r *Runtime) settledActionMemoriesAfter(baseline string) []Memory {
+	recent := make([]Memory, 0, maxOperationalMemoryContext)
+	seen := make(map[string]bool)
+	for _, commitment := range r.state.Commitments {
+		if commitment.ID == "" || seen[commitment.ID] || commitment.Status != "assimilated" {
+			continue
+		}
+		memory := r.memoryByID(commitment.MemoryID)
+		if memory == nil && commitment.MemoryID == "" {
+			// Historical snapshots predate the explicit canonical outcome link.
+			memory = r.memoryForCommitment(commitment.ID)
+		}
+		if memory == nil || memory.CommitmentID != commitment.ID || memory.ActionKind == "" ||
+			(memory.SourceKind != "" && memory.SourceKind != "action_result") ||
+			(memory.Origin != "" && memory.Origin != "observed") || !timeAfter(memory.ObservedAt, baseline) {
+			continue
+		}
+		seen[commitment.ID] = true
+		recent = append(recent, *memory)
+	}
+	sort.SliceStable(recent, func(i, j int) bool { return timeAfter(recent[i].ObservedAt, recent[j].ObservedAt) })
+	if len(recent) > maxOperationalMemoryContext {
+		recent = recent[:maxOperationalMemoryContext]
+	}
+	return recent
+}
+
+func (r *Runtime) memoryByID(memoryID string) *Memory {
+	if r.learning != nil {
+		if memory, exists := r.learning.memories[memoryID]; exists {
+			return &memory
+		}
+	}
+	for index := len(r.state.Memories) - 1; index >= 0; index-- {
+		if r.state.Memories[index].ID == memoryID {
+			return &r.state.Memories[index]
+		}
+	}
+	return nil
+}
+
+func actionEffectIsContactOnly(effect string) bool {
+	// Only an organ-verified changed effect can prove a persistent causal
+	// alteration. Observed, oriented, unknown, failed and legacy-empty effects
+	// may still yield valuable Memory, but do not by themselves prove a run of
+	// contact achieved a persistent change. This is not a repeat-read policy:
+	// moving the sensory pose can change what the same read will observe.
+	return effect != "changed"
+}
+
+func (r *Runtime) memoryActionEffect(memory Memory) string {
+	_, action, _, _ := r.realityForCommitment(memory.CommitmentID)
+	if action == nil {
+		return ""
+	}
+	return action.Effect
+}
+
 // maybeOpenAffectiveSelfDifference exposes sustained high activation with low
 // control as an interoceptive fact. Mere non-action is deliberately absent:
 // understanding or releasing a real object can be a complete cognition, and a
 // counter that demands a new body consequence rewards cheap artifact creation.
-// Repetitive enacted behavior is handled separately from actual Experiences.
+// Repetitive enacted behavior is handled separately from actual Memories.
 func (r *Runtime) maybeOpenAffectiveSelfDifference() error {
-	if r.state.Stage < 10 || r.selfModelDifferenceCandidateActive() || r.state.PendingAction != nil || r.hasUnassimilatedCommitment() {
+	if r.state.Stage < 10 || r.selfModelDifferenceCandidateActive() || r.state.PendingAction != nil || r.hasCommitmentAwaitingAssimilation() {
 		return nil
 	}
 	threshold := r.config.Dynamics.AttentionThreshold
@@ -374,12 +462,12 @@ func (r *Runtime) maybeOpenAffectiveSelfDifference() error {
 		!r.selfModelDifferenceObservedWithin(5*time.Minute) {
 		r.state.SelfModelTension = maxFloat(r.state.SelfModelTension, threshold)
 		payload, _ := json.Marshal(map[string]any{
-			"difference_kind":         "affective_control_balance",
-			"current_narrative":       r.state.Self.Narrative,
-			"affective_state":         r.state.AffectiveState,
-			"affective_strain":        affectiveStrain,
-			"integrity_debt":          r.state.IntegrityDebt,
-			"evidence_experience_ids": []string{},
+			"difference_kind":     "affective_control_balance",
+			"current_narrative":   r.state.Self.Narrative,
+			"affective_state":     r.state.AffectiveState,
+			"affective_strain":    affectiveStrain,
+			"integrity_debt":      r.state.IntegrityDebt,
+			"evidence_memory_ids": []string{},
 		})
 		return r.enqueueSelfModelDifference(
 			"self_model_difference",
@@ -408,12 +496,15 @@ func (r *Runtime) selfModelDifferenceObservedWithin(window time.Duration) bool {
 
 func (r *Runtime) selfRegulationBaseline() string {
 	baseline := r.state.T0
-	if timeAfter(r.state.Self.UpdatedAt, baseline) {
-		baseline = r.state.Self.UpdatedAt
-	}
 	for index := len(r.state.Background) - 1; index >= 0; index-- {
 		event := r.state.Background[index]
 		if event.Kind != "self_model_difference" {
+			continue
+		}
+		var payload struct {
+			DifferenceKind string `json:"difference_kind"`
+		}
+		if json.Unmarshal(event.Payload, &payload) != nil || payload.DifferenceKind != "attention_yield_balance" {
 			continue
 		}
 		if timeAfter(event.ObservedAt, baseline) {
@@ -440,19 +531,19 @@ func (r *Runtime) cognitiveSpendAfter(baseline string) (int64, int) {
 	return spent, calls
 }
 
-func experienceActionPattern(experience Experience) string {
-	if experience.ActionKind != "organ_action" {
-		return experience.ActionKind
+func memoryActionPattern(memory Memory) string {
+	if memory.ActionKind != "organ_action" {
+		return memory.ActionKind
 	}
 	var request struct {
 		OrganID   string `json:"organ_id"`
 		Operation string `json:"operation"`
 		Input     string `json:"input"`
 	}
-	if json.Unmarshal([]byte(experience.EnactedRequest), &request) != nil {
-		return experience.ActionKind
+	if json.Unmarshal([]byte(memory.EnactedRequest), &request) != nil {
+		return memory.ActionKind
 	}
-	pattern := experience.ActionKind + ":" + request.OrganID + ":" + request.Operation
+	pattern := memory.ActionKind + ":" + request.OrganID + ":" + request.Operation
 	if request.OrganID != "system" || request.Operation != "exec" {
 		return pattern
 	}
@@ -476,29 +567,29 @@ func timeAfter(candidate, baseline string) bool {
 	return candidateErr == nil && baselineErr == nil && candidateTime.After(baselineTime)
 }
 
-// enqueueConcernContribution gives a real child Experience one bounded route
+// enqueueConcernContribution gives a real child Memory one bounded route
 // back into a broader Concern that Alice selected while assimilating the
 // result. It creates no meaning, reward, priority, or prescribed response: the
 // new candidate merely makes the factual relationship available to a later
 // single attention pulse.
-func (r *Runtime) enqueueConcernContribution(parentID string, commitment ActionCommitment, experience Experience) error {
+func (r *Runtime) enqueueConcernContribution(parentID string, commitment ActionCommitment, memory Memory) error {
 	payload, _ := json.Marshal(map[string]any{
-		"experience_id":     experience.ID,
+		"memory_id":         memory.ID,
 		"commitment_id":     commitment.ID,
 		"child_concern_id":  commitment.ConcernID,
 		"parent_concern_id": parentID,
 	})
 	journalPayload := map[string]any{
-		"experience_id":     experience.ID,
+		"memory_id":         memory.ID,
 		"commitment_id":     commitment.ID,
 		"child_concern_id":  commitment.ConcernID,
 		"parent_concern_id": parentID,
 	}
 	return r.enqueueConcernContributionFact(
 		parentID,
-		experience.ID,
-		"experience",
-		"一项或多项由你自主关联的独立行动已经产生真实 Experience；最新后果现在可以重新参与同一上位 Concern 的判断。",
+		memory.ID,
+		"memory",
+		"一项或多项由你自主关联的独立行动已经产生真实 Memory；最新后果现在可以重新参与同一上位 Concern 的判断。",
 		payload,
 		journalPayload,
 	)
@@ -558,7 +649,7 @@ func (r *Runtime) enqueueConcernContributionFact(
 			continue
 		}
 		// A contribution is only a wake-up surface for the parent Concern. The
-		// Experiences remain separate durable facts, while one parent needs only
+		// Memories remain separate durable facts, while one parent needs only
 		// one current signal regardless of how many children advanced. Reusing even
 		// a previously processed signal prevents several candidates from mapping to
 		// the same Concern in one single-focus pulse.
@@ -616,30 +707,30 @@ func (r *Runtime) validateNarrativeUpdate(commit CognitiveCommit) error {
 	if candidate.Kind == "self_model_difference" {
 		if r.state.Stage >= 10 {
 			var payload struct {
-				DifferenceKind        string   `json:"difference_kind"`
-				EvidenceExperienceIDs []string `json:"evidence_experience_ids"`
+				DifferenceKind    string   `json:"difference_kind"`
+				EvidenceMemoryIDs []string `json:"evidence_memory_ids"`
 			}
 			if json.Unmarshal(candidate.Payload, &payload) == nil &&
 				strings.TrimSpace(payload.DifferenceKind) != "" &&
-				len(payload.EvidenceExperienceIDs) == 0 {
+				len(payload.EvidenceMemoryIDs) == 0 {
 				// An operational interoceptive signal is real evidence that
 				// something in the current regulation loop deserves attention, but
 				// it is not yet lived evidence of how Alice actually regulates it.
 				// Let the signal change appraisal, attention or action. Narrative
-				// waits for subsequent Reality to become Experience, so paraphrasing
+				// waits for subsequent Reality to become Memory, so paraphrasing
 				// "I will wait/change" cannot clear the very gap being observed.
-				return errors.New("an operational self-model signal without lived Experience may guide appraisal or action, while Narrative changes after its regulation produces Reality")
+				return errors.New("an operational self-model signal without lived Memory may guide appraisal or action, while Narrative changes after its regulation produces Reality")
 			}
 		}
 		return nil
 	}
-	if commitmentIDFromEvent(candidate) == "" || len(commit.ExperienceUpdates) != 1 {
-		return errors.New("a narrative update is grounded in an important reality experience or a self-model difference")
+	if commitmentIDFromEvent(candidate) == "" || len(commit.RealityUpdates) != 1 {
+		return errors.New("a narrative update is grounded in an important reality memory or a self-model difference")
 	}
 	if strings.TrimSpace(r.state.Self.Narrative) != "" {
 		return errors.New("an established narrative changes through accumulated self-model difference")
 	}
-	if absFloat(commit.ExperienceUpdates[0].Values.SelfEndorsed) < r.config.Dynamics.AttentionThreshold {
+	if absFloat(commit.RealityUpdates[0].Values.SelfEndorsed) < r.config.Dynamics.AttentionThreshold {
 		return errors.New("this reality has not been appraised as sufficiently self-relevant for a narrative update")
 	}
 	return nil
@@ -663,43 +754,43 @@ func (r *Runtime) applyNarrativeUpdate(commit CognitiveCommit) error {
 		return err
 	}
 	evidence := make([]string, 0, 4)
-	for _, experienceUpdate := range commit.ExperienceUpdates {
-		if experience := r.experienceForFocus(commit.FocusID); experience != nil {
-			evidence = append(evidence, experience.ID)
-		} else if experience := r.experienceForCommitment(experienceUpdate.CommitmentID); experience != nil {
-			evidence = append(evidence, experience.ID)
+	for _, memoryUpdate := range commit.RealityUpdates {
+		if memory := r.memoryForFocus(commit.FocusID); memory != nil {
+			evidence = append(evidence, memory.ID)
+		} else if memory := r.memoryForCommitment(memoryUpdate.CommitmentID); memory != nil {
+			evidence = append(evidence, memory.ID)
 		}
 	}
 	if candidate, exists := r.activeCandidates[commit.FocusID]; exists && candidate.Kind == "self_model_difference" {
 		var payload struct {
-			EvidenceExperienceIDs []string `json:"evidence_experience_ids"`
+			EvidenceMemoryIDs []string `json:"evidence_memory_ids"`
 		}
 		if json.Unmarshal(candidate.Payload, &payload) == nil {
-			evidence = append(evidence, payload.EvidenceExperienceIDs...)
+			evidence = append(evidence, payload.EvidenceMemoryIDs...)
 		}
 	}
 	return r.journal("self_updated", commit.FocusID, map[string]any{
-		"focus_id":                commit.FocusID,
-		"evidence_experience_ids": evidence,
-		"previous_narrative":      previous,
-		"current_narrative":       r.state.Self.Narrative,
+		"focus_id":            commit.FocusID,
+		"evidence_memory_ids": evidence,
+		"previous_narrative":  previous,
+		"current_narrative":   r.state.Self.Narrative,
 	})
 }
 
 // accrueSelfModelTension closes the same Difference Field over the current
-// self-model. A self-relevant experience contributes in proportion to its
-// prediction/reality residue; repeated low-gap experiences can accumulate,
-// while one surprising experience contributes faster. No semantic conclusion
+// self-model. A self-relevant memory contributes in proportion to its
+// prediction/reality residue; repeated low-gap memories can accumulate,
+// while one surprising memory contributes faster. No semantic conclusion
 // is generated here—the threshold only returns grounded evidence to attention.
-func (r *Runtime) accrueSelfModelTension(experience Experience, narrativeUpdated bool) error {
+func (r *Runtime) accrueSelfModelTension(memory Memory, narrativeUpdated bool) error {
 	if narrativeUpdated {
 		return nil
 	}
-	selfRelevance := absFloat(experience.Values.SelfEndorsed)
+	selfRelevance := absFloat(memory.Values.SelfEndorsed)
 	if selfRelevance == 0 {
 		return nil
 	}
-	difference := maxFloat(experience.PredictionDifference, experience.RemainingDifference)
+	difference := maxFloat(memory.PredictionDifference, memory.RemainingDifference)
 	contribution := selfRelevance * (r.config.Dynamics.ConcernBaseDrive + r.config.Dynamics.ConcernUrgencyWeight*difference)
 	before := r.state.SelfModelTension
 	r.state.SelfModelTension = clamp01(before + r.config.Dynamics.ConcernGrowthGain*contribution)
@@ -713,33 +804,33 @@ func (r *Runtime) accrueSelfModelTension(experience Experience, narrativeUpdated
 		evidenceIDs = append(evidenceIDs, item.ID)
 	}
 	payload, _ := json.Marshal(map[string]any{
-		"before":                  before,
-		"after":                   r.state.SelfModelTension,
-		"current_narrative":       r.state.Self.Narrative,
-		"evidence":                evidence,
-		"evidence_experience_ids": evidenceIDs,
+		"before":              before,
+		"after":               r.state.SelfModelTension,
+		"current_narrative":   r.state.Self.Narrative,
+		"evidence":            evidence,
+		"evidence_memory_ids": evidenceIDs,
 	})
 	return r.enqueueSelfModelDifference(
 		"self_model_difference",
 		"endogenous",
 		"近期真实经历已经积累成一次值得理解的自我模型差异。",
-		experience.ID,
+		memory.ID,
 		payload,
 		true,
 	)
 }
 
-func (r *Runtime) recentSelfModelEvidence(limit int) []Experience {
+func (r *Runtime) recentSelfModelEvidence(limit int) []Memory {
 	if limit <= 0 {
 		return nil
 	}
-	selected := make([]Experience, 0, limit)
-	for index := len(r.state.Experiences) - 1; index >= 0 && len(selected) < limit; index-- {
-		experience := r.state.Experiences[index]
-		if absFloat(experience.Values.SelfEndorsed) == 0 {
+	selected := make([]Memory, 0, limit)
+	for index := len(r.state.Memories) - 1; index >= 0 && len(selected) < limit; index-- {
+		memory := r.state.Memories[index]
+		if absFloat(memory.Values.SelfEndorsed) == 0 {
 			continue
 		}
-		selected = append(selected, experience)
+		selected = append(selected, memory)
 	}
 	for left, right := 0, len(selected)-1; left < right; left, right = left+1, right-1 {
 		selected[left], selected[right] = selected[right], selected[left]
@@ -751,7 +842,7 @@ func (r *Runtime) recentSelfModelEvidence(limit int) []Experience {
 // surfaces. A held self-model Concern is intentionally not included: long-lived
 // questions about identity or life rhythm must remain able to receive new
 // operational evidence. Otherwise the first durable self question would make
-// later fatigue, low-yield attention, and contradictory Experience invisible.
+// later fatigue, low-yield attention, and contradictory Memory invisible.
 func (r *Runtime) selfModelDifferenceCandidateActive() bool {
 	for _, event := range r.state.Background {
 		if event.Kind == "self_model_difference" && eventChainActive(event.Status) {
@@ -815,10 +906,26 @@ func (r *Runtime) formActionCommitment(leaseID string, profile CognitiveProfile,
 	if concern := r.concernByID(concernID); concern != nil {
 		concern.CommitmentID = commitment.ID
 	}
-	if len(r.state.Commitments) > maxCommitments {
-		r.state.Commitments = append([]ActionCommitment(nil), r.state.Commitments[len(r.state.Commitments)-maxCommitments:]...)
-	}
+	r.pruneCommitments()
 	return r.journal("action_committed", commitment.ID, commitment)
+}
+
+func (r *Runtime) pruneCommitments() {
+	excess := len(r.state.Commitments) - maxCommitments
+	if excess <= 0 {
+		return
+	}
+	kept := r.state.Commitments[:0]
+	for _, commitment := range r.state.Commitments {
+		// A deferred result can outlive many unrelated actions. Its causal
+		// identity is live work, not an old settled item in the history window.
+		if excess > 0 && commitment.Status == "assimilated" {
+			excess--
+			continue
+		}
+		kept = append(kept, commitment)
+	}
+	r.state.Commitments = kept
 }
 
 // validateActionProgress gives assimilated reality two small, factual
@@ -827,6 +934,9 @@ func (r *Runtime) formActionCommitment(leaseID string, profile CognitiveProfile,
 // not a new experiment merely because a different concern names it. Alice still
 // chooses the next substantive action and may use any genuinely changed request.
 func (r *Runtime) validateActionProgress(focusID string, action CognitiveAction, effectiveConcernIDs ...string) error {
+	if err := r.validateMentorCausalNovelty(action, time.Now().UTC()); err != nil {
+		return err
+	}
 	concernID := r.focusConcernID(focusID)
 	if len(effectiveConcernIDs) > 0 && strings.TrimSpace(effectiveConcernIDs[0]) != "" {
 		concernID = strings.TrimSpace(effectiveConcernIDs[0])
@@ -844,8 +954,8 @@ func (r *Runtime) validateActionProgress(focusID string, action CognitiveAction,
 		if reality == nil || previousKind != kind || previousRequest != request {
 			continue
 		}
-		experience := r.experienceForCommitment(commitment.ID)
-		if experience == nil {
+		memory := r.memoryForCommitment(commitment.ID)
+		if memory == nil {
 			continue
 		}
 		// Concern identity cannot manufacture progress, but it also cannot erase
@@ -857,15 +967,37 @@ func (r *Runtime) validateActionProgress(focusID string, action CognitiveAction,
 			return nil
 		}
 		if actionRequestFailed(previousAction) {
-			return errors.New("the exact organ request already failed or returned an unknown result; inspect reality and form a genuinely changed request")
+			return newActionProgressBoundary("the exact organ request already failed or returned an unknown result; inspect reality and form a genuinely changed request")
 		}
-		if experience.RemainingDifference > settledDifference {
+		if memory.RemainingDifference > settledDifference {
 			return nil
 		}
 		if commitment.ConcernID != concernID {
-			return errors.New("the same enacted request already returned a settled reality under another concern; a new concern does not reset embodied experience, so form a genuinely changed request")
+			return newActionProgressBoundary("the same enacted request already returned a settled reality under another concern; a new concern does not reset embodied memory, so form a genuinely changed request")
 		}
-		return errors.New("the same enacted request already returned a low-difference reality for this concern, and no new body or world fact has changed its conditions")
+		return newActionProgressBoundary("the same enacted request already returned a low-difference reality for this concern, and no new body or world fact has changed its conditions")
+	}
+	return nil
+}
+
+// Only exact recent unsolicited retransmission is mechanically knowable.
+// Lexical overlap cannot decide whether a new question or expression matters.
+func (r *Runtime) validateMentorCausalNovelty(action CognitiveAction, now time.Time) error {
+	if action.Kind != "mentor_send" || strings.TrimSpace(action.ReplyTo) != "" {
+		return nil
+	}
+	for index := len(r.state.Mentor.Outbox) - 1; index >= 0; index-- {
+		message := r.state.Mentor.Outbox[index]
+		if strings.TrimSpace(message.ReplyTo) != "" {
+			continue
+		}
+		queuedAt, err := time.Parse(time.RFC3339Nano, message.QueuedAt)
+		if err == nil && now.Sub(queuedAt) > mentorCausalReplayWindow {
+			break
+		}
+		if strings.TrimSpace(action.Text) == strings.TrimSpace(message.Body) {
+			return newActionProgressBoundary("this exact unsolicited message was already sent recently; its delivery remains recorded")
+		}
 	}
 	return nil
 }
@@ -900,19 +1032,19 @@ func actionRequestFailed(action *ActionState) bool {
 	return action != nil && action.Kind == "organ_action" && (action.Status == "failed" || action.Status == "unknown")
 }
 
-func (r *Runtime) experienceForCommitment(commitmentID string) *Experience {
-	for index := len(r.state.Experiences) - 1; index >= 0; index-- {
-		if r.state.Experiences[index].CommitmentID == commitmentID {
-			return &r.state.Experiences[index]
+func (r *Runtime) memoryForCommitment(commitmentID string) *Memory {
+	for index := len(r.state.Memories) - 1; index >= 0; index-- {
+		if r.state.Memories[index].CommitmentID == commitmentID {
+			return &r.state.Memories[index]
 		}
 	}
 	return nil
 }
 
-func (r *Runtime) experienceForFocus(focusID string) *Experience {
-	for index := len(r.state.Experiences) - 1; index >= 0; index-- {
-		if r.state.Experiences[index].FocusID == focusID {
-			return &r.state.Experiences[index]
+func (r *Runtime) memoryForFocus(focusID string) *Memory {
+	for index := len(r.state.Memories) - 1; index >= 0; index-- {
+		if r.state.Memories[index].FocusID == focusID {
+			return &r.state.Memories[index]
 		}
 	}
 	return nil
@@ -921,14 +1053,34 @@ func (r *Runtime) experienceForFocus(focusID string) *Experience {
 func (r *Runtime) materialRealityAfter(seq uint64, repeatedKind, repeatedRequest string) bool {
 	for index := range r.state.Background {
 		event := r.state.Background[index]
-		if event.Seq <= seq || event.Kind == "endogenous_change" {
+		if event.Seq <= seq {
 			continue
 		}
 		if event.Kind != "action_result" {
-			return true
+			// Internal pressure, reflection and resource bookkeeping can alter
+			// attention without changing the reality an earlier observation read.
+			// Only a newly observed body/world fact can reopen that settled request.
+			switch event.Kind {
+			case "mentor_received", "mentor_content", "environment_change", "body_delta", "perceptual_change", "reality_consequence":
+				return true
+			default:
+				continue
+			}
 		}
 		var action ActionState
-		if json.Unmarshal(event.Payload, &action) != nil || action.Kind != repeatedKind || normalizedActionStateRequest(action) != repeatedRequest {
+		if json.Unmarshal(event.Payload, &action) != nil {
+			// An undecodable observed result leaves its causal effect unknown.
+			return true
+		}
+		if action.Kind == repeatedKind && normalizedActionStateRequest(action) == repeatedRequest {
+			continue
+		}
+		// A pure read leaves its conditions unchanged. Orientation, a state
+		// change or an unknown effect may instead change what the next identical
+		// read observes. Permission to inspect these conditions is distinct from
+		// claiming valuable or persistent world change; contact-only self-sensing
+		// continues to use the stricter actionEffectIsContactOnly distinction.
+		if action.Effect != "observed" {
 			return true
 		}
 	}
@@ -1084,59 +1236,59 @@ func commitmentIDFromEvent(candidate Event) string {
 	return ""
 }
 
-func contributedExperienceIDFromEvent(candidate Event) string {
+func contributedMemoryIDFromEvent(candidate Event) string {
 	if candidate.Kind != "concern_contribution" || len(candidate.Payload) == 0 {
 		return ""
 	}
 	var payload struct {
-		ExperienceID string `json:"experience_id"`
+		MemoryID string `json:"memory_id"`
 	}
 	_ = json.Unmarshal(candidate.Payload, &payload)
-	return payload.ExperienceID
+	return payload.MemoryID
 }
 
-func selectContextExperiences(experiences []Experience, candidates []Event) []Experience {
-	if len(experiences) <= maxExperienceContext {
-		return append([]Experience(nil), experiences...)
+func selectContextMemories(memories []Memory, candidates []Event) []Memory {
+	if len(memories) <= maxMemoryContext {
+		return append([]Memory(nil), memories...)
 	}
 	wantedCommitments := make(map[string]bool)
-	wantedExperiences := make(map[string]bool)
+	wantedMemories := make(map[string]bool)
 	for _, candidate := range candidates {
 		if commitmentID := commitmentIDFromEvent(candidate); commitmentID != "" {
 			wantedCommitments[commitmentID] = true
 		}
-		if experienceID := contributedExperienceIDFromEvent(candidate); experienceID != "" {
-			wantedExperiences[experienceID] = true
+		if memoryID := contributedMemoryIDFromEvent(candidate); memoryID != "" {
+			wantedMemories[memoryID] = true
 		}
 	}
-	selected := make([]Experience, 0, maxExperienceContext)
+	selected := make([]Memory, 0, maxMemoryContext)
 	seen := make(map[string]bool)
-	for index := len(experiences) - 1; index >= 0; index-- {
-		experience := experiences[index]
-		if (wantedCommitments[experience.CommitmentID] || wantedExperiences[experience.ID]) && !seen[experience.ID] {
-			selected = append(selected, experience)
-			seen[experience.ID] = true
+	for index := len(memories) - 1; index >= 0; index-- {
+		memory := memories[index]
+		if (wantedCommitments[memory.CommitmentID] || wantedMemories[memory.ID]) && !seen[memory.ID] {
+			selected = append(selected, memory)
+			seen[memory.ID] = true
 		}
 	}
 	query := memoryQuery(candidates)
-	type scoredExperience struct {
-		experience Experience
-		score      float64
-		index      int
+	type scoredMemory struct {
+		memory Memory
+		score  float64
+		index  int
 	}
-	scored := make([]scoredExperience, 0, len(experiences))
-	for index, experience := range experiences {
-		if seen[experience.ID] {
+	scored := make([]scoredMemory, 0, len(memories))
+	for index, memory := range memories {
+		if seen[memory.ID] {
 			continue
 		}
 		// Causal recall needs what the body actually did, not only the meaning
 		// later written about it. A delayed regression often names the affected
-		// path or setting more precisely than the Experience summary; retaining
+		// path or setting more precisely than the Memory summary; retaining
 		// the enacted request in similarity lets Alice reconnect a present body
 		// change to her own earlier intervention without the kernel declaring a
 		// cause or choosing a correction.
-		text := strings.Join([]string{experience.EnactedRequest, experience.Meaning, experience.Lesson, experience.MethodUpdate}, " ")
-		scored = append(scored, scoredExperience{experience: experience, score: memorySimilarity(query, text), index: index})
+		text := strings.Join([]string{memory.EnactedRequest, memory.Meaning, memory.Lesson, memory.MethodUpdate}, " ")
+		scored = append(scored, scoredMemory{memory: memory, score: memorySimilarity(query, text), index: index})
 	}
 	sort.SliceStable(scored, func(left, right int) bool {
 		if scored[left].score == scored[right].score {
@@ -1145,11 +1297,11 @@ func selectContextExperiences(experiences []Experience, candidates []Event) []Ex
 		return scored[left].score > scored[right].score
 	})
 	for _, item := range scored {
-		if len(selected) >= maxExperienceContext {
+		if len(selected) >= maxMemoryContext {
 			break
 		}
-		selected = append(selected, item.experience)
-		seen[item.experience.ID] = true
+		selected = append(selected, item.memory)
+		seen[item.memory.ID] = true
 	}
 	return selected
 }
@@ -1157,9 +1309,52 @@ func selectContextExperiences(experiences []Experience, candidates []Event) []Ex
 func memoryQuery(candidates []Event) string {
 	parts := make([]string, 0, len(candidates)*2)
 	for _, candidate := range candidates {
+		if candidate.Kind == "value_signal" {
+			var p struct {
+				Surface string `json:"surface"`
+				Meaning string `json:"context_meaning"`
+			}
+			if json.Unmarshal(candidate.Payload, &p) == nil {
+				// Randomly associated history is a cue, not an explicit request
+				// to fill the entire recall window with this record's lineage.
+				parts = append(parts, p.Surface, p.Meaning)
+				continue
+			}
+		}
+		if candidate.Kind == "action_result" {
+			var action ActionState
+			if json.Unmarshal(candidate.Payload, &action) == nil {
+				parts = append(parts, action.Operation, action.Status, recallMaterial(action.Result))
+				continue
+			}
+		}
 		parts = append(parts, candidate.Summary, string(candidate.Payload))
 	}
 	return strings.Join(parts, " ")
+}
+
+// Transport envelopes repeat controls and implementation metadata. Recall
+// follows the returned material. The complete journal record and the existing
+// bounded factual projection are unchanged. This works for any organ.
+func recallMaterial(output string) string {
+	var envelope struct {
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if json.Unmarshal([]byte(output), &envelope) == nil && len(envelope.Content) > 0 {
+		parts := []string{}
+		for _, item := range envelope.Content {
+			if item.Type == "text" {
+				parts = append(parts, item.Text)
+			}
+		}
+		if len(parts) > 0 {
+			return strings.Join(parts, "\n")
+		}
+	}
+	return output
 }
 
 func memorySimilarity(left, right string) float64 {
@@ -1192,4 +1387,67 @@ func runeBigrams(value string) map[string]bool {
 		grams[string(runes[index:index+2])] = true
 	}
 	return grams
+}
+
+// methodProposalRedundant is a deterministic guard on the scarce durable
+// method slots. The main cognition still decides whether an Memory carries
+// a method and may explicitly revise one indexed slot. For an unindexed new
+// proposal, this guard only rejects strong lexical restatements; the complete
+// Memory remains available as evidence, so the kernel does not rewrite or
+// reinterpret Alice's meaning.
+func methodProposalRedundant(candidate string, methods []string) bool {
+	candidateBigrams := runeBigrams(candidate)
+	candidateRunes := normalizedRuneSet(candidate)
+	for _, method := range methods {
+		if strings.TrimSpace(candidate) == strings.TrimSpace(method) {
+			return true
+		}
+		methodBigrams := runeBigrams(method)
+		methodRunes := normalizedRuneSet(method)
+		bigramCommon := setIntersectionSize(candidateBigrams, methodBigrams)
+		bigramTotal := len(candidateBigrams) + len(methodBigrams)
+		bigramDice := 0.0
+		if bigramTotal > 0 {
+			bigramDice = 2 * float64(bigramCommon) / float64(bigramTotal)
+		}
+		shorterRuneSet := minInt(len(candidateRunes), len(methodRunes))
+		runeCoverage := 0.0
+		if shorterRuneSet > 0 {
+			runeCoverage = float64(setIntersectionSize(candidateRunes, methodRunes)) / float64(shorterRuneSet)
+		}
+		if bigramDice >= 0.34 || (bigramDice >= 0.20 && runeCoverage >= 0.45) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizedRuneSet(value string) map[string]bool {
+	result := make(map[string]bool)
+	for _, current := range []rune(strings.ToLower(value)) {
+		if unicode.IsLetter(current) || unicode.IsDigit(current) {
+			result[string(current)] = true
+		}
+	}
+	return result
+}
+
+func setIntersectionSize(left, right map[string]bool) int {
+	if len(left) > len(right) {
+		left, right = right, left
+	}
+	common := 0
+	for item := range left {
+		if right[item] {
+			common++
+		}
+	}
+	return common
+}
+
+func minInt(left, right int) int {
+	if left < right {
+		return left
+	}
+	return right
 }

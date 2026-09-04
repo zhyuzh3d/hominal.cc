@@ -114,7 +114,7 @@ func TestStageFourModelUsesOneForcedCognitiveCommit(t *testing.T) {
 		if !strings.Contains(input, `"user":"root"`) || !strings.Contains(input, `"home":"/root"`) || !strings.Contains(input, `"working_directory":"/agent/lives/`) || !strings.Contains(input, `"life_space":"/life"`) ||
 			!strings.Contains(input, `"desktop_home":"/home/hominal"`) || !strings.Contains(input, `"command":"hominal-browser"`) ||
 			!strings.Contains(input, `"operations":["browser_snapshot","browser_click"]`) ||
-			!strings.Contains(input, `"wechat_client"`) || !strings.Contains(input, `"mentor_channel"`) ||
+			!strings.Contains(input, `"wechat_client"`) || !strings.Contains(input, `"organ_surface":"process_state_only"`) || !strings.Contains(input, `"mentor_channel"`) ||
 			!strings.Contains(input, `"content_persistence":"cross_generation"`) || !strings.Contains(input, `"existing_content_role":"lineage_environment"`) ||
 			!strings.Contains(input, `"current_generation_publication_evidence"`) {
 			t.Fatalf("stage four did not make Alice's device, file and communication resources recoverable: %q", input)
@@ -148,8 +148,8 @@ func TestStageFourModelUsesOneForcedCognitiveCommit(t *testing.T) {
 	profile := CognitiveProfile{Model: "terra", ReasoningEffort: "medium"}
 	request := CognitiveRequest{
 		Lease: Lease{ID: "lease-1", Profile: profile}, Stage: 4,
-		Focus:      Event{ID: "event-1", Kind: "concern_contribution", Source: "experience", Summary: "one child advanced", ConcernID: "parent-concern", LastCommitErr: "previous focus was invalid"},
-		Candidates: []Event{{ID: "event-1", Kind: "concern_contribution", Source: "experience", Summary: "one child advanced", ConcernID: "parent-concern", LastCommitErr: "previous focus was invalid"}},
+		Focus:      Event{ID: "event-1", Kind: "concern_contribution", Source: "memory", Summary: "one child advanced", ConcernID: "parent-concern", LastCommitErr: "previous focus was invalid"},
+		Candidates: []Event{{ID: "event-1", Kind: "concern_contribution", Source: "memory", Summary: "one child advanced", ConcernID: "parent-concern", LastCommitErr: "previous focus was invalid"}},
 		State: State{
 			Mentor: MentorState{Received: map[string]uint64{}},
 			Body: BodySnapshot{Organs: map[string]OrganSnapshot{"browser": {
@@ -232,38 +232,38 @@ func TestCognitiveCommitSchemaBindsPresentCandidateFacts(t *testing.T) {
 	if got := resolution["enum"].([]string); len(got) != 3 || got[0] != "hold" || got[1] != "resolved" || got[2] != "released" {
 		t.Fatalf("concern lifecycle did not distinguish closure from chosen release: %#v", got)
 	}
-	experiences := properties["experience_updates"].(map[string]any)
-	if experiences["minItems"] != 1 || experiences["maxItems"] != 1 {
-		t.Fatalf("a real action result did not require one experience: %#v", experiences)
+	memories := properties["reality_updates"].(map[string]any)
+	if memories["minItems"] != 1 || memories["maxItems"] != 1 {
+		t.Fatalf("a real action result did not require one memory: %#v", memories)
 	}
-	experienceItems := experiences["items"].(map[string]any)
-	experienceProperties := experienceItems["properties"].(map[string]any)
-	commitmentID := experienceProperties["commitment_id"].(map[string]any)
+	memoryItems := memories["items"].(map[string]any)
+	memoryProperties := memoryItems["properties"].(map[string]any)
+	commitmentID := memoryProperties["commitment_id"].(map[string]any)
 	if got := commitmentID["enum"].([]string); len(got) != 1 || got[0] != "commitment-now" {
-		t.Fatalf("experience could name an unrelated commitment: %#v", got)
+		t.Fatalf("memory could name an unrelated commitment: %#v", got)
 	}
 
 	ordinary := cognitiveCommitTool(5, []Event{{ID: "mentor-now", Kind: "mentor_received"}}, true, true, true)
 	ordinaryProperties := ordinary["parameters"].(map[string]any)["properties"].(map[string]any)
-	ordinaryExperiences := ordinaryProperties["experience_updates"].(map[string]any)
-	if ordinaryExperiences["minItems"] != 0 || ordinaryExperiences["maxItems"] != 0 {
-		t.Fatalf("a non-reality focus could invent an experience: %#v", ordinaryExperiences)
+	ordinaryMemories := ordinaryProperties["reality_updates"].(map[string]any)
+	if ordinaryMemories["minItems"] != 0 || ordinaryMemories["maxItems"] != 0 {
+		t.Fatalf("a non-reality focus could invent an memory: %#v", ordinaryMemories)
 	}
 	feedbackPayload, _ := json.Marshal(map[string]string{"commitment_id": "commitment-now"})
 	feedback := cognitiveCommitTool(8, []Event{{ID: "mentor-reply", Kind: "mentor_received", Payload: feedbackPayload}}, false, true, true)
 	feedbackProperties := feedback["parameters"].(map[string]any)["properties"].(map[string]any)
-	feedbackExperiences := feedbackProperties["experience_updates"].(map[string]any)
-	if feedbackExperiences["minItems"] != 1 || feedbackExperiences["maxItems"] != 1 {
-		t.Fatalf("linked delayed mentor feedback did not require one experience: %#v", feedbackExperiences)
+	feedbackMemories := feedbackProperties["reality_updates"].(map[string]any)
+	if feedbackMemories["minItems"] != 1 || feedbackMemories["maxItems"] != 1 {
+		t.Fatalf("linked delayed mentor feedback did not require one memory: %#v", feedbackMemories)
 	}
 	mixed := cognitiveCommitTool(8, []Event{
 		{ID: "mentor-reply", Kind: "mentor_received", Payload: feedbackPayload},
 		{ID: "own-concern", Kind: "concern"},
 	}, false, true, true)
 	mixedProperties := mixed["parameters"].(map[string]any)["properties"].(map[string]any)
-	mixedExperiences := mixedProperties["experience_updates"].(map[string]any)
-	if mixedExperiences["minItems"] != 0 || mixedExperiences["maxItems"] != 1 {
-		t.Fatalf("background feedback forced an experience onto an independently selected focus: %#v", mixedExperiences)
+	mixedMemories := mixedProperties["reality_updates"].(map[string]any)
+	if mixedMemories["minItems"] != 0 || mixedMemories["maxItems"] != 1 {
+		t.Fatalf("background feedback forced an memory onto an independently selected focus: %#v", mixedMemories)
 	}
 }
 
@@ -290,6 +290,30 @@ func TestStageTenSchemaCarriesPluralValuesAndLocksUngroundedOrientation(t *testi
 	}
 }
 
+func TestCognitiveSchemaKeepsOneBodyActionWhileAnOrganIsBusy(t *testing.T) {
+	tool := cognitiveCommitToolWithLinks(
+		10,
+		[]Event{{ID: "other-reality", Kind: "mentor_content"}},
+		false,
+		true,
+		true,
+		false,
+		nil,
+		nil,
+		nil,
+	)
+	encoded, err := json.Marshal(tool["parameters"].(map[string]any)["properties"].(map[string]any)["action"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), `"organ_action"`) {
+		t.Fatalf("a second body action remained available while an organ was busy: %s", encoded)
+	}
+	if !strings.Contains(string(encoded), `"mentor_send"`) || !strings.Contains(string(encoded), `"none"`) {
+		t.Fatalf("non-body cognition disappeared while an organ was busy: %s", encoded)
+	}
+}
+
 func TestNewIndependentConcernCanChooseAStableBroaderContext(t *testing.T) {
 	parent := Concern{
 		ID: "shared-experiment", OriginKind: "mentor_received", Meaning: "共同实验仍在进行",
@@ -310,7 +334,7 @@ func TestNewIndependentConcernCanChooseAStableBroaderContext(t *testing.T) {
 	if len(contributable) != 1 || contributable[0] != parent.ID {
 		t.Fatalf("an independent reality fact could not affect a visible self-owned concern: %#v", contributable)
 	}
-	tool := cognitiveCommitToolWithLinks(9, []Event{child, visibleParent}, false, true, true, continuable, within, contributable)
+	tool := cognitiveCommitToolWithLinks(9, []Event{child, visibleParent}, false, true, true, true, continuable, within, contributable)
 	properties := tool["parameters"].(map[string]any)["properties"].(map[string]any)
 	context := properties["within_concern_id"].(map[string]any)
 	if got := context["enum"].([]string); len(got) != 2 || got[1] != parent.ID {
@@ -550,8 +574,11 @@ func TestLLMServerAdapterUsesNativeFunctionCognitionAndConfirmedServerBill(t *te
 		if strings.Contains(instructions, "不提供 function tool") || strings.Contains(instructions, "请只输出一个 JSON 对象") {
 			t.Fatal("obsolete prompt-emulated tool contract remained in native cognition")
 		}
+		if !strings.Contains(instructions, "价值判断也容纳生成性") || !strings.Contains(instructions, "长期结果由行动后的后果检验") {
+			t.Fatal("stage ten still required social or experiential value to be proven before a reversible action")
+		}
 		extension, _ := body["llmserver"].(map[string]any)
-		if !strings.HasPrefix(extension["idempotency_key"].(string), "hominal:llmserver-life:llmserver-focus:") {
+		if !strings.HasPrefix(extension["idempotency_key"].(string), "hominal:llmserver-life:llmserver-focus:lease-local:") {
 			t.Fatalf("missing stable llmserver idempotency key: %#v", extension)
 		}
 		writer.Header().Set("X-LLMServer-Request-ID", "req-confirmed")
@@ -631,10 +658,14 @@ func TestLLMServerUnconfirmedBillRejectsCognitionWithoutInventingSpend(t *testin
 }
 
 func TestLLMServerIdempotencyAndDecimalBillingAreStrict(t *testing.T) {
-	request := CognitiveRequest{State: State{InstanceID: "alice"}, Focus: Event{ID: "focus"}}
+	request := CognitiveRequest{State: State{InstanceID: "alice"}, Focus: Event{ID: "focus"}, Lease: Lease{ID: "lease-one"}}
 	first := llmserverIdempotencyKey(request, []byte(`{"x":1}`))
 	if first != llmserverIdempotencyKey(request, []byte(`{"x":1}`)) || first == llmserverIdempotencyKey(request, []byte(`{"x":2}`)) {
 		t.Fatal("llmserver idempotency key was unstable or ignored request identity")
+	}
+	request.Lease.ID = "lease-two"
+	if first == llmserverIdempotencyKey(request, []byte(`{"x":1}`)) {
+		t.Fatal("a later cognition lease reused a definitively failed llmserver request identity")
 	}
 	for _, value := range []struct {
 		decimal string
@@ -647,17 +678,13 @@ func TestLLMServerIdempotencyAndDecimalBillingAreStrict(t *testing.T) {
 	}
 }
 
-func TestLLMServerRetriesTransientGatewayFailureWithTheSameRequest(t *testing.T) {
-	requests := make([]string, 0, 2)
+func TestLLMServerPreservesDefinitiveGatewayFailureWithoutIdempotencyReplay(t *testing.T) {
+	requests := make([]string, 0, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		data, _ := io.ReadAll(request.Body)
 		requests = append(requests, string(data))
-		if len(requests) == 1 {
-			writer.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = writer.Write([]byte(`{"error":{"message":"warming"}}`))
-			return
-		}
-		_ = json.NewEncoder(writer).Encode(map[string]any{"id": "retry-ok"})
+		writer.WriteHeader(http.StatusBadGateway)
+		_, _ = writer.Write([]byte(`{"error":{"code":"provider_start_failed","message":"provider unavailable"}}`))
 	}))
 	defer server.Close()
 	client := NewModelClient()
@@ -668,8 +695,8 @@ func TestLLMServerRetriesTransientGatewayFailureWithTheSameRequest(t *testing.T)
 		t.Fatal(err)
 	}
 	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK || len(requests) != 2 || requests[0] != requests[1] {
-		t.Fatalf("bounded retry changed the request or did not recover: status=%d requests=%q", response.StatusCode, requests)
+	if response.StatusCode != http.StatusBadGateway || len(requests) != 1 {
+		t.Fatalf("a definitive server failure was replayed into an idempotency conflict: status=%d requests=%q", response.StatusCode, requests)
 	}
 }
 
@@ -732,22 +759,22 @@ func TestStageFiveCommitSchemaCarriesRealityLearningFields(t *testing.T) {
 			t.Fatalf("stage-five action omitted %s", field)
 		}
 	}
-	if _, exists := properties["experience_updates"]; !exists {
-		t.Fatal("stage-five commit omitted experience_updates")
+	if _, exists := properties["reality_updates"]; !exists {
+		t.Fatal("stage-five commit omitted reality_updates")
 	}
-	experienceUpdates := properties["experience_updates"].(map[string]any)
-	experienceItem := experienceUpdates["items"].(map[string]any)
-	experienceProperties := experienceItem["properties"].(map[string]any)
-	if _, exists := experienceProperties["method_slot"]; !exists {
+	memoryUpdates := properties["reality_updates"].(map[string]any)
+	memoryItem := memoryUpdates["items"].(map[string]any)
+	memoryProperties := memoryItem["properties"].(map[string]any)
+	if _, exists := memoryProperties["method_slot"]; !exists {
 		t.Fatal("stage-five commit did not let Alice choose durable method replacement")
 	}
 	required := parameters["required"].([]string)
 	found := false
 	for _, field := range required {
-		found = found || field == "experience_updates"
+		found = found || field == "reality_updates"
 	}
 	if !found {
-		t.Fatal("stage-five strict schema does not require experience_updates")
+		t.Fatal("stage-five strict schema does not require reality_updates")
 	}
 }
 
@@ -787,11 +814,11 @@ func TestStageEightNarrativeUpdateBelongsToWholeCognitiveCommit(t *testing.T) {
 	if _, exists := properties["narrative_update"]; !exists {
 		t.Fatal("stage-eight commit omitted the common narrative update path")
 	}
-	experienceUpdates := properties["experience_updates"].(map[string]any)
-	experienceItem := experienceUpdates["items"].(map[string]any)
-	experienceProperties := experienceItem["properties"].(map[string]any)
-	if _, exists := experienceProperties["narrative_update"]; exists {
-		t.Fatal("narrative update remained trapped inside the one-shot reality experience")
+	memoryUpdates := properties["reality_updates"].(map[string]any)
+	memoryItem := memoryUpdates["items"].(map[string]any)
+	memoryProperties := memoryItem["properties"].(map[string]any)
+	if _, exists := memoryProperties["narrative_update"]; exists {
+		t.Fatal("narrative update remained trapped inside the one-shot reality memory")
 	}
 	found := false
 	for _, field := range parameters["required"].([]string) {
@@ -872,6 +899,15 @@ func TestDynamicCommitSchemaKeepsActionChoiceAtMatureExploration(t *testing.T) {
 	if !requestAllowsMentorSend(request) {
 		t.Fatal("an earlier message removed a normal relationship affordance")
 	}
+	request.State.Mentor.Outbox = []MentorMessage{{MessageID: "alice-unread", Status: "queued"}}
+	if !requestAllowsMentorSend(request) {
+		t.Fatal("an unread message was mistaken for an executing send")
+	}
+	request.State.Mentor.Outbox[0].RepliedAt = nowUTC()
+	if !requestAllowsMentorSend(request) {
+		t.Fatal("an actual reply did not reopen the serial mentor relationship")
+	}
+	request.State.Mentor.Outbox = nil
 	openTool := cognitiveCommitTool(8, []Event{exploration}, false, true, requestAllowsMentorSend(request))
 	kinds = cognitiveActionKinds(t, openTool)
 	foundMentor := false
@@ -904,14 +940,27 @@ func TestDynamicCommitSchemaKeepsActionChoiceAtMatureExploration(t *testing.T) {
 	linkedReply := Event{ID: "mentor-linked-reply", Kind: "mentor_received", Payload: linkedPayload}
 	linkedRequest := request
 	linkedRequest.Focus = linkedReply
-	linkedRequest.Candidates = []Event{linkedReply}
+	linkedRequest.Candidates = []Event{linkedReply, {ID: "peripheral", Kind: "perceptual_change"}}
 	if requestAllowsMentorSend(linkedRequest) {
-		t.Fatal("linked mentor feedback could reply before its content pass")
+		t.Fatal("background candidates reopened a reply while linked mentor feedback was still Reality")
 	}
-	linkedTool := cognitiveCommitTool(8, []Event{linkedReply}, false, true, requestAllowsMentorSend(linkedRequest))
-	for _, kind := range cognitiveActionKinds(t, linkedTool) {
-		if kind == "mentor_send" {
-			t.Fatal("linked mentor feedback exposed a duplicate mentor_send action")
+	linkedTool := cognitiveCommitTool(8, linkedRequest.Candidates, false, true, requestAllowsMentorSend(linkedRequest))
+	linkedKinds := cognitiveActionKinds(t, linkedTool)
+	if len(linkedKinds) != 1 || linkedKinds[0] != "none" {
+		t.Fatalf("linked mentor feedback exposed an enactive action before its content pass: %v", linkedKinds)
+	}
+
+	contentPayload, _ := json.Marshal(map[string]string{"message_id": "codex-message-1"})
+	contentTool := cognitiveCommitTool(8, []Event{{ID: "mentor-content", Kind: "mentor_content", Payload: contentPayload}}, false, true, true)
+	contentAction := contentTool["parameters"].(map[string]any)["properties"].(map[string]any)["action"].(map[string]any)
+	for _, rawBranch := range contentAction["anyOf"].([]any) {
+		properties := rawBranch.(map[string]any)["properties"].(map[string]any)
+		if properties["kind"].(map[string]any)["enum"].([]string)[0] != "mentor_send" {
+			continue
+		}
+		replies := properties["reply_to"].(map[string]any)["enum"].([]string)
+		if len(replies) != 2 || replies[0] != "" || replies[1] != "codex-message-1" {
+			t.Fatalf("mentor content exposed untrusted reply targets: %#v", replies)
 		}
 	}
 
@@ -958,12 +1007,12 @@ func TestModelFactPayloadKeepsTheKernelOrganAgnosticAndBounded(t *testing.T) {
 }
 
 func TestEnactedActionMemoryKeepsDistinctSettledRequests(t *testing.T) {
-	experiences := []Experience{
+	memories := []Memory{
 		{ActionKind: "organ_action", EnactedRequest: normalizedOrganRequest("browser", "list", `{}`), ObservedAt: "one", RemainingDifference: 0.04},
 		{ActionKind: "organ_action", EnactedRequest: normalizedOrganRequest("system", "exec", "uname -a"), ObservedAt: "two", RemainingDifference: 0.03},
 		{ActionKind: "organ_action", EnactedRequest: normalizedOrganRequest("browser", "list", `{}`), ObservedAt: "three", RemainingDifference: 0.02},
 	}
-	views := contextEnactedActionViews(experiences)
+	views := contextEnactedActionViews(memories)
 	if len(views) != 2 {
 		t.Fatalf("action memory length = %d, want two distinct requests", len(views))
 	}
@@ -974,7 +1023,7 @@ func TestEnactedActionMemoryKeepsDistinctSettledRequests(t *testing.T) {
 
 func TestIndexedSelfViewKeepsMethodConnectedToItsCausalOrigin(t *testing.T) {
 	method := "外部关系可以提供事实和边界，具体方向由我形成。"
-	experiences := []Experience{
+	memories := []Memory{
 		{
 			ActionKind: "mentor_send", EnactedRequest: "请替我选择下一件事。",
 			SourceKind: "action_result", ObservedAt: "earlier", MethodUpdate: method,
@@ -986,7 +1035,7 @@ func TestIndexedSelfViewKeepsMethodConnectedToItsCausalOrigin(t *testing.T) {
 			Lesson: "换一种措辞仍然把对象来源交给了外部。", PredictionDifference: 0.08, RemainingDifference: 0.5,
 		},
 	}
-	view := indexedSelfView(SelfState{Methods: []string{method}}, experiences)
+	view := indexedSelfView(SelfState{Methods: []string{method}}, memories)
 	methods := view["methods"].([]map[string]any)
 	if len(methods) != 1 {
 		t.Fatalf("method view length = %d, want one", len(methods))
@@ -1001,7 +1050,7 @@ func TestIndexedSelfViewKeepsMethodConnectedToItsCausalOrigin(t *testing.T) {
 }
 
 func TestIndexedSelfViewDoesNotInventMethodOrigins(t *testing.T) {
-	view := indexedSelfView(SelfState{Methods: []string{"尚无经验锚点的方法"}}, []Experience{{MethodUpdate: "另一条方法"}})
+	view := indexedSelfView(SelfState{Methods: []string{"尚无经验锚点的方法"}}, []Memory{{MethodUpdate: "另一条方法"}})
 	methods := view["methods"].([]map[string]any)
 	if _, exists := methods[0]["causal_origin"]; exists {
 		t.Fatalf("unmatched method received an invented origin: %#v", methods[0])
