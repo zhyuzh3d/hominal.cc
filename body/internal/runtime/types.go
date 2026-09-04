@@ -262,6 +262,7 @@ type ActionState struct {
 	ID                          string `json:"id"`
 	LeaseID                     string `json:"lease_id"`
 	CommitmentID                string `json:"commitment_id,omitempty"`
+	ConcernID                   string `json:"concern_id,omitempty"`
 	Kind                        string `json:"kind"`
 	OrganID                     string `json:"organ_id,omitempty"`
 	Operation                   string `json:"operation,omitempty"`
@@ -584,6 +585,7 @@ type RealityUpdate struct {
 type Memory struct {
 	ID                   string     `json:"id"`
 	CommitmentID         string     `json:"commitment_id"`
+	ConcernID            string     `json:"concern_id,omitempty"`
 	FocusID              string     `json:"focus_id"`
 	SourceKind           string     `json:"source_kind,omitempty"`
 	ActionKind           string     `json:"action_kind"`

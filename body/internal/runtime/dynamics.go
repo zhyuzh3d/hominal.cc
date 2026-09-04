@@ -1224,8 +1224,13 @@ func (r *Runtime) annotateActionAssistanceOpportunity(action *ActionState, conce
 			if json.Unmarshal(event.Payload, &previous) != nil || previous.Kind != "organ_action" {
 				continue
 			}
-			commitment := r.commitmentByID(previous.CommitmentID)
-			if commitment == nil || commitment.ConcernID != concernID {
+			previousConcernID := previous.ConcernID
+			if previousConcernID == "" {
+				if commitment := r.commitmentByID(previous.CommitmentID); commitment != nil {
+					previousConcernID = commitment.ConcernID
+				}
+			}
+			if previousConcernID != concernID {
 				continue
 			}
 			if previous.Status == "failed" || previous.Status == "unknown" {
@@ -1252,8 +1257,13 @@ func (r *Runtime) annotateActionAssistanceOpportunity(action *ActionState, conce
 			if memory.ActionKind != "organ_action" {
 				continue
 			}
-			commitment := r.commitmentByID(memory.CommitmentID)
-			if commitment == nil || commitment.ConcernID != concernID {
+			memoryConcernID := memory.ConcernID
+			if memoryConcernID == "" {
+				if commitment := r.commitmentByID(memory.CommitmentID); commitment != nil {
+					memoryConcernID = commitment.ConcernID
+				}
+			}
+			if memoryConcernID != concernID {
 				continue
 			}
 			var enacted struct {
@@ -2945,6 +2955,7 @@ func (r *Runtime) startStage4Action(ctx context.Context, leaseID string, action 
 			StartedAt:    nowUTC(),
 		}
 		if commitment := r.commitmentByID(action.CommitmentID); commitment != nil {
+			r.state.PendingAction.ConcernID = commitment.ConcernID
 			commitment.ActionID = actionID
 			commitment.Status = "acting"
 		}
@@ -3018,6 +3029,10 @@ func (r *Runtime) handleStage4ActionResult(ctx context.Context, result ActionRes
 	completedConcernID := ""
 	if commitment := r.commitmentByID(completed.CommitmentID); commitment != nil {
 		completedConcernID = commitment.ConcernID
+		completed.ConcernID = completedConcernID
+		r.annotateActionAssistanceOpportunity(&completed, completedConcernID)
+	} else if completed.ConcernID != "" {
+		completedConcernID = completed.ConcernID
 		r.annotateActionAssistanceOpportunity(&completed, completedConcernID)
 	}
 	if err := r.journal("action_"+completed.Status, completed.ID, map[string]any{"kind": completed.Kind, "organ_id": completed.OrganID, "operation": completed.Operation, "result": completed.Result}); err != nil {

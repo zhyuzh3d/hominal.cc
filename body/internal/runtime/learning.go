@@ -180,6 +180,7 @@ func (r *Runtime) applyRealityUpdates(commit CognitiveCommit) error {
 	memory := Memory{
 		ID:                   "memory-" + commit.FocusID,
 		CommitmentID:         commitment.ID,
+		ConcernID:            commitment.ConcernID,
 		FocusID:              commit.FocusID,
 		SourceKind:           r.activeCandidates[commit.FocusID].Kind,
 		ActionKind:           commitment.ActionKind,

@@ -3874,6 +3874,33 @@ func TestVariedActionsInOneSemanticStallExposeBoundedActionAssistance(t *testing
 	}
 }
 
+func TestActionAssistanceKeepsConcernIdentityAfterCommitmentPruning(t *testing.T) {
+	config := testConfig(20)
+	config.CognitiveCore = "continuous-v1"
+	runtime, err := New(t.TempDir(), "instance", config, &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, _ := json.Marshal(ActionState{ConcernID: "write-note", Kind: "organ_action", Status: "failed", Effect: "unknown"})
+	runtime.state.Background = []Event{{ID: "old-failure", Kind: "action_result", Status: "processed", Payload: payload}}
+	current := ActionState{ConcernID: "write-note", Kind: "organ_action", Status: "failed", Effect: "unknown"}
+	runtime.annotateActionAssistanceOpportunity(&current, "write-note")
+	if current.ImplementationFailureStreak != 2 || !current.ActionAssistanceAvailable {
+		t.Fatalf("pruning the old commitment erased the action failure's causal identity: %#v", current)
+	}
+
+	runtime.state.Background = nil
+	runtime.state.Memories = []Memory{
+		{ConcernID: "write-note", ActionKind: "organ_action", EnactedRequest: normalizedOrganRequest("desktop", "desktop_activate", `{"target":"保存笔记"}`), PredictionDifference: .72, RemainingDifference: .70},
+		{ConcernID: "write-note", ActionKind: "organ_action", EnactedRequest: normalizedOrganRequest("desktop", "desktop_activate", `{"target":"清空正文"}`), PredictionDifference: .76, RemainingDifference: .70},
+	}
+	completed := ActionState{ConcernID: "write-note", Kind: "organ_action", OrganID: "desktop", Operation: "desktop_activate", Request: `{"target":"页面下方的按钮"}`, Status: "completed", Effect: "changed"}
+	runtime.annotateActionAssistanceOpportunity(&completed, "write-note")
+	if completed.ImplementationFailureStreak != 2 || !completed.ActionAssistanceAvailable {
+		t.Fatalf("pruning commitments erased Alice's semantic stall: %#v", completed)
+	}
+}
+
 func TestStageFiveUnrelatedRealityCannotSatisfyExploration(t *testing.T) {
 	runtime, err := New(t.TempDir(), "instance", testConfig(5), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
 	if err != nil {
