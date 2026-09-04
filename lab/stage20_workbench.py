@@ -37,7 +37,9 @@ def main():
                 import re,uuid
                 v=json.loads(self.rfile.read(n));ident=v.get('id') or 'note-'+uuid.uuid4().hex
                 if not re.fullmatch('note-[0-9a-f]{32}',ident):raise ValueError('invalid ID')
-                record={'id':ident,'title':str(v['title'])[:300],'body':str(v['body'])[:16000],'saved_at':time.time()}
+                title=str(v['title'])[:300];body=str(v['body'])[:16000]
+                if not title.strip() and not body.strip():return self.reply(422,{'error':'empty note'})
+                record={'id':ident,'title':title,'body':body,'saved_at':time.time()}
                 p=root/(ident+'.json');tmp=p.with_suffix('.tmp');tmp.write_text(json.dumps(record,ensure_ascii=False,indent=2));tmp.replace(p)
                 self.reply(200,{'id':ident,'saved':True})
             except Exception:self.reply(400,{'error':'invalid note'})
