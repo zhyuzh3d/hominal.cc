@@ -8,6 +8,8 @@ import (
 const stateSchema = "hominal.runtime.state/v1"
 
 type Config struct {
+	CognitiveCore           string                  `json:"cognitive_core,omitempty"`
+	Platform                PlatformConfig          `json:"platform,omitempty"`
 	Stage                   int                     `json:"stage"`
 	Engineering             bool                    `json:"engineering"`
 	GenerationKind          string                  `json:"generation_kind"`

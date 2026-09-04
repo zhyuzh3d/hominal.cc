@@ -36,11 +36,11 @@ func main() {
 	switch os.Args[1] {
 	case "describe":
 		write(organ.Description{
-			Schema: organ.DescriptionSchema, ID: id, Name: "Ubuntu system", Command: "system",
+			Schema: organ.DescriptionSchema, ID: id, Name: envOr("HOMINAL_PLATFORM_NAME", "Linux") + " system", Command: "system",
 			Capabilities:    []string{"observe", "perform", "cancel", "body_state", "filesystem", "process", "network", "software"},
 			Operations:      []string{"exec"},
 			OperationInputs: map[string]string{"exec": "直接填写完整 bash 源码字符串，例如：pwd；不要包成 JSON 对象。"},
-			Guidance:        "system 提供 Ubuntu 主机、存储、网络、桌面与进程事实。行动时从 operations 选择 exec，并在 input 中写入以 root 身份执行的 bash 源码。",
+			Guidance:        "system 提供当前主机、存储、网络、桌面与进程事实。exec接收bash源码，按实际进程身份执行；无自动提权。",
 		})
 	case "health":
 		write(organ.Health{Schema: organ.HealthSchema, ID: id, Status: "ready", Accepting: true})
@@ -61,10 +61,10 @@ func observe(id string) organ.Observation {
 	facts := map[string]any{
 		"uptime_seconds":      readUptime(),
 		"root_free_bytes":     freeBytes("/"),
-		"agent_free_bytes":    freeBytes("/agent"),
+		"agent_free_bytes":    freeBytes(envOr("HOMINAL_DATA_ROOT", "/agent")),
 		"network_available":   network.Reachable,
 		"network_probe":       network,
-		"desktop_available":   commandSucceeds(2*time.Second, "systemctl", "is-active", "--quiet", "lightdm"),
+		"desktop_available":   commandSucceeds(2*time.Second, "systemctl", "is-active", "--quiet", envOr("HOMINAL_DESKTOP_SERVICE", "lightdm")),
 		"wechat_running":      commandSucceeds(2*time.Second, "pgrep", "-f", "(^|/)wechat( |$)"),
 		"clash_verge_running": commandSucceeds(2*time.Second, "systemctl", "is-active", "--quiet", "clash-verge-service.service"),
 	}

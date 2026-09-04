@@ -123,6 +123,17 @@ func (r *Runtime) handleModelNotice(notice WorkerNotice) error {
 			break
 		}
 		lease.ReservedMicrousd = reservation.ReservedMicrousd
+		if r.config.Stage == 20 {
+			// A new individual must still account for requests interrupted before
+			// their bill arrived. Only the live state counts in-flight reservations;
+			// the shared durable ledger keeps a conservative recovery record.
+			provisional := UsageRecord{CallID: key, LeaseID: lease.ID, Time: nowUTC(), RequestedModel: lease.Profile.Model,
+				ReasoningEffort: lease.Profile.ReasoningEffort, ReservedMicrousd: reservation.ReservedMicrousd,
+				ActualMicrousd: reservation.ReservedMicrousd, Status: "reservation_unsettled"}
+			if err := r.store.AppendUsage(provisional); err != nil {
+				return err
+			}
+		}
 		if r.state.ModelReservations == nil {
 			r.state.ModelReservations = map[string]PendingModelCall{}
 		}

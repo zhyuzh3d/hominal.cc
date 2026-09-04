@@ -23,3 +23,5 @@
 
 # Reproducible build artifacts are regenerated from frozen source.
 /dist/
+
+**/__pycache__/

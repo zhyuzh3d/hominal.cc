@@ -1,3 +1,7 @@
+# Hominal Stage 20.0 · A1X independent line
+
+This checkout continues on A1X with a visual desktop organ and a separate laboratory. Use `python3 lab/stage20.py --help`. The plans are `plans/stage-20.0-development.md` and `plans/stage-20.0-experiments.md`; actual evidence is recorded in `plans/stage-20.0-results.md`. Private state lives outside this checkout. Legacy Lab below is frozen historical documentation and its entry point refuses execution here.
+
 # Hominal.cc
 
 Hominal.cc 是一个极简的成人级高级认知生命创生实验项目，目标是在真实有限的 Ubuntu 身体中，以 Proto-Hominal（候生体）为 G0 形态，构造能够持续产生意识表现行为、内生张力、具身行动、个人连续性并接受现实后果修正的认知组织。

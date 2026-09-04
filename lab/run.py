@@ -86,6 +86,9 @@ def model_gateway_settings(llm: dict[str, object]) -> dict[str, str]:
     }
 
 
+if __name__ == "__main__" and (ROOT / "lineage/stage20-fork.json").exists():
+    raise SystemExit("This is the isolated Stage20 checkout. Use python3 lab/stage20.py; legacy Lab is archival source only.")
+
 SETTINGS = load_settings()
 HOST = str(SETTINGS["host"])
 ARCHIVE_ROOT = Path(SETTINGS["archive"])

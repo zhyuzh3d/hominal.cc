@@ -56,8 +56,11 @@ func New(instanceRoot, instanceID string, config Config, cognizer Cognizer) (*Ru
 	if instanceID == "" {
 		return nil, errors.New("instance id is required")
 	}
-	if config.Stage != 3 && config.Stage != 4 && config.Stage != 5 && config.Stage != 8 && config.Stage != 9 && config.Stage != 10 {
+	if config.Stage != 20 && config.Stage != 3 && config.Stage != 4 && config.Stage != 5 && config.Stage != 8 && config.Stage != 9 && config.Stage != 10 {
 		return nil, fmt.Errorf("unsupported runtime stage %d", config.Stage)
+	}
+	if config.Stage == 20 && config.CognitiveCore != "continuous-v1" {
+		return nil, errors.New("stage20 requires continuous-v1 cognitive core")
 	}
 	if config.GenerationKind == "" {
 		config.GenerationKind = "engineering"
@@ -65,7 +68,7 @@ func New(instanceRoot, instanceID string, config Config, cognizer Cognizer) (*Ru
 	switch config.GenerationKind {
 	case "engineering":
 	case "rehearsal", "formal":
-		if config.Stage != 5 && config.Stage != 8 && config.Stage != 9 && config.Stage != 10 {
+		if config.Stage != 20 && config.Stage != 5 && config.Stage != 8 && config.Stage != 9 && config.Stage != 10 {
 			return nil, errors.New("rehearsal and formal generations require the stage-five, stage-eight, stage-nine, or stage-ten cognition core")
 		}
 		if config.GenerationWindowSeconds <= 0 {
@@ -148,6 +151,9 @@ func New(instanceRoot, instanceID string, config Config, cognizer Cognizer) (*Ru
 	}
 	organRegistry.SetEnvironment(map[string]string{
 		"HOMINAL_NETWORK_PROBE_URL": config.ModelGateway.BaseURL,
+		"HOMINAL_DATA_ROOT":         config.Platform.DataRoot,
+		"HOMINAL_PLATFORM_NAME":     config.Platform.OS,
+		"HOMINAL_DESKTOP_SERVICE":   config.Platform.DesktopService,
 	})
 	runtime := &Runtime{
 		instanceRoot:      instanceRoot,

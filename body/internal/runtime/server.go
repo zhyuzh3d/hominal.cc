@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-const mentorSocketPath = "/run/hominal/hominal.sock"
+var mentorSocketPath = runtimeSocketPath()
 
 const (
 	mentorCommandEnqueueTimeout = 3 * time.Second
@@ -180,6 +180,9 @@ func (h *mentorHandler) command(writer http.ResponseWriter, request *http.Reques
 }
 
 func setSocketAccess(path string) error {
+	if os.Geteuid() != 0 {
+		return os.Chmod(path, 0o600)
+	}
 	gid, err := hominalGroupID()
 	if err != nil {
 		return err
@@ -191,6 +194,9 @@ func setSocketAccess(path string) error {
 }
 
 func setRuntimeDirectoryAccess(path string) error {
+	if os.Geteuid() != 0 {
+		return os.Chmod(path, 0o700)
+	}
 	gid, err := hominalGroupID()
 	if err != nil {
 		return err
