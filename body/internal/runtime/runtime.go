@@ -1594,7 +1594,7 @@ func (r *Runtime) setGenerationIdentity(at time.Time) {
 	}
 	r.state.T0 = at.UTC().Format(time.RFC3339Nano)
 	shanghai := at.In(time.FixedZone("Asia/Shanghai", 8*60*60))
-	r.state.SampleID = fmt.Sprintf("alice%02d%02d%c", int(shanghai.Month()), shanghai.Day(), rune('a'+shanghai.Hour()))
+	r.state.SampleID = fmt.Sprintf("alice%02d%02d-%02d%02d%02d", int(shanghai.Month()), shanghai.Day(), shanghai.Hour(), shanghai.Minute(), shanghai.Second())
 	r.state.PlannedEnd = at.UTC().Add(time.Duration(r.config.GenerationWindowSeconds) * time.Second).Format(time.RFC3339Nano)
 }
 

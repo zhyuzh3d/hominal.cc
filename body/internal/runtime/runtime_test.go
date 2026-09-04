@@ -177,14 +177,14 @@ func TestBirthOrientationBecomesBackgroundFactExactlyOnce(t *testing.T) {
 	}
 }
 
-func TestGenerationIdentityUsesShanghaiHourAndIsIdempotent(t *testing.T) {
+func TestGenerationIdentityUsesShanghaiTimeAndIsIdempotent(t *testing.T) {
 	runtime, err := New(t.TempDir(), "instance", rehearsalConfig(), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
 	if err != nil {
 		t.Fatal(err)
 	}
 	first := time.Date(2026, 8, 25, 18, 12, 0, 0, time.UTC)
 	runtime.setGenerationIdentity(first)
-	if runtime.state.SampleID != "alice0826c" {
+	if runtime.state.SampleID != "alice0826-021200" {
 		t.Fatalf("unexpected sample id %q", runtime.state.SampleID)
 	}
 	wantEnd := first.Add(300 * time.Second).Format(time.RFC3339Nano)
@@ -192,7 +192,7 @@ func TestGenerationIdentityUsesShanghaiHourAndIsIdempotent(t *testing.T) {
 		t.Fatalf("unexpected generation times: %#v", runtime.state)
 	}
 	runtime.setGenerationIdentity(first.Add(time.Hour))
-	if runtime.state.SampleID != "alice0826c" || runtime.state.T0 != first.Format(time.RFC3339Nano) {
+	if runtime.state.SampleID != "alice0826-021200" || runtime.state.T0 != first.Format(time.RFC3339Nano) {
 		t.Fatal("generation identity changed after it was established")
 	}
 }
