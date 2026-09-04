@@ -1,5 +1,8 @@
-import sys,json,shlex
+import sys,json,shlex,argparse
 sys.path.insert(0,'lab');import stage20 as l
+parser=argparse.ArgumentParser();parser.add_argument('--tag',default=l.stamp().lower());args=parser.parse_args()
+name='input-scope-'+args.tag+'.json'
+if (l.ARCHIVE/name).exists():raise RuntimeError('preserve earlier scope evidence; use a new tag')
 l.stopped();r=l.REMOTE;rel=json.loads((l.ARCHIVE/'release.json').read_text())['release'];scripts=r+'/releases/'+rel+'/body/tools/'
 l.copy(l.REPO/'lab/stage20_window.py',r+'/tools/stage20_window.py')
 env=shlex.join(['env']+[k+'='+v for k,v in l.ENV.items()]);geom=l.remote_json('/usr/bin/python3 '+r+'/tools/stage20_window.py --minimized false')
@@ -18,5 +21,5 @@ for value in ('true','false'):
  receipt=json.loads(l.remote(env+' /usr/bin/python3 -',input=probe))
  results[value]={'geometry':geom,'focus':focus,'receipt':receipt}
 results['passed']=results['true']['geometry']['minimized'] and 'outside' in results['true']['receipt']['error'] and results['true']['receipt']['input_attempted'] is False and results['false']['receipt']['error']=='unsupported input'
-l.write_json(l.ARCHIVE/'input-scope-validation-v2.json',results);l.copy(l.ARCHIVE/'input-scope-validation-v2.json',r+'/evidence/input-scope-validation-v2.json');print(json.dumps(results,ensure_ascii=False))
+l.write_json(l.ARCHIVE/name,results);l.copy(l.ARCHIVE/name,r+'/evidence/'+name);print(json.dumps(results,ensure_ascii=False))
 assert results['passed']

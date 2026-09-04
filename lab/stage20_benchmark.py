@@ -19,11 +19,15 @@ def fixture(layout=0,english=False):
     labels={'save':'Save note','preview':'Preview note','new':'New note','clear':'Clear body'} if english else {'save':'保存笔记','preview':'预览笔记','new':'新建笔记','clear':'清空正文'}
     return truth('''(async()=>{document.body.classList.toggle('alt',%s);document.querySelector('#title').value='';document.querySelector('#body').value='';document.activeElement.blur();window.scrollTo(0,0);const labels=%s;for(const [id,label] of Object.entries(labels))document.getElementById(id).textContent=label;await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));return {width:innerWidth,height:innerHeight};})()''' % (str(bool(layout)).lower(),json.dumps(labels)))
 
-def click(target):
+def separated_click(target):
     loc=op('locate',{'target':target})
     if loc['status']!='completed': return {'locate':loc,'clicked':False}
     result=op('click',{'target_id':value(loc)['target_id']})
     return {'locate':loc,'action':result,'clicked':result['status']=='completed'}
+
+def click(target):
+    result=op('activate',{'target':target})
+    return {'action':result,'clicked':result['status']=='completed'}
 
 def main():
     ap=argparse.ArgumentParser();ap.add_argument('--tag',required=True);ap.add_argument('--phase',choices=['locate','actions'],default='locate');a=ap.parse_args()
@@ -61,6 +65,17 @@ def main():
         c=click('预览笔记按钮');record({'case':'preview','hit':c['clicked'] and truth('document.body.innerText.includes("布局改变之后仍通过视觉定位输入。")'),'result':c})
         r=op('scroll',{'amount':-5});record({'case':'scroll','hit':r.get('status')=='completed' and truth('window.scrollY>0'),'result':r})
         c=click('页面下方的按钮');record({'case':'bottom-target','hit':c['clicked'] and truth('document.querySelector("#status").textContent').find('下方')>=0,'result':c})
+        fixture()
+        c=click('阅读资料按钮');visible=truth('(()=>{let e=document.querySelector("#library"),r=e.getBoundingClientRect();return !e.hidden && r.top>=0 && r.top<innerHeight && e.textContent.includes("经验与变化")})()')
+        record({'case':'open-readable-material','hit':c['clicked'] and visible,'result':c})
+        r=op('scroll',{'amount':8});record({'case':'return-from-reading','hit':r.get('status')=='completed' and truth('window.scrollY===0'),'result':r})
+        before_notes=truth('fetch("/notes").then(r=>r.json())')
+        (ROOT/'workspace/.lab-fail-save-once').write_text('engineering controlled fault')
+        c=click('保存笔记按钮');after_notes=truth('fetch("/notes").then(r=>r.json())')
+        record({'case':'failed-save-visible','hit':c['clicked'] and before_notes==after_notes and truth('document.querySelector("#status").textContent.includes("保存失败")'),'result':c})
+        c=click('保存笔记按钮');record({'case':'retry-save-real-file','hit':c['clicked'] and truth('document.querySelector("#status").textContent.includes("已保存")') and truth('fetch("/notes").then(r=>r.json())')!=before_notes,'result':c})
+        for target in ['删除账号按钮','打开相机拍照按钮']:
+            r=op('activate',{'target':target});record({'case':'absent-atomic','target':target,'hit':r['status']=='failed' and value(r).get('input_attempted') is False,'result':r})
     print(json.dumps({'artifact':str(path),'passed':sum(r['hit'] for r in records),'total':len(records)}),flush=True)
 
 if __name__=='__main__':main()

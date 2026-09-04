@@ -14,7 +14,7 @@ def main():
     receiver=Receiver(name,'/Focus')
     key='hominal20-focus-'+uuid.uuid4().hex
     path=pathlib.Path(os.environ['HOMINAL20_ROOT'])/'services'/(key+'.js')
-    path.write_text("const w=workspace.activeWindow;callDBus('org.hominal20.FocusProbe','/Focus','org.hominal20.FocusProbe','Report',JSON.stringify(w?{window_id:String(w.internalId),caption:w.caption,minimized:w.minimized,active:w.active}:{}));")
+    path.write_text("const w=workspace.activeWindow;callDBus('org.hominal20.FocusProbe','/Focus','org.hominal20.FocusProbe','Report',JSON.stringify(w?{window_id:String(w.internalId),caption:w.caption,minimized:w.minimized,active:w.active,frame:[w.frameGeometry.x,w.frameGeometry.y,w.frameGeometry.width,w.frameGeometry.height]}:{}));")
     iface=dbus.Interface(bus.get_object('org.kde.KWin','/Scripting'),'org.kde.kwin.Scripting')
     try:
         ident=bus.call_blocking('org.kde.KWin','/Scripting','org.kde.kwin.Scripting','loadScript','ss',(str(path),key))

@@ -19,7 +19,7 @@ SAMPLE=os.environ.get('HOMINAL20_SAMPLE_ID','')
 if SAMPLE and not re.fullmatch(r's20-[a-z0-9-]+',SAMPLE): raise ValueError('invalid sample namespace')
 EVIDENCE = ROOT/'evidence'/SAMPLE
 VISION = 'http://127.0.0.1:8765'
-OPS = {'desktop_observe': '{}', 'desktop_locate': '{"target":"visible control description"}',
+OPS = {'desktop_activate': '{"target":"one visible control description"}', 'desktop_observe': '{}', 'desktop_locate': '{"target":"visible control description"}',
        'desktop_click': '{"target_id":"ID returned by desktop_locate"}',
        'desktop_type': '{"text":"exact text to enter"}',
        'desktop_key': '{"key":"Enter|Escape|Tab|Ctrl+A|Ctrl+S|Ctrl+V|Backspace"}',
@@ -156,12 +156,25 @@ def perform(req):
             result = binding; out['effect'] = 'observed'
         else:
             before = capture(deadline)
-            if op == 'desktop_click':
-                ident = data.get('target_id', '')
+            if op in ('desktop_activate','desktop_click'):
+                if op == 'desktop_activate':
+                    target=data.get('target','').strip()
+                    if not target or len(target)>300:raise ValueError('target must describe one visible control')
+                    found=vision(before,'locate',deadline,target)
+                    if not found.get('found'):raise ValueError('visual model found no visible matching target')
+                    point=[min(before['width']-1,round(found['x']*before['width']/1000)),min(before['height']-1,round(found['y']*before['height']/1000))]
+                    binding={'target_id':'target-'+uuid.uuid4().hex,'target':target,'point':point,'digest':before['digest'],
+                             'created':time.time(),'size':[before['width'],before['height']],'frame_id':before['id'],
+                             'path':before['path'],'interpretation':found}
+                    atomic(EVIDENCE/(binding['target_id']+'.json'),binding)
+                    ident=binding['target_id']
+                    before=capture(deadline)
+                else:
+                    ident = data.get('target_id', '')
                 if not re.fullmatch(r'target-[0-9a-f]{32}', ident): raise ValueError('invalid target identity')
                 binding = json.loads((EVIDENCE/(ident+'.json')).read_text())
                 verify_binding(binding, before)
-                payload = {'x': binding['point'][0]/before['width'], 'y': binding['point'][1]/before['height']}
+                payload = {'x': binding['point'][0]/before['width'], 'y': binding['point'][1]/before['height'], 'display_size':[before['width'],before['height']]}
                 binding['consumed']=True; atomic(EVIDENCE/(ident+'.json'),binding)
                 attempted = True; receipt = input_command('tap', payload, deadline)
             elif op == 'desktop_type':
@@ -177,12 +190,16 @@ def perform(req):
             # Input delivery and screenshot availability are mechanical facts, not semantic success.
             after = capture(deadline)
             result = {'input_receipt':receipt,'before':before,'after':after,
-                      'pixels_changed':after['digest']!=before['digest'], 'semantic_success':'not_decided'}
+                      'pixels_changed':after['digest']!=before['digest'], 'semantic_success':'not_decided',
+                      'operation':op, 'target_description':binding['target'] if op in ('desktop_click','desktop_activate') else '',
+                      'same_visible_scene':same_scene(before,after)}
             try:
                 interpreted = vision(after, 'describe', deadline)
                 result['visual_after'] = interpreted; out['observation'] = observation(after, interpreted)
             except Exception as exc:
                 result['visual_after_error'] = str(exc)[:200]
+            if op in ('desktop_activate','desktop_click'):
+                result['target_binding']={'target_id':binding['target_id'],'point':binding['point'],'frame_id':binding['frame_id'],'evidence':str(EVIDENCE/(binding['target_id']+'.json'))}
             out['effect'] = 'changed' if result['pixels_changed'] else 'unknown'
         out.update(status='completed', summary='实际操作及可核验观察已返回；目标是否实现由主脑结合证据判断。', output=json.dumps(result,ensure_ascii=False))
     except Exception as exc:
@@ -200,7 +217,7 @@ def main():
         return emit({'schema':'hominal.organ-description/v1','id':'desktop','name':'KDE visual desktop',
             'command':'desktop','capabilities':['observe','perform','cancel','desktop_ui','vision'],
             'operations':list(OPS),'operation_inputs':OPS,
-            'guidance':'真实桌面视觉器官。先locate取得target_id，随后click；画面变化需重新定位。type向当前焦点输入原文，key/scroll作用于当前窗口。操作后返回截图与视觉推测，成功投递输入不等于目标完成。'})
+            'guidance':'真实桌面视觉器官。目标明确时优先activate：本地视觉新鲜定位、单次点击、回看，不选择后续动作。需要单独核验位置时可先locate取得target_id，随后click；画面变化需重新定位；同一现场的重复定位只刷新寻址，不代表任务获得新进展。type向当前焦点输入原文，key/scroll作用于当前窗口。操作后返回截图与视觉推测，成功投递输入不等于目标完成。'})
     if op == 'health':
         try:
             with urllib.request.urlopen(VISION+'/health', timeout=1) as r: health=json.load(r)

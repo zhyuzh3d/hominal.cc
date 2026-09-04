@@ -67,6 +67,8 @@ def main():
                         x,y=p['x'],p['y']
                         if not (type(x) in (float,int) and type(y) in (float,int) and 0<=x<1 and 0<=y<1):
                             raise ValueError('invalid normalized point')
+                        width,height=p['display_size'];fx,fy,fw,fh=focus['frame']
+                        if not (fx<=x*width<fx+fw and fy<=y*height<fy+fh):raise ValueError('point is outside experiment window; no input delivered')
                         delivered=True
                         touch.write(e.EV_ABS,e.ABS_X,round(x*65535));touch.write(e.EV_ABS,e.ABS_Y,round(y*65535))
                         try:
