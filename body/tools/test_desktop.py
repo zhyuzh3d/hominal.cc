@@ -1,6 +1,9 @@
 import importlib.util
+import json
 import pathlib
+import tempfile
 import unittest
+from unittest import mock
 
 HERE=pathlib.Path(__file__).parent
 def module(name):
@@ -23,5 +26,29 @@ class DesktopBoundaryTests(unittest.TestCase):
         with self.assertRaises(ValueError):d.verify_binding(dict(b,consumed=True),f,at=30)
         with self.assertRaises(ValueError):d.verify_binding(b,dict(f,digest='b'),at=30)
         with self.assertRaises(ValueError):d.verify_binding(dict(b,point=[101,1]),f,at=30)
+
+    def test_visual_fill_locates_clicks_types_and_returns_one_result(self):
+        d=module('desktop')
+        frame={'id':'frame-1','path':'/tmp/frame.png','width':100,'height':80,
+               'digest':'same','captured_at':'now','created':20}
+        after=dict(frame,id='frame-2',digest='changed')
+        calls=[]
+        def send(kind,payload,deadline):
+            calls.append((kind,payload))
+            return {'delivered':True,'kind':kind,'semantic_success':'not_decided'}
+        with tempfile.TemporaryDirectory() as temp:
+            d.EVIDENCE=pathlib.Path(temp)
+            with mock.patch.object(d,'capture',side_effect=[frame,frame,after]), \
+                 mock.patch.object(d,'vision',side_effect=[{'found':True,'x':500,'y':500},{'text':'笔记标题：迁移测试'}]), \
+                 mock.patch.object(d,'input_command',side_effect=send):
+                result=d.perform({'action_id':'action-1','operation':'desktop_fill',
+                                  'input':json.dumps({'target':'笔记标题输入框','text':'迁移测试'}),
+                                  'timeout_milliseconds':30000})
+        self.assertEqual(result['status'],'completed')
+        output=json.loads(result['output'])
+        self.assertEqual([item[0] for item in calls],['tap','text'])
+        self.assertEqual(calls[1][1],{'text':'迁移测试'})
+        self.assertEqual(output['input_receipt']['kind'],'visual_fill')
+        self.assertEqual(output['target_description'],'笔记标题输入框')
 
 if __name__=='__main__':unittest.main()

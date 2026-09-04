@@ -49,9 +49,9 @@ def main():
     else:
         fixture();started=time.time();title='视觉输入标题-'+a.tag
         for index,(target,text,ident) in enumerate([('笔记标题输入框',title,'title'),('笔记内容多行输入框','这是通过真实截图定位、触控和粘贴输入的正文。','body')]):
-            c=click(target);r=op('type',{'text':text}) if c['clicked'] else c
+            r=op('fill',{'target':target,'text':text})
             observed=truth('document.getElementById('+json.dumps(ident)+').value')
-            record({'case':'input-'+ident,'hit':c['clicked'] and r.get('status')=='completed' and observed==text,'truth':observed,'result':{'click':c,'type':r}})
+            record({'case':'input-'+ident,'hit':r.get('status')=='completed' and observed==text,'truth':observed,'result':r})
         c=click('保存笔记按钮');notes=json.loads(subprocess.check_output(['curl','-sf','http://127.0.0.1:8760/notes'],text=True))
         record({'case':'save-real-file','hit':c['clicked'] and any(n.get('saved_at',0)>=started and n.get('title')==title and n.get('body')=='这是通过真实截图定位、触控和粘贴输入的正文。' for n in notes),'truth':notes,'result':c})
         c=click('使用说明按钮'); opened=truth('document.querySelector("dialog").open')
@@ -60,8 +60,8 @@ def main():
         record({'case':'close-dialog','hit':c['clicked'] and opened and closed,'result':c})
         c=click('切换布局按钮');record({'case':'change-layout','hit':c['clicked'] and truth('document.body.classList.contains("alt")'),'result':c})
         c=click('清空正文按钮');record({'case':'clear-body','hit':c['clicked'] and truth('document.querySelector("#body").value===""'),'result':c})
-        c=click('笔记内容多行输入框');r=op('type',{'text':'布局改变之后仍通过视觉定位输入。'})
-        record({'case':'input-after-layout','hit':c['clicked'] and truth('document.querySelector("#body").value==="布局改变之后仍通过视觉定位输入。"'),'result':{'click':c,'type':r}})
+        r=op('fill',{'target':'笔记内容多行输入框','text':'布局改变之后仍通过视觉定位输入。'})
+        record({'case':'input-after-layout','hit':r.get('status')=='completed' and truth('document.querySelector("#body").value==="布局改变之后仍通过视觉定位输入。"'),'result':r})
         c=click('预览笔记按钮');record({'case':'preview','hit':c['clicked'] and truth('document.body.innerText.includes("布局改变之后仍通过视觉定位输入。")'),'result':c})
         r=op('scroll',{'amount':-5});record({'case':'scroll','hit':r.get('status')=='completed' and truth('window.scrollY>0'),'result':r})
         c=click('页面下方的按钮');record({'case':'bottom-target','hit':c['clicked'] and truth('document.querySelector("#status").textContent').find('下方')>=0,'result':c})

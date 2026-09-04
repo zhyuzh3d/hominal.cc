@@ -26,8 +26,13 @@ def copy(source,dest,fetch=False):
     run(args+([HOST+':'+source,str(dest)] if fetch else [str(source),HOST+':'+dest]))
 def stamp():return datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
 def parse_time(value):
-    # Go persists RFC3339 nanoseconds; the host may still run Python 3.9.
-    return datetime.fromisoformat(re.sub(r'(\.\d{6})\d+',r'\1',value).replace('Z','+00:00'))
+    # Go's RFC3339 formatter trims trailing fractional zeroes.  Normalize any
+    # fraction to six digits because supported host Pythons differ here.
+    match=re.fullmatch(r'(.*?)(?:\.(\d+))?(Z|[+-]\d\d:\d\d)',value)
+    if not match:raise ValueError('invalid RFC3339 time: '+value)
+    base,fraction,zone=match.groups()
+    normalized=base+(('.'+(fraction+'000000')[:6]) if fraction else '')+('+00:00' if zone=='Z' else zone)
+    return datetime.fromisoformat(normalized)
 def current():return json.loads((ARCHIVE/'current.json').read_text())
 def active():return remote('systemctl --user is-active hominal20-life 2>/dev/null || true').strip() in ('active','activating','deactivating')
 def stopped():
@@ -181,7 +186,7 @@ def extend(minutes):
     c.update(planned_end=s['planned_end'],deadline_unit=new);write_json(ARCHIVE/'current.json',c);intervention('extend',response);print(json.dumps(c))
 
 def stop(reason):
-    c=current();remote('systemctl --user stop hominal20-life',timeout=60)
+    c=current();remote('systemctl --user stop hominal20-life 2>/dev/null || true',timeout=60)
     if c.get('deadline_unit'):remote('systemctl --user stop '+c['deadline_unit']+'.timer 2>/dev/null || true')
     dest=ARCHIVE/'samples'/c['instance_id'];dest.mkdir(parents=True,exist_ok=True)
     tar=REMOTE+'/archives/'+c['instance_id']+'.tar.gz'

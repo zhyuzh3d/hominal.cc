@@ -22,6 +22,6 @@ python3 lab/stage20.py stop --reason completed_observation
 
 代码在本目录；私密配置在`../xconfigs/hominal20`；设备数据在`~/.local/share/hominal20`；Mac离机档案在`~/HominalStage20Lab`。实验截图、模型权重、账号状态和个体历史不得提交。工程测试使用Lab的DOM/文件真值核对结果，视觉器官不会得到这些答案。
 
-协议与内核验证使用`go test -race ./body/...`，桌面边界单测使用`python3 body/tools/test_desktop.py`。实机基准、布局干预和窗口真值工具位于`lab/stage20_*.py`。工程任务和人工修复不算自主成长证据。
+协议与内核验证使用`go test -race ./body/...`，桌面边界单测使用`python3 body/tools/test_desktop.py`，实验控制时间兼容测试使用`PYTHONPATH=lab python3 -m unittest lab.test_stage20`。实机基准、布局干预和窗口真值工具位于`lab/stage20_*.py`。工程任务和人工修复不算自主成长证据。
 
 MIT License，见[LICENSE](LICENSE)。
