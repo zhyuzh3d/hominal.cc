@@ -3849,6 +3849,31 @@ func TestRepeatedSemanticActionStallExposesBoundedActionAssistance(t *testing.T)
 	}
 }
 
+func TestVariedActionsInOneSemanticStallExposeBoundedActionAssistance(t *testing.T) {
+	config := testConfig(20)
+	config.CognitiveCore = "continuous-v1"
+	runtime, err := New(t.TempDir(), "instance", config, &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.state.Commitments = []ActionCommitment{
+		{ID: "save", ConcernID: "write-note"},
+		{ID: "observe", ConcernID: "write-note"},
+		{ID: "clear", ConcernID: "write-note"},
+		{ID: "current", ConcernID: "write-note"},
+	}
+	runtime.state.Memories = []Memory{
+		{CommitmentID: "save", ActionKind: "organ_action", EnactedRequest: normalizedOrganRequest("desktop", "desktop_activate", `{"target":"保存笔记"}`), PredictionDifference: .72, RemainingDifference: .70},
+		{CommitmentID: "observe", ActionKind: "organ_action", EnactedRequest: normalizedOrganRequest("desktop", "desktop_observe", `{}`), PredictionDifference: .04, RemainingDifference: .70},
+		{CommitmentID: "clear", ActionKind: "organ_action", EnactedRequest: normalizedOrganRequest("desktop", "desktop_activate", `{"target":"清空正文"}`), PredictionDifference: .76, RemainingDifference: .70},
+	}
+	current := ActionState{CommitmentID: "current", Kind: "organ_action", OrganID: "desktop", Operation: "desktop_activate", Request: `{"target":"页面下方的按钮"}`, Status: "completed", Effect: "changed"}
+	runtime.annotateActionAssistanceOpportunity(&current, "write-note")
+	if current.ImplementationFailureStreak != 2 || !current.ActionAssistanceAvailable {
+		t.Fatalf("superficially varied actions hid one semantic implementation stall: %#v", current)
+	}
+}
+
 func TestStageFiveUnrelatedRealityCannotSatisfyExploration(t *testing.T) {
 	runtime, err := New(t.TempDir(), "instance", testConfig(5), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
 	if err != nil {

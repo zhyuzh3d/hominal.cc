@@ -142,7 +142,7 @@ def start(minutes):
     copy(path,REMOTE+'/private/runtime.json')
     public=json.loads(json.dumps(cfg));public['model_gateway']['api_key']='<runtime-only>';write_json(ARCHIVE/'samples'/ident/'runtime-public.json',public)
     args=['systemd-run','--user','--unit=hominal20-life','--collect','--working-directory='+instance,
-          '--property=TimeoutStopSec=45s','--property=RuntimeMaxSec='+str(minutes*60+120),
+          '--property=TimeoutStopSec=45s','--property=RuntimeMaxSec=1920s',
           '--property=KillMode=control-group','--property=UMask=0077']
     env={**ENV,'HOMINAL20_SAMPLE_ID':ident,'HOMINAL_INSTANCE_ROOT':instance,'HOMINAL_INSTANCE_ID':ident,'HOMINAL_RUNTIME_CONFIG':REMOTE+'/private/runtime.json'}
     args+=['--setenv='+k+'='+v for k,v in env.items()];args+=[instance+'/body/bin/hominald']
@@ -177,7 +177,6 @@ def extend(minutes):
     end=parse_time(s['t0'])+timedelta(minutes=minutes)
     response=api('/v1/lab/deadline',{'planned_end':end.isoformat().replace('+00:00','Z')})
     s=remote_json('cat '+c['instance_root']+'/state/current.json');new=arm_deadline(s)
-    remote('systemctl --user set-property --runtime hominal20-life RuntimeMaxSec='+str(minutes*60+120)+'s')
     remote('systemctl --user stop '+c['deadline_unit']+'.timer')
     c.update(planned_end=s['planned_end'],deadline_unit=new);write_json(ARCHIVE/'current.json',c);intervention('extend',response);print(json.dumps(c))
 

@@ -25,6 +25,23 @@ func (r *Runtime) startPerception(parent context.Context, id string, orient bool
 	if r.perceptionPending != "" || r.organs == nil || (orient && r.organHasUnabsorbedReality(id)) {
 		return
 	}
+	if orient {
+		description, exists := r.organs.Description(id)
+		supported := false
+		if exists {
+			for _, capability := range description.Capabilities {
+				if capability == "orient" {
+					supported = true
+					break
+				}
+			}
+		}
+		// Re-sample a read-only sense when it cannot physically reorient. Calling
+		// an unpublished protocol operation only manufactures body failures.
+		if !supported {
+			orient = false
+		}
+	}
 	ctx, cancel := context.WithTimeout(parent, 20*time.Second)
 	job, epoch := "sense-"+randomID(), r.actionEpoch
 	r.perceptionPending, r.perceptionCancel, r.perceptionOrients = job, cancel, orient

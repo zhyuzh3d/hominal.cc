@@ -1240,20 +1240,27 @@ func (r *Runtime) annotateActionAssistanceOpportunity(action *ActionState, conce
 
 	// A completed input can still be an implementation failure at the meaning
 	// level. Stage 20 can expose that limit after Alice herself has twice judged
-	// the same stable request to leave both a material prediction error and a
-	// material unresolved difference. A later low-gap result resets the streak.
+	// concrete implementation attempts in the same concern to leave both a
+	// material prediction error and a material unresolved difference. Read-only
+	// observations neither inflate nor reset the streak; real low-gap progress does.
 	if r.state.Stage >= 20 && action.Status == "completed" {
-		request := normalizedActionStateRequest(*action)
 		semanticStalls := 0
 		inspected := 0
 		for index := len(r.state.Memories) - 1; index >= 0 && inspected < 32; index-- {
 			memory := r.state.Memories[index]
 			inspected++
-			if memory.ActionKind != "organ_action" || memory.EnactedRequest != request {
+			if memory.ActionKind != "organ_action" {
 				continue
 			}
 			commitment := r.commitmentByID(memory.CommitmentID)
 			if commitment == nil || commitment.ConcernID != concernID {
+				continue
+			}
+			var enacted struct {
+				Operation string `json:"operation"`
+			}
+			if json.Unmarshal([]byte(memory.EnactedRequest), &enacted) == nil &&
+				(enacted.Operation == "desktop_observe" || enacted.Operation == "browser_snapshot") {
 				continue
 			}
 			if memory.PredictionDifference < 0.4 || memory.RemainingDifference < 0.2 {

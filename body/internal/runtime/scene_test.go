@@ -76,6 +76,26 @@ func TestOrientationSettlesBeforeCognitionButReadOnlySenseDoesNotBlock(t *testin
 	}
 }
 
+func TestUnsupportedOrientationFallsBackToReadOnlyObservation(t *testing.T) {
+	root := t.TempDir()
+	installTestSystemOrgan(t, root)
+	r, err := New(root, "read-only-organ", testConfig(10), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r.startPerception(ctx, "system", true)
+	select {
+	case result := <-r.perceptionResults:
+		if result.Error != nil || result.Operation != "observe" || r.perceptionOrients {
+			t.Fatalf("unsupported orientation did not become an ordinary observation: result=%#v orient=%t", result, r.perceptionOrients)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("read-only observation did not return")
+	}
+}
+
 func TestFailedOrientationInvalidatesPositionNotLearnedObjects(t *testing.T) {
 	r, err := New(t.TempDir(), "failed-movement", testConfig(10), nil)
 	if err != nil {
