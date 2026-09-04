@@ -545,6 +545,14 @@ func TestTruncateKeepsUTF8Valid(t *testing.T) {
 }
 
 func TestLLMServerAdapterUsesNativeFunctionCognitionAndConfirmedServerBill(t *testing.T) {
+	checkNativeFunctionCognitionAndBill(t, 10)
+}
+
+func TestStage20RunsActualNativeCognitionAndSettlement(t *testing.T) {
+	checkNativeFunctionCognitionAndBill(t, 20)
+}
+
+func checkNativeFunctionCognitionAndBill(t *testing.T, stage int) {
 	arguments, _ := json.Marshal(CognitiveCommit{
 		Appraisals: []CandidateAppraisal{{
 			CandidateID: "llmserver-focus", Meaning: "本地认知服务已经可达", Difference: 0.2,
@@ -594,7 +602,7 @@ func TestLLMServerAdapterUsesNativeFunctionCognitionAndConfirmedServerBill(t *te
 	}))
 	defer server.Close()
 
-	config := testConfig(10)
+	config := testConfig(stage)
 	config.ModelGateway.BaseURL = server.URL
 	config.ModelGateway.Adapter = "llmserver"
 	terra := config.CognitiveResource.Models["terra"]
@@ -602,7 +610,7 @@ func TestLLMServerAdapterUsesNativeFunctionCognitionAndConfirmedServerBill(t *te
 	config.CognitiveResource.Models["terra"] = terra
 	profile := CognitiveProfile{Model: "terra", ReasoningEffort: "none"}
 	request := CognitiveRequest{
-		Lease: Lease{ID: "lease-local", Profile: profile, PulseID: 7}, Stage: 10,
+		Lease: Lease{ID: "lease-local", Profile: profile, PulseID: 7}, Stage: stage,
 		Focus:      Event{ID: "llmserver-focus", Kind: "body_delta", Status: "pending"},
 		Candidates: []Event{{ID: "llmserver-focus", Kind: "body_delta", Status: "pending"}},
 		State:      State{InstanceID: "llmserver-life"}, Config: config, Profile: profile,

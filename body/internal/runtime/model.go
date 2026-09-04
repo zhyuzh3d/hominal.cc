@@ -132,7 +132,7 @@ func (m *ModelClient) Run(ctx context.Context, request CognitiveRequest, notices
 
 func usesUnifiedCognition(stage int) bool {
 	switch stage {
-	case 4, 5, 8, 9, 10:
+	case 4, 5, 8, 9, 10, 20:
 		return true
 	default:
 		return false
