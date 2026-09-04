@@ -103,6 +103,7 @@ def main():
                     image = Image.open(path).convert('RGB')
                     image.thumbnail((1280, 960))
                     messages = [{'role': 'user', 'content': [{'type': 'image', 'image': image}, {'type': 'text', 'text': prompt}]}]
+                    json_retry_messages=messages
                     if mode=='locate' and 'GUI-Owl' in model_root.name:
                         # Use the published model-native grounding contract, not guessed JSON repair.
                         tool={'type':'function','function':{'name':'computer_use','description':'Propose a visible UI location. Coordinates are normalized to a 1000 by 1000 screen. Aim inside the center of the control.',
@@ -115,8 +116,7 @@ def main():
                     for attempt in range(2 if mode=='locate' and 'GUI-Owl' in model_root.name else 1):
                         attempt_messages=messages
                         if attempt:
-                            retry_system=system+'\nFormatting retry: emit valid JSON with both coordinate brackets and the exact closing </tool_call> tag.'
-                            attempt_messages=[{'role':'system','content':retry_system},messages[-1]]
+                            attempt_messages=json_retry_messages
                         inputs = processor.apply_chat_template(attempt_messages, tokenize=True, add_generation_prompt=True,
                                   return_dict=True, return_tensors='pt').to(model.device)
                         start = time.monotonic()

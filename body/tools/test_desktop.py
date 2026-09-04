@@ -4,6 +4,7 @@ import pathlib
 import tempfile
 import unittest
 from unittest import mock
+from PIL import Image
 
 HERE=pathlib.Path(__file__).parent
 def module(name):
@@ -26,6 +27,17 @@ class DesktopBoundaryTests(unittest.TestCase):
         with self.assertRaises(ValueError):d.verify_binding(dict(b,consumed=True),f,at=30)
         with self.assertRaises(ValueError):d.verify_binding(b,dict(f,digest='b'),at=30)
         with self.assertRaises(ValueError):d.verify_binding(dict(b,point=[101,1]),f,at=30)
+
+    def test_scene_comparison_ignores_caret_but_rejects_layout_change(self):
+        d=module('desktop')
+        with tempfile.TemporaryDirectory() as temp:
+            root=pathlib.Path(temp);base=root/'base.png';caret=root/'caret.png';layout=root/'layout.png'
+            Image.new('RGB',(1000,800),'white').save(base)
+            changed=Image.open(base);changed.paste('black',(900,700,902,720));changed.save(caret)
+            changed=Image.open(base);changed.paste('black',(100,100,300,300));changed.save(layout)
+            old={'path':str(base),'digest':'base'}
+            self.assertTrue(d.same_scene(old,{'path':str(caret),'digest':'caret'}))
+            self.assertFalse(d.same_scene(old,{'path':str(layout),'digest':'layout'}))
 
     def test_visual_fill_locates_clicks_types_and_returns_one_result(self):
         d=module('desktop')

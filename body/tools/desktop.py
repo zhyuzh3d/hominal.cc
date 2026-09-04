@@ -54,9 +54,12 @@ def same_scene(old, frame):
     try:
         a=Image.open(old['path']).convert('RGB'); b=Image.open(frame['path']).convert('RGB')
         if a.size!=b.size: return False
-        box=ImageChops.difference(a,b).getbbox()
-        # A blinking text insertion caret is not a changed control or window.
-        return box is None or (box[2]-box[0]<=4 and box[3]-box[1]<=40)
+        diff=ImageChops.difference(a,b)
+        strongest=ImageChops.lighter(ImageChops.lighter(*diff.split()[:2]),diff.split()[2])
+        significant=strongest.point(lambda value: 255 if value>8 else 0).histogram()[255]
+        # Carets and text antialiasing can change a few dispersed pixels.  A
+        # visible control, popup or layout change crosses this conservative cap.
+        return significant<=max(512,round(a.width*a.height*.001))
     except (OSError, KeyError): return False
 
 
