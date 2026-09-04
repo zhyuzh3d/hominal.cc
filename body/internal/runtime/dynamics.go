@@ -1382,6 +1382,19 @@ func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldA
 		}
 	}
 	normalizedCompositeDisposition := r.normalizeCompositeProgressDisposition(&commit, effectiveConcernID)
+	if r.state.Stage >= 20 && commit.Action.Kind != "none" {
+		// A new explicitly chosen action has no returned Reality yet. Decline
+		// only the contradictory closure projection, preserving valid absorption
+		// of the previous step and the next action. Do not manufacture a verdict.
+		for index := range commit.Appraisals {
+			appraisal := &commit.Appraisals[index]
+			concern := r.concernForCandidate(r.activeCandidates[appraisal.CandidateID])
+			if appraisal.CandidateID == commit.FocusID && appraisal.Resolution == "resolved" && concern != nil && concern.Resolution == "hold" {
+				appraisal.Resolution = "hold"
+				withheldProjections["concern_disposition"] = "resolved withheld: the newly chosen action has not returned Reality; the existing concern remains held"
+			}
+		}
+	}
 	for _, appraisal := range commit.Appraisals {
 		candidate := r.activeCandidates[appraisal.CandidateID]
 		concern := r.concernForCandidate(candidate)
