@@ -232,7 +232,7 @@ def main():
         return emit({'schema':'hominal.organ-description/v1','id':'desktop','name':'KDE visual desktop',
             'command':'desktop','capabilities':['observe','perform','cancel','desktop_ui','vision'],
             'operations':list(OPS),'operation_inputs':OPS,
-            'guidance':'真实桌面视觉器官。目标明确时优先activate：本地视觉新鲜定位、单次点击、回看，不选择后续动作。向可见文本框写入已确定内容时优先fill：同一有界动作内新鲜定位、点击、输入并回看；它不判断文字是否正确或目标是否完成。需要单独核验位置时可先locate取得target_id，随后click；画面变化需重新定位；同一现场的重复定位只刷新寻址，不代表任务获得新进展。type只在焦点已经由现实确认时向当前焦点输入原文。scroll正数移向页面上方和较早内容，负数移向页面下方和较后内容；最近看见的目标在滚动后消失时，反向滚动属于不同的核验。操作后返回截图与视觉推测，成功投递输入不等于目标完成。'})
+            'guidance':'真实桌面视觉器官。目标明确时优先activate：本地视觉新鲜定位、单次点击、回看，不选择后续动作。向可见文本框写入已确定内容时优先fill：同一有界动作内新鲜定位、点击、输入并回看；它不判断文字是否正确或目标是否完成。需要单独核验位置时可先locate取得target_id，随后click；画面变化需重新定位；同一现场的重复定位只刷新寻址，不代表任务获得新进展。type只在焦点已经由现实确认时向当前焦点输入原文。scroll正数移向页面上方和较早内容，负数移向页面下方和较后内容；滚动条在顶部表示不能继续向上、仍可向下，在中部表示两向均可，在底部表示仍可向上、不能继续向下。最近看见的目标在滚动后消失时，反向滚动属于不同的核验。操作后返回截图与视觉推测，成功投递输入不等于目标完成。'})
     if op == 'health':
         try:
             with urllib.request.urlopen(VISION+'/health', timeout=1) as r: health=json.load(r)
