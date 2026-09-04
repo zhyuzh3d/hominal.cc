@@ -500,6 +500,56 @@ func TestRepeatedModelSpecificGatewayFailuresProtectOnceAndOfferRecovery(t *test
 	}
 }
 
+func TestStageTwentyCoalescesRollingBandOscillationWithoutLosingBodyTruth(t *testing.T) {
+	config := testConfig(20)
+	config.CognitiveCore = "continuous-v1"
+	config.CognitiveResource.RollingHourLimitMicrousd = 1000
+	config.CognitiveResource.RollingDayLimitMicrousd = 10000
+	runtime, err := New(t.TempDir(), "resource-oscillation", config, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	runtime.state.Body.CognitiveResourceBand = "open"
+	runtime.state.Usage = []UsageRecord{{CallID: "first", Time: now.Format(time.RFC3339Nano), ActualMicrousd: 260}}
+	if err := runtime.refreshResourceBody(now); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.state.Body.CognitiveResourceBand != "comfortable" || len(runtime.state.Background) != 1 {
+		t.Fatalf("first degradation was not a visible bodily fact: body=%#v background=%#v", runtime.state.Body, runtime.state.Background)
+	}
+
+	// A nearby spend crosses another boundary. Keep the exact state and journal
+	// record, but do not manufacture another paid attention object.
+	runtime.state.Usage[0].ActualMicrousd = 910
+	if err := runtime.refreshResourceBody(now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.state.Body.CognitiveResourceBand != "critical" || len(runtime.state.Background) != 1 || runtime.state.EventSeq != 2 {
+		t.Fatalf("nearby oscillation was not coalesced: body=%#v background=%#v seq=%d", runtime.state.Body, runtime.state.Background, runtime.state.EventSeq)
+	}
+
+	// Recovery is available in the body view and wakes any affordability wait by
+	// its separate mechanism; it does not become another attention object.
+	runtime.state.Usage = nil
+	if err := runtime.refreshResourceBody(now.Add(2 * time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.state.Body.CognitiveResourceBand != "open" || len(runtime.state.Background) != 1 || runtime.state.EventSeq != 3 {
+		t.Fatalf("resource recovery was not retained without a paid focus: body=%#v background=%#v seq=%d", runtime.state.Body, runtime.state.Background, runtime.state.EventSeq)
+	}
+
+	// After the refractory window, a new degradation may become conscious again.
+	runtime.state.Body.CognitiveResourceBand = "scarce"
+	runtime.state.Usage = []UsageRecord{{CallID: "later", Time: now.Add(6 * time.Minute).Format(time.RFC3339Nano), ActualMicrousd: 950}}
+	if err := runtime.refreshResourceBody(now.Add(6 * time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if len(runtime.state.Background) != 2 || runtime.state.EventSeq != 4 {
+		t.Fatalf("later independent degradation stayed hidden: background=%#v seq=%d", runtime.state.Background, runtime.state.EventSeq)
+	}
+}
+
 func TestSharedInfrastructureFailureDoesNotProtectOrSwitchModel(t *testing.T) {
 	runtime, err := New(t.TempDir(), "instance", testConfig(10), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
 	if err != nil {

@@ -14,6 +14,10 @@ const (
 	tokensPerMillion   int64 = 1_000_000
 	resourceHourWindow       = time.Hour
 	resourceDayWindow        = 24 * time.Hour
+	// A settled spend can move a rolling balance across the same boundary that
+	// an older spend is leaving.  Those crossings remain bodily facts, but they
+	// must not buy a new thought on every alternation.
+	stageTwentyResourceAttentionCooldown = 5 * time.Minute
 )
 
 func normalizeResourceConfig(config *Config) error {
@@ -205,6 +209,66 @@ func updateResourceSnapshot(snapshot *BodySnapshot, state State, config Cognitiv
 	snapshot.CognitivePriceTableVersion = config.PriceTableVersion
 }
 
+func resourceBandRank(band string) int {
+	switch band {
+	case "open":
+		return 4
+	case "comfortable":
+		return 3
+	case "limited":
+		return 2
+	case "scarce":
+		return 1
+	case "critical":
+		return 0
+	default:
+		return -1
+	}
+}
+
+// resourceAwareAttentionSeconds changes only timers for cognition that has no
+// new external fact. Fresh Reality, mentor input and action results stay
+// immediately eligible. Stage 20 has an explicit rolling money budget, so a
+// rapid idle/revisit cadence must slow before its own reflections consume the
+// remaining ability to act.
+func (r *Runtime) resourceAwareAttentionSeconds(configured int) int {
+	if configured <= 0 {
+		configured = 10
+	}
+	if r.state.Stage < 20 {
+		return configured
+	}
+	floor := 0
+	switch r.state.Body.CognitiveResourceBand {
+	case "limited":
+		floor = 30
+	case "scarce":
+		floor = 60
+	case "critical":
+		floor = 120
+	}
+	return maxInt(configured, floor)
+}
+
+func (r *Runtime) resourceBandChangeNeedsAttention(previous, current string, now time.Time) bool {
+	if r.state.Stage < 20 {
+		return true
+	}
+	// A recovery is already present in every later body view, while a focus that
+	// was actually blocked on affordability is released by
+	// releaseCognitiveResourceWaits. It does not need an independent paid focus.
+	if resourceBandRank(current) >= resourceBandRank(previous) {
+		return false
+	}
+	key := differenceFamilyKey(Event{Kind: "cognitive_resource_change", Source: "interoception"})
+	trace, exists := r.state.DifferenceField[key]
+	if !exists || trace.LastIgnitedAt == "" {
+		return true
+	}
+	last, err := time.Parse(time.RFC3339Nano, trace.LastIgnitedAt)
+	return err != nil || now.Sub(last) >= stageTwentyResourceAttentionCooldown
+}
+
 // Spend is a durable resource change; a reservation only temporarily occupies
 // funds. Every writer refreshes through this owner so settling a request cannot
 // erase the baseline before the next sensor compares it.
@@ -217,7 +281,8 @@ func (r *Runtime) refreshResourceBody(now time.Time) error {
 	}
 	payload, _ := json.Marshal(map[string]any{"previous_band": previous, "current_band": current,
 		"hour_spent_microusd": r.state.Body.CognitiveHourSpentMicrousd, "day_spent_microusd": r.state.Body.CognitiveDaySpentMicrousd})
-	return r.addEvent("cognitive_resource_change", "interoception", "已结算认知资源档位由 "+previous+" 变为 "+current+"；可支配余额另计在途预留。", "", payload, r.state.Stage >= 4)
+	return r.addEvent("cognitive_resource_change", "interoception", "已结算认知资源档位由 "+previous+" 变为 "+current+"；可支配余额另计在途预留。", "", payload,
+		r.state.Stage >= 4 && r.resourceBandChangeNeedsAttention(previous, current, now))
 }
 
 func activeProfile(state State, config CognitiveResourceConfig, focusID string) CognitiveProfile {

@@ -142,7 +142,7 @@ func (r *Runtime) lifeContinuityAttentionEvidence(event Event) float64 {
 	if !ok {
 		return 0
 	}
-	idle := r.config.Dynamics.AttentionMaximumIdleSeconds
+	idle := r.resourceAwareAttentionSeconds(r.config.Dynamics.AttentionMaximumIdleSeconds)
 	if idle <= 0 {
 		idle = 10
 	}

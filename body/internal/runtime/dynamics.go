@@ -71,7 +71,7 @@ func (r *Runtime) advanceDynamics(elapsed time.Duration) error {
 	currentConcernID := r.currentExplorationConcernID()
 	orphaned := explorationPressure >= r.config.Dynamics.AttentionThreshold &&
 		currentConcernID == "" && !r.explorationCandidateActive() &&
-		attentionDue(r.state.LastAttentionAt, time.Now().UTC(), r.config.Dynamics.AttentionRevisitSeconds)
+		attentionDue(r.state.LastAttentionAt, time.Now().UTC(), r.resourceAwareAttentionSeconds(r.config.Dynamics.AttentionRevisitSeconds))
 	if (crossed || orphaned) && explorationDominatesValuePressure(r.state.ValueField) && currentConcernID == "" && !r.attentionCandidateActive() {
 		if r.state.Stage >= 8 {
 			// The drive stays active, while a low-cost perceptual scan supplies the
@@ -151,7 +151,7 @@ func (r *Runtime) maybeEmitLifeValueSignal() (bool, error) {
 	if r.attentionCandidateActive() || r.hasCommitmentAwaitingAssimilation() {
 		return false, nil
 	}
-	cooldown := r.config.Dynamics.AttentionMaximumIdleSeconds
+	cooldown := r.resourceAwareAttentionSeconds(r.config.Dynamics.AttentionMaximumIdleSeconds)
 	if cooldown <= 0 {
 		cooldown = 30
 	}
@@ -364,7 +364,7 @@ func (r *Runtime) freshLifeValueAffordances(direction string, now time.Time) []l
 }
 
 func (r *Runtime) lifeContinuityFallbackDue(now time.Time) bool {
-	idle := r.config.Dynamics.AttentionMaximumIdleSeconds
+	idle := r.resourceAwareAttentionSeconds(r.config.Dynamics.AttentionMaximumIdleSeconds)
 	if idle <= 0 {
 		idle = 10
 	}
@@ -913,7 +913,7 @@ func (r *Runtime) nextStage4Request() (CognitiveRequest, bool) {
 			effectiveConcernSalience < minimumConcernSalience {
 			continue
 		}
-		if !attentionDue(concern.LastFocusedAt, now, r.config.Dynamics.AttentionRevisitSeconds) {
+		if !attentionDue(concern.LastFocusedAt, now, r.resourceAwareAttentionSeconds(r.config.Dynamics.AttentionRevisitSeconds)) {
 			continue
 		}
 		candidates = append(candidates, candidate)

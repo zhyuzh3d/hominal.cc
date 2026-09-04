@@ -62,6 +62,38 @@ func TestUnsatisfiedNonExplorationValueCanEnterAttention(t *testing.T) {
 	}
 }
 
+func TestStageTwentyCriticalBudgetSlowsOnlyEndogenousAttention(t *testing.T) {
+	config := testConfig(20)
+	config.CognitiveCore = "continuous-v1"
+	config.Dynamics.AttentionMaximumIdleSeconds = 10
+	config.Dynamics.AttentionRevisitSeconds = 10
+	runtime, err := New(t.TempDir(), "resource-paced-attention", config, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	runtime.state.Body.CognitiveResourceBand = "critical"
+	runtime.state.ValueField.Activation = LifeValueVector{Relatedness: 0.9}
+	runtime.state.ValueField.Satiation = LifeValueVector{}
+	runtime.state.LastAttentionAt = now.Add(-30 * time.Second).Format(time.RFC3339Nano)
+	if emitted, err := runtime.maybeEmitLifeValueSignal(); err != nil || emitted {
+		t.Fatalf("critical budget reopened an idle value after only 30 seconds: emitted=%v err=%v", emitted, err)
+	}
+	runtime.state.LastAttentionAt = now.Add(-121 * time.Second).Format(time.RFC3339Nano)
+	if emitted, err := runtime.maybeEmitLifeValueSignal(); err != nil || !emitted {
+		t.Fatalf("critical budget permanently silenced embodied value: emitted=%v err=%v", emitted, err)
+	}
+
+	// New Reality remains causal and immediate regardless of the low-resource
+	// cadence. The pacing applies only to timers that would reopen old material.
+	runtime.state.Background = []Event{{ID: "fresh-reality", Kind: "mentor_received", Status: "pending", Summary: "一条刚到达的导师消息"}}
+	runtime.state.LastAttentionAt = now.Format(time.RFC3339Nano)
+	request, ok := runtime.nextStage4Request()
+	if !ok || request.Focus.ID != "fresh-reality" {
+		t.Fatalf("fresh Reality was delayed by resource pacing: %#v", request)
+	}
+}
+
 func TestWeakSatisfiedValueStaysInEmbodiedDynamics(t *testing.T) {
 	runtime, err := New(t.TempDir(), "value-below-consciousness", testConfig(10), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
 	if err != nil {
