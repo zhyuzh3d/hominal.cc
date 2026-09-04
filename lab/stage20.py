@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Independent A1X laboratory. Never imports legacy Lab or original private settings."""
-import argparse,hashlib,json,os,pathlib,shlex,shutil,subprocess,tarfile,tempfile,time,uuid
+import argparse,hashlib,json,os,pathlib,re,shlex,shutil,subprocess,tarfile,tempfile,time,uuid
 from datetime import datetime,timezone,timedelta
 import yaml
 from stage20_config import dynamics_config,seed_config
@@ -25,6 +25,9 @@ def copy(source,dest,fetch=False):
     args=['scp','-o','ControlPath='+SOCKET]
     run(args+([HOST+':'+source,str(dest)] if fetch else [str(source),HOST+':'+dest]))
 def stamp():return datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+def parse_time(value):
+    # Go persists RFC3339 nanoseconds; the host may still run Python 3.9.
+    return datetime.fromisoformat(re.sub(r'(\.\d{6})\d+',r'\1',value).replace('Z','+00:00'))
 def current():return json.loads((ARCHIVE/'current.json').read_text())
 def active():return remote('systemctl --user is-active hominal20-life 2>/dev/null || true').strip() in ('active','activating','deactivating')
 def stopped():
@@ -63,6 +66,7 @@ def config(instance,minutes):
     copy(REMOTE+'/private/models.json',PRIVATE/'models.json',True)
     gateway=json.loads((PRIVATE/'gateway.json').read_text());gateway['max_output_tokens']=2200
     birth=('Alice，你现在生活在AOKZOE A1X掌机的Bazzite KDE桌面，主机当前名为bazzite。生命进程以普通用户AOKZOE运行，没有管理员授权。'
+      '宿主系统根目录使用只读镜像；根目录可用字节为0不代表用户数据盘已满。用户空间可写，宿主驱动与系统更新由导师维护。'
       '这具身体有RTX 5060 Ti 16GB显卡。视觉器官使用本地模型读取真实屏幕并提出定位，输入器官实际触控、输入和滚动。'
       '主脑使用terra none，简单局部推理可用luna none，复杂辅助可用sol low；辅助结论需要由你判断采用。'
       '当前可探索的生活空间是独立的本地视觉工作室，可阅读、写作、保存和重新打开笔记。工作室中的内容都是这条实验线的材料。'
@@ -82,7 +86,7 @@ def config(instance,minutes):
 
 def arm_deadline(state):
     # Calendar timer is independent of the cognition process and SSH supervisor.
-    end=datetime.fromisoformat(state['planned_end'].replace('Z','+00:00'))+timedelta(seconds=20)
+    end=parse_time(state['planned_end'])+timedelta(seconds=20)
     unit='hominal20-end-'+hashlib.sha256((state['instance_id']+state['planned_end']).encode()).hexdigest()[:12]
     remote(shlex.join(['systemd-run','--user','--unit='+unit,'--on-calendar='+end.strftime('%Y-%m-%d %H:%M:%S UTC'),
        '--timer-property=AccuracySec=1s','--collect','/usr/bin/systemctl','--user','stop','hominal20-life.service']))
@@ -139,7 +143,7 @@ def status():
 
 def extend(minutes):
     c=current();s=remote_json('cat '+c['instance_root']+'/state/current.json')
-    end=datetime.fromisoformat(s['t0'].replace('Z','+00:00'))+timedelta(minutes=minutes)
+    end=parse_time(s['t0'])+timedelta(minutes=minutes)
     response=api('/v1/lab/deadline',{'planned_end':end.isoformat().replace('+00:00','Z')})
     s=remote_json('cat '+c['instance_root']+'/state/current.json');new=arm_deadline(s)
     remote('systemctl --user set-property --runtime hominal20-life RuntimeMaxSec='+str(minutes*60+120)+'s')

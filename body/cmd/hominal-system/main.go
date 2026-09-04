@@ -74,7 +74,7 @@ func observe(id string) organ.Observation {
 		encoded[key] = data
 	}
 	return organ.Observation{
-		Schema: organ.ObservationSchema, OrganID: id, SurfaceID: "ubuntu.body",
+		Schema: organ.ObservationSchema, OrganID: id, SurfaceID: "linux.body",
 		ObservedAt: time.Now().UTC().Format(time.RFC3339Nano), Facts: encoded,
 	}
 }
