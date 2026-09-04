@@ -3812,6 +3812,43 @@ func TestCausalChangeResetsActionAssistanceFailureStreak(t *testing.T) {
 	}
 }
 
+func TestRepeatedSemanticActionStallExposesBoundedActionAssistance(t *testing.T) {
+	config := testConfig(20)
+	config.CognitiveCore = "continuous-v1"
+	runtime, err := New(t.TempDir(), "instance", config, &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.state.Commitments = []ActionCommitment{
+		{ID: "commit-1", ConcernID: "concern-1"},
+		{ID: "commit-2", ConcernID: "concern-1"},
+		{ID: "commit-3", ConcernID: "concern-1"},
+	}
+	request := normalizedOrganRequest("desktop", "desktop_activate", `{"target":"保存笔记"}`)
+	runtime.state.Memories = []Memory{
+		{CommitmentID: "commit-1", ActionKind: "organ_action", EnactedRequest: request, PredictionDifference: 0.72, RemainingDifference: 0.41},
+		{CommitmentID: "commit-2", ActionKind: "organ_action", EnactedRequest: request, PredictionDifference: 0.58, RemainingDifference: 0.29},
+	}
+	current := ActionState{CommitmentID: "commit-3", Kind: "organ_action", OrganID: "desktop", Operation: "desktop_activate", Request: `{"target":"保存笔记"}`, Status: "completed", Effect: "changed"}
+	runtime.annotateActionAssistanceOpportunity(&current, "concern-1")
+	if current.ImplementationFailureStreak != 2 || !current.ActionAssistanceAvailable {
+		t.Fatalf("alice's repeated semantic stall did not expose bounded assistance: %#v", current)
+	}
+	if runtime.state.CognitiveResource.NextProfile != nil {
+		t.Fatalf("semantic stall silently selected a helper: %#v", runtime.state.CognitiveResource.NextProfile)
+	}
+
+	runtime.state.Memories = append(runtime.state.Memories, Memory{
+		CommitmentID: "commit-2", ActionKind: "organ_action", EnactedRequest: request,
+		PredictionDifference: 0.08, RemainingDifference: 0.04,
+	})
+	reset := ActionState{CommitmentID: "commit-3", Kind: "organ_action", OrganID: "desktop", Operation: "desktop_activate", Request: `{"target":"保存笔记"}`, Status: "completed", Effect: "changed"}
+	runtime.annotateActionAssistanceOpportunity(&reset, "concern-1")
+	if reset.ImplementationFailureStreak != 0 || reset.ActionAssistanceAvailable {
+		t.Fatalf("a later low-gap result did not reset semantic assistance: %#v", reset)
+	}
+}
+
 func TestStageFiveUnrelatedRealityCannotSatisfyExploration(t *testing.T) {
 	runtime, err := New(t.TempDir(), "instance", testConfig(5), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
 	if err != nil {

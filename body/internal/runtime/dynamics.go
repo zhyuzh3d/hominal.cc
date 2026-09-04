@@ -1206,34 +1206,67 @@ func (r *Runtime) applyCognitiveCommit(commit CognitiveCommit) error {
 
 // annotateActionAssistanceOpportunity makes a bodily implementation limit
 // visible without bypassing the main consciousness. The main profile first
-// absorbs failed Reality and remains free to retry, change route, stop, or ask
-// for one serial Sol/low implementation through the existing resource choice.
+// absorbs Reality and remains free to retry, change route, stop, or ask for one
+// serial Sol/low implementation through the existing resource choice.
 func (r *Runtime) annotateActionAssistanceOpportunity(action *ActionState, concernID string) {
-	if r.state.Stage < 10 || action == nil || action.Kind != "organ_action" ||
-		(action.Status != "failed" && action.Status != "unknown") || strings.TrimSpace(concernID) == "" {
+	if r.state.Stage < 10 || action == nil || action.Kind != "organ_action" || strings.TrimSpace(concernID) == "" {
 		return
 	}
-	failures := 1
-	for index := len(r.state.Background) - 1; index >= 0; index-- {
-		event := r.state.Background[index]
-		if event.Kind != "action_result" {
-			continue
+	failures := 0
+	if action.Status == "failed" || action.Status == "unknown" {
+		failures = 1
+		for index := len(r.state.Background) - 1; index >= 0; index-- {
+			event := r.state.Background[index]
+			if event.Kind != "action_result" {
+				continue
+			}
+			var previous ActionState
+			if json.Unmarshal(event.Payload, &previous) != nil || previous.Kind != "organ_action" {
+				continue
+			}
+			commitment := r.commitmentByID(previous.CommitmentID)
+			if commitment == nil || commitment.ConcernID != concernID {
+				continue
+			}
+			if previous.Status == "failed" || previous.Status == "unknown" {
+				failures++
+				continue
+			}
+			if previous.Status == "completed" && previous.Effect != "observed" {
+				break
+			}
 		}
-		var action ActionState
-		if json.Unmarshal(event.Payload, &action) != nil || action.Kind != "organ_action" {
-			continue
+	}
+
+	// A completed input can still be an implementation failure at the meaning
+	// level. Stage 20 can expose that limit after Alice herself has twice judged
+	// the same stable request to leave both a material prediction error and a
+	// material unresolved difference. A later low-gap result resets the streak.
+	if r.state.Stage >= 20 && action.Status == "completed" {
+		request := normalizedActionStateRequest(*action)
+		semanticStalls := 0
+		inspected := 0
+		for index := len(r.state.Memories) - 1; index >= 0 && inspected < 32; index-- {
+			memory := r.state.Memories[index]
+			inspected++
+			if memory.ActionKind != "organ_action" || memory.EnactedRequest != request {
+				continue
+			}
+			commitment := r.commitmentByID(memory.CommitmentID)
+			if commitment == nil || commitment.ConcernID != concernID {
+				continue
+			}
+			if memory.PredictionDifference < 0.4 || memory.RemainingDifference < 0.2 {
+				break
+			}
+			semanticStalls++
 		}
-		commitment := r.commitmentByID(action.CommitmentID)
-		if commitment == nil || commitment.ConcernID != concernID {
-			continue
+		if semanticStalls > failures {
+			failures = semanticStalls
 		}
-		if action.Status == "failed" || action.Status == "unknown" {
-			failures++
-			continue
-		}
-		if action.Status == "completed" && action.Effect != "observed" {
-			break
-		}
+	}
+	if failures == 0 {
+		return
 	}
 	action.ImplementationFailureStreak = failures
 	profile := CognitiveProfile{Model: "sol", ReasoningEffort: "low"}
