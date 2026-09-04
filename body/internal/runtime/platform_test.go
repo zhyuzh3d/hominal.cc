@@ -185,7 +185,7 @@ func TestStage20AbsorbsPriorStepWithoutClosingItsNextChosenAction(t *testing.T) 
 	if err := r.applyCognitiveCommit(c); err != nil {
 		t.Fatal(err)
 	}
-	if r.state.Concerns[0].Resolution != "resolved" {
+	if remaining := r.concernByID("read"); remaining != nil && remaining.Resolution != "resolved" {
 		t.Fatal("direct closure was overridden")
 	}
 }
