@@ -116,11 +116,19 @@ def verify_binding(binding, frame, at=None):
     if not (0 <= x < frame['width'] and 0 <= y < frame['height']): raise ValueError('target out of bounds')
 
 
+class InputRejected(ValueError): pass
+
+
 def input_command(kind, payload, deadline):
     req = urllib.request.Request('http://127.0.0.1:8766/input',
          json.dumps({'kind': kind, 'payload': payload, 'deadline': deadline}).encode(),
          {'Content-Type': 'application/json','X-Hominal-Capability':(ROOT/'services/input.cap').read_text()})
-    with urllib.request.urlopen(req, timeout=max(.1, deadline-time.time())) as response: return json.load(response)
+    try:
+        with urllib.request.urlopen(req, timeout=max(.1, deadline-time.time())) as response: return json.load(response)
+    except urllib.error.HTTPError as exc:
+        receipt=json.loads(exc.read())
+        if receipt.get('input_attempted') is False:raise InputRejected(receipt.get('error','input rejected')) from exc
+        raise
 
 
 def perform(req):
@@ -178,6 +186,7 @@ def perform(req):
             out['effect'] = 'changed' if result['pixels_changed'] else 'unknown'
         out.update(status='completed', summary='实际操作及可核验观察已返回；目标是否实现由主脑结合证据判断。', output=json.dumps(result,ensure_ascii=False))
     except Exception as exc:
+        if isinstance(exc,InputRejected):attempted=False
         out.update(status='unknown' if attempted else 'failed', summary=str(exc)[:300],
                    output=json.dumps({'error':type(exc).__name__,'input_attempted':attempted,'detail':str(exc)[:300]}))
     with (EVIDENCE/'actions.jsonl').open('a') as log: log.write(json.dumps(out,ensure_ascii=False)+'\n')

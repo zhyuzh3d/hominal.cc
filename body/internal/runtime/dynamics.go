@@ -319,6 +319,12 @@ func (r *Runtime) recentLivedContextIDs(limit int) map[string]bool {
 }
 
 func affordanceDomain(key string) string {
+	if strings.HasPrefix(key, "surface:") {
+		parts := strings.SplitN(key, ":", 3)
+		if len(parts) == 3 {
+			return parts[1]
+		}
+	}
 	switch key {
 	case "mentor_channel":
 		return "mentor"
@@ -455,7 +461,17 @@ func (r *Runtime) lifeValueAffordances(direction string) []lifeValueAffordance {
 			Supports: []string{"agency", "vitality", "contribution"},
 		})
 	}
-	if bodyHasOrganCapability(r.state.Body, "public_web") {
+	if r.config.Stage == 20 {
+		for _, surface := range r.config.Platform.Surfaces {
+			installed, ok := r.state.Body.Organs[surface.OrganID]
+			if !ok || !installed.Accepting || installed.Status == "unavailable" {
+				continue
+			}
+			available = append(available, lifeValueAffordance{Key: "surface:" + surface.OrganID + ":" + surface.ID,
+				Surface: surface.Description, Supports: surface.Supports})
+		}
+	}
+	if r.config.Stage != 20 && bodyHasOrganCapability(r.state.Body, "public_web") {
 		// Concrete public content can meet exploration, vitality or relatedness.
 		// The account's empty composer is an effector, not a life object: Alice
 		// always knows it is available through body capabilities and may use it
@@ -478,7 +494,7 @@ func (r *Runtime) lifeValueAffordances(direction string) []lifeValueAffordance {
 	// the System Organ can still reveal the process and support building a future
 	// desktop organ, but it must not make the Browser Organ appear able to see a
 	// native window.
-	if r.state.Body.DesktopAvailable && r.state.Body.WechatRunning && bodyHasOrganCapability(r.state.Body, "desktop_ui") {
+	if r.config.Stage != 20 && r.state.Body.DesktopAvailable && r.state.Body.WechatRunning && bodyHasOrganCapability(r.state.Body, "desktop_ui") {
 		available = append(available, lifeValueAffordance{
 			Key: "wechat", Surface: "当前由 desktop_ui 器官开放感知与行动的微信客户端",
 			Supports: []string{"exploration", "vitality", "relatedness"},

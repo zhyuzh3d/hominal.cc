@@ -49,6 +49,7 @@ def main():
             if self.path!='/input': return self.reply(404,{'error':'unknown route'})
             n=int(self.headers.get('Content-Length','0'))
             if not 0<n<40000: return self.reply(400,{'error':'invalid size'})
+            delivered=False
             try:
                 req=json.loads(self.rfile.read(n)); p=req['payload']; kind=req['kind']
                 with gate:
@@ -56,27 +57,36 @@ def main():
                     locked=subprocess.check_output(['/usr/lib64/qt6/bin/qdbus','org.freedesktop.ScreenSaver',
                            '/ScreenSaver','org.freedesktop.ScreenSaver.GetActive'],text=True,timeout=2).strip()
                     if locked!='false': raise ValueError('session locked')
+                    scope=json.loads((root/'services/input-scope.json').read_text())
+                    focus=json.loads(subprocess.check_output(['/usr/bin/python3',str(pathlib.Path(__file__).with_name('session_window.py'))],text=True,timeout=2))
+                    if (not scope.get('window_id') or focus.get('window_id')!=scope['window_id']
+                            or focus.get('minimized') is not False or focus.get('active') is not True
+                            or focus.get('showing_desktop') is not False):
+                        raise ValueError('foreground window is outside the current experiment surface; no input delivered')
                     if kind=='tap':
                         x,y=p['x'],p['y']
                         if not (type(x) in (float,int) and type(y) in (float,int) and 0<=x<1 and 0<=y<1):
                             raise ValueError('invalid normalized point')
+                        delivered=True
                         touch.write(e.EV_ABS,e.ABS_X,round(x*65535));touch.write(e.EV_ABS,e.ABS_Y,round(y*65535))
                         try:
                             touch.write(e.EV_KEY,e.BTN_TOUCH,1);touch.syn();time.sleep(.07)
                         finally: touch.write(e.EV_KEY,e.BTN_TOUCH,0);touch.syn()
-                    elif kind=='key': key(p['key'])
+                    elif kind=='key':
+                        if p['key'] not in KEYS:raise ValueError('unsupported key')
+                        delivered=True;key(p['key'])
                     elif kind=='scroll':
                         value=p['amount']
                         if type(value)!=int or not -8<=value<=8: raise ValueError('invalid scroll')
-                        keyboard.write(e.EV_REL,e.REL_WHEEL,value);keyboard.syn()
+                        delivered=True;keyboard.write(e.EV_REL,e.REL_WHEEL,value);keyboard.syn()
                     elif kind=='text':
                         value=p['text']
                         if not isinstance(value,str) or len(value)>8000: raise ValueError('invalid text')
                         subprocess.run(['wl-copy','--type','text/plain;charset=utf-8'],input=value,text=True,check=True,timeout=2)
-                        key('Ctrl+V')
+                        delivered=True;key('Ctrl+V')
                     else: raise ValueError('unsupported input')
                     self.reply(200,{'delivered':True,'kind':kind,'at':time.time(),'semantic_success':'not_decided'})
-            except Exception as exc: self.reply(422,{'error':str(exc)[:200]})
+            except Exception as exc: self.reply(422,{'error':str(exc)[:200],'input_attempted':delivered})
         def do_GET(self):
             self.reply(200 if self.path=='/health' else 404,{'ready':True,'busy':gate.locked()})
     # Reading /dev/input is not required for writing this user's virtual device.

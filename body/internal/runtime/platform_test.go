@@ -116,3 +116,24 @@ func TestDesktopUserMentorAccessNeedsNoHominalAccount(t *testing.T) {
 		}
 	}
 }
+
+func TestStage20AffordancesRequireAnExplicitAccessibleSurface(t *testing.T) {
+	cfg := testConfig(20)
+	cfg.CognitiveCore = "continuous-v1"
+	cfg.Platform.Surfaces = []PlatformSurface{{ID: "workbench", OrganID: "desktop", Description: "local visible material", Supports: []string{"exploration", "vitality"}}}
+	r, err := New(t.TempDir(), "scoped", cfg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.state.Body = BodySnapshot{DesktopAvailable: true, WechatRunning: true, Organs: map[string]OrganSnapshot{
+		"desktop": {Accepting: true, Status: "ready", Capabilities: []string{"desktop_ui", "public_web"}},
+	}}
+	got := r.lifeValueAffordances("exploration")
+	if len(got) != 1 || got[0].Key != "surface:desktop:workbench" {
+		t.Fatalf("host process became an ungranted surface: %#v", got)
+	}
+	r.config.Platform.Surfaces = nil
+	if len(r.lifeValueAffordances("exploration")) != 0 {
+		t.Fatal("generic desktop capability invented an accessible app")
+	}
+}
