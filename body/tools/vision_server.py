@@ -14,7 +14,16 @@ def parse_point(text):
     calls=re.findall(r'<tool_call>\s*(.*?)\s*</tool_call>',text,re.S)
     if calls:
         if len(calls)!=1: raise ValueError('multiple visual candidates')
-        obj=json.loads(calls[0]);args=obj.get('arguments',{})
+        try:
+            obj=json.loads(calls[0]);args=obj.get('arguments',{})
+        except json.JSONDecodeError:
+            # GUI-Owl can omit only the opening coordinate bracket on a valid
+            # native call.  Accept that exact shape without inventing values.
+            repaired=re.fullmatch(r'\s*\{\s*"name"\s*:\s*"computer_use"\s*,\s*"arguments"\s*:\s*\{\s*"action"\s*:\s*"left_click"\s*,\s*"coordinate"\s*:\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*\]\s*\}\s*\}\s*',calls[0])
+            if not repaired:raise
+            x,y=map(float,repaired.groups())
+            if not (0<=x<=1000 and 0<=y<=1000):raise ValueError('visual candidate out of bounds')
+            return {'found':True,'x':x,'y':y,'format_repaired':True}
         if obj.get('name')!='computer_use':raise ValueError('unexpected visual function')
         if args.get('action')=='terminate' and args.get('status')=='failure':return {'found':False}
         point=args.get('coordinate')
@@ -103,41 +112,30 @@ def main():
                     image = Image.open(path).convert('RGB')
                     image.thumbnail((1280, 960))
                     messages = [{'role': 'user', 'content': [{'type': 'image', 'image': image}, {'type': 'text', 'text': prompt}]}]
-                    json_retry_messages=messages
                     if mode=='locate' and 'GUI-Owl' in model_root.name:
-                        # Use the published model-native grounding contract, not guessed JSON repair.
+                        # Use the published model-native grounding contract.
                         tool={'type':'function','function':{'name':'computer_use','description':'Propose a visible UI location. Coordinates are normalized to a 1000 by 1000 screen. Aim inside the center of the control.',
                           'parameters':{'type':'object','properties':{'action':{'type':'string','enum':['left_click','mouse_move','terminate']},
                           'coordinate':{'type':'array','items':{'type':'number'}},'status':{'type':'string','enum':['failure']}},'required':['action']}}}
                         system='Return one location in this exact format: <tool_call> {"name":"computer_use","arguments":{"action":"left_click","coordinate":[x,y]}} </tool_call>. Replace x and y by integers in 0..1000. If the target is absent, return <tool_call> {"name":"computer_use","arguments":{"action":"terminate","status":"failure"}} </tool_call>. Do not add other properties.\n<tools>\n'+json.dumps(tool)+'\n</tools>'
                         messages=[{'role':'system','content':system},{'role':'user','content':[{'type':'image','image':image},{'type':'text','text':'Locate this visible control: '+target}]}]
                     token_limit=96 if mode=='locate' else 650
-                    total_start=time.monotonic();result=None
-                    for attempt in range(2 if mode=='locate' and 'GUI-Owl' in model_root.name else 1):
-                        attempt_messages=messages
-                        if attempt:
-                            attempt_messages=json_retry_messages
-                        inputs = processor.apply_chat_template(attempt_messages, tokenize=True, add_generation_prompt=True,
-                                  return_dict=True, return_tensors='pt').to(model.device)
-                        start = time.monotonic()
-                        with torch.inference_mode():
-                            output = model.generate(**inputs, max_new_tokens=token_limit,
-                                do_sample=False, stopping_criteria=StoppingCriteriaList([Deadline(deadline)]))
-                        torch.cuda.synchronize()
-                        if time.time() >= deadline: raise TimeoutError('vision generation expired; no usable result')
-                        text = processor.decode(output[0][inputs['input_ids'].shape[-1]:], skip_special_tokens=True)
-                        result = {'mode': mode, 'text': text, 'source': 'local_visual_model_hypothesis',
-                                  'model': model_root.name, 'seconds': round(time.monotonic()-total_start, 3),
-                                  'attempt_seconds': round(time.monotonic()-start,3), 'format_retries': attempt,
-                                  'output_truncated':len(output[0])-inputs['input_ids'].shape[-1]>=token_limit,
-                                  'gpu_memory_bytes': torch.cuda.max_memory_allocated()}
-                        with (root/'vision-results.jsonl').open('a') as log:
-                            log.write(json.dumps({**result,'image':str(path),'target':target,'at':time.time()},ensure_ascii=False)+'\n')
-                        if mode!='locate':break
-                        try:
-                            result.update(parse_point(text));break
-                        except ValueError:
-                            if attempt:raise
+                    inputs = processor.apply_chat_template(messages, tokenize=True, add_generation_prompt=True,
+                              return_dict=True, return_tensors='pt').to(model.device)
+                    start = time.monotonic()
+                    with torch.inference_mode():
+                        output = model.generate(**inputs, max_new_tokens=token_limit,
+                            do_sample=False, stopping_criteria=StoppingCriteriaList([Deadline(deadline)]))
+                    torch.cuda.synchronize()
+                    if time.time() >= deadline: raise TimeoutError('vision generation expired; no usable result')
+                    text = processor.decode(output[0][inputs['input_ids'].shape[-1]:], skip_special_tokens=True)
+                    result = {'mode': mode, 'text': text, 'source': 'local_visual_model_hypothesis',
+                              'model': model_root.name, 'seconds': round(time.monotonic()-start, 3),
+                              'output_truncated':len(output[0])-inputs['input_ids'].shape[-1]>=token_limit,
+                              'gpu_memory_bytes': torch.cuda.max_memory_allocated()}
+                    if mode == 'locate': result.update(parse_point(text))
+                    with (root/'vision-results.jsonl').open('a') as log:
+                        log.write(json.dumps({**result,'image':str(path),'target':target,'at':time.time()},ensure_ascii=False)+'\n')
                     self.reply(200, result)
                 finally:
                     gate.release()

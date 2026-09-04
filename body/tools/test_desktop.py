@@ -16,6 +16,8 @@ class DesktopBoundaryTests(unittest.TestCase):
         self.assertEqual(v.parse_point('{"found":false}'),{'found':False})
         self.assertEqual(v.parse_point('{"found":true,"x":500,"y":250}')['x'],500)
         self.assertEqual(v.parse_point('<tool_call>{"name":"computer_use","arguments":{"action":"left_click","coordinate":[500,250]}}</tool_call>')['y'],250)
+        repaired=v.parse_point('<tool_call>{"name":"computer_use","arguments":{"action":"left_click","coordinate":391, 684]}}</tool_call>')
+        self.assertEqual((repaired['x'],repaired['y'],repaired['format_repaired']),(391,684,True))
         for invalid in ['{"x":1001,"y":100}','{"x":true,"y":100}','click 100 200','{"x":500,"y":500}','{"found":true,"x":281,793,"y":793}']:
             with self.assertRaises(ValueError):v.parse_point(invalid)
 
