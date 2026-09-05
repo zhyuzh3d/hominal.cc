@@ -7,6 +7,15 @@ import stage20
 
 
 class Stage20ControlTests(unittest.TestCase):
+    def test_automation_browser_is_pinned_to_the_integrated_radeon(self):
+        self.assertEqual(stage20.AMD_RENDER_NODE,
+                         '/dev/dri/by-path/pci-0000:c6:00.0-render')
+        self.assertEqual(stage20.BROWSER_GPU_ENV['DRI_PRIME'],'pci-0000_c6_00_0')
+        self.assertEqual(stage20.BROWSER_GPU_ENV['__GLX_VENDOR_LIBRARY_NAME'],'mesa')
+        self.assertEqual(stage20.BROWSER_GPU_ENV['MESA_VK_DEVICE_SELECT'],'1002:150e!')
+        self.assertEqual(stage20.BROWSER_GPU_ENV['CUDA_VISIBLE_DEVICES'],'-1')
+        self.assertEqual(stage20.VISION_GPU_ENV['CUDA_VISIBLE_DEVICES'],'0')
+
     def test_runtime_roles_resolve_catalog_models_and_default(self):
         catalog={
             'codex-luna':{'supported_reasoning_efforts':['none','low']},

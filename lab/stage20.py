@@ -29,6 +29,22 @@ ENV={'HOMINAL20_ROOT':REMOTE,'XDG_RUNTIME_DIR':'/run/user/1000','DBUS_SESSION_BU
      'WAYLAND_DISPLAY':'wayland-0','QT_QPA_PLATFORM':'wayland','HOMINAL_RESOURCE_LEDGER':REMOTE+'/state/cognitive-usage.jsonl',
      'HOMINAL_MENTOR_SOCKET':REMOTE+'/services/mentor/hominal.sock','HOMINAL_ORGAN_RUNTIME_DIR':REMOTE+'/services/organs'}
 
+# Ordinary desktop/browser rendering stays on the integrated Radeon and cannot
+# accidentally create a CUDA context.  The vision service gets the dedicated
+# GPU explicitly and may wake it when local model inference needs it.
+AMD_RENDER_NODE='/dev/dri/by-path/pci-0000:c6:00.0-render'
+BROWSER_GPU_ENV={
+    'DRI_PRIME':'pci-0000_c6_00_0',
+    '__GLX_VENDOR_LIBRARY_NAME':'mesa',
+    '__EGL_VENDOR_LIBRARY_FILENAMES':'/usr/share/glvnd/egl_vendor.d/50_mesa.json',
+    'VK_DRIVER_FILES':'/usr/share/vulkan/icd.d/radeon_icd.x86_64.json',
+    'MESA_VK_DEVICE_SELECT':'1002:150e!',
+    'LIBVA_DRIVER_NAME':'radeonsi',
+    'VDPAU_DRIVER':'radeonsi',
+    'CUDA_VISIBLE_DEVICES':'-1',
+}
+VISION_GPU_ENV={'CUDA_VISIBLE_DEVICES':'0'}
+
 YAML_FIELD_COMMENTS={
     'schema':'配置文件结构版本，用于识别字段语义。','device':'A1X设备及当前网络、系统事实。',
     'name':'设备或对象的稳定名称。','hostname':'设备当前主机名。','address':'设备固定IPv4地址。',
@@ -44,7 +60,7 @@ YAML_FIELD_COMMENTS={
     'sleep_mode':'内核当前采用的睡眠模式。','wowlan_supported':'Wi-Fi硬件是否声明支持无线唤醒。',
     'wowlan_enabled':'当前是否已启用无线唤醒。','remote_wake_currently_available':'当前是否具备已验证的远程唤醒能力。',
     'note':'对配置边界或风险的简短说明。','base_url':'llmserver统一接口根地址。',
-    'api_key':'llmserver访问令牌；敏感字段，仅保存在0600私密配置中。','adapter':'模型网关协议适配器。',
+    'api_key':'llmserver访问令牌；敏感字段，仅保存在0600私密配置中。','adapter':'模型网关协议适配器。',  # secret-scan: allow-literal
     'max_output_tokens':'单次模型响应允许的最大输出Token数。','window_id':'当前允许输入的KWin窗口标识。',
     'surface':'输入范围对应的受控界面名称。','codex-terra':'llmserver公开模型codex-terra。',
     'codex-luna':'llmserver公开模型codex-luna。','codex-sol':'llmserver公开模型codex-sol。',
@@ -192,16 +208,20 @@ def prepare():
 def body_up():
     stopped();release=json.loads((ARCHIVE/'release.json').read_text())['release'];scripts=REMOTE+'/releases/'+release+'/body/tools/'
     remote('systemctl --user stop hominal20-vision hominal20-input hominal20-workbench hominal20-browser 2>/dev/null || true')
-    def unit(name,command):
+    def unit(name,command,extra_env=None):
+        environment={**ENV,**(extra_env or {})}
         remote(shlex.join(['systemd-run','--user','--unit=hominal20-'+name,'--collect','--property=UMask=0077']+
-                         ['--setenv='+k+'='+v for k,v in ENV.items()]+command))
+                         ['--setenv='+k+'='+v for k,v in environment.items()]+command))
     python=REMOTE+'/venv/bin/python'
     unit('input',['kde-inhibit','--power','--screenSaver',python,scripts+'input_server.py'])
-    unit('vision',[python,scripts+'vision_server.py','--model',REMOTE+'/models/GUI-Owl-1.5-4B-Instruct','--evidence-root',REMOTE+'/evidence'])
+    unit('vision',[python,scripts+'vision_server.py','--model',REMOTE+'/models/GUI-Owl-1.5-4B-Instruct','--evidence-root',REMOTE+'/evidence'],
+        VISION_GPU_ENV)
     unit('workbench',[python,scripts+'stage20_workbench.py','--workspace',REMOTE+'/workspace'])
     unit('browser',['/home/AOKZOE/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome','--ozone-platform=wayland',
+        '--render-node-override='+AMD_RENDER_NODE,
         '--app=http://127.0.0.1:8760','--user-data-dir='+REMOTE+'/profiles/workbench','--remote-debugging-address=127.0.0.1',
-        '--remote-debugging-port=9223','--no-first-run','--no-default-browser-check','--password-store=basic','--start-maximized'])
+        '--remote-debugging-port=9223','--no-first-run','--no-default-browser-check','--password-store=basic','--start-maximized'],
+        BROWSER_GPU_ENV)
     for _ in range(30):
         try:
             health=remote_json('curl -sf http://127.0.0.1:8765/health')
