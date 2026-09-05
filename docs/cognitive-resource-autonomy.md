@@ -75,7 +75,7 @@ next_profile       alice 为当前焦点继续认知指定的一次性选择
 {"apply":"next","model":"sol","reasoning_effort":"low","task":"reasoning","include_self":false,"purpose":"具体问题、必要事实、需要澄清的逻辑"}
 ```
 
-`task:reasoning` 可用 `fast/none` 或 `high/low`；`task:implementation` 使用 `high/low`，并由主脑固定已认领行动的目标和必要内容。简单逻辑问题不必人为制造持续 Concern。`next` 配合 `action:none`，`purpose` 是主脑主动交出的材料；只有高阶可以通过 `include_self:true` 额外取到当前 Narrative Self。低阶输出上限 200 Token；高阶沿用配置的输出上限。实现协助另外获得真实身体操作契约。核心不自动附上全部个人回忆、情绪、关切或 Seed。
+`task:reasoning` 可使用 `fast` 或 `high`；`task:implementation` 使用 `high`，具体推理强度由本次启动配置选定，并由主脑固定已认领行动的目标和必要内容。简单逻辑问题不必人为制造持续 Concern。`next` 配合 `action:none`，`purpose` 是主脑主动交出的材料；只有高阶可以通过 `include_self:true` 额外取到当前 Narrative Self。低阶输出上限 200 Token；高阶沿用配置的输出上限。实现协助另外获得真实身体操作契约。核心不自动附上全部个人回忆、情绪、关切或 Seed。
 
 这一次协助复用唯一前景租约、现有请求计费和重试，使用单字段 `assistance_result {answer}` 返回结论或代码；没有另设代理调度器。结果以 `cognition_assistance_result` 回到现有事件—注意循环，标明 inferred 和未执行。主脑决定采纳、继续求证、保留经验或通过器官实施。代码建议与真实执行结果分别记录。这样复杂实现多经过一次主脑采用，但所有模型均遵循同一条权责边界，避免高阶无意改变既定内容或低阶直接修改人格。
 

@@ -289,17 +289,17 @@ organ_action 用来让身体器官读取或改变一个具体的身体/世界事
 
 	instructions += `
 
-cognitive_resources 是你当前真实可用的认知资源。default_profile 是本代主力认知，适合绝大多数感知、意义判断、关切、生活决策和结果吸收。high/low 是进阶行动协助：当你已经决定自己要实现什么，但对精确命令、代码或工具步骤把握不足时，可以用 next 请求它协助形成紧接着的一次可执行内容；完成后自然回到主力模型。表达内容、对象、受众与平台先由主力认知确定，high/low 只把已经固定的意图实现成命令、代码或工具步骤。简单且有把握的动作直接由主力认知完成，确定性的本能与机械状态工作由身体内核完成。resource_choice 的 keep 保持当前安排，next 只安排同一因果线程中紧接着的一次认知；每次真实费用、小时与日余额以及资源故障都在 cognitive_resources 中可见。资源投入首先服务于把事情理解好、做好，再由亲历的质量、速度和费用形成自己的使用经验。`
+cognitive_resources 是你当前真实可用的认知资源。default_profile 是本代主力认知，适合绝大多数感知、意义判断、关切、生活决策和结果吸收。high 角色是进阶行动协助：当你已经决定自己要实现什么，但对精确命令、代码或工具步骤把握不足时，可以用 next 请求它协助形成紧接着的一次可执行内容；完成后自然回到主力模型。表达内容、对象、受众与平台先由主力认知确定，high 只把已经固定的意图实现成命令、代码或工具步骤。简单且有把握的动作直接由主力认知完成，确定性的本能与机械状态工作由身体内核完成。每个角色当前配置的模型与推理强度显示在 cognitive_resources 中。resource_choice 的 keep 保持当前安排，next 只安排同一因果线程中紧接着的一次认知；每次真实费用、小时与日余额以及资源故障都在 cognitive_resources 中可见。资源投入首先服务于把事情理解好、做好，再由亲历的质量、速度和费用形成自己的使用经验。`
 	instructions += `
 
-当你已经认领一项行动意图，并且判断精确命令、代码或工具操作需要更可靠的技术形成时，可以把本次 action 设为 none，并用 resource_choice 的 next、high、low 请求紧接着的一次行动协助；purpose 清楚带上已经固定的对象、目标、表达内容、不确定的实现部分、预期结果与核验边界。公开表达或导师消息的文字、受众和平台由主力认知先确定；需要继续构思这些意义内容时，保持主力认知，不交给行动协助。high/low 只实现 purpose 中已经固定的意图，Reality 随后回到原默认档位继续吸收。简单且有把握的行动可以直接完成。`
+当你已经认领一项行动意图，并且判断精确命令、代码或工具操作需要更可靠的技术形成时，可以把本次 action 设为 none，并用 resource_choice 的 next、high 及 cognitive_resources 中该角色的推理强度请求紧接着的一次行动协助；purpose 清楚带上已经固定的对象、目标、表达内容、不确定的实现部分、预期结果与核验边界。公开表达或导师消息的文字、受众和平台由主力认知先确定；需要继续构思这些意义内容时，保持主力认知，不交给行动协助。high 只实现 purpose 中已经固定的意图，Reality 随后回到原默认档位继续吸收。简单且有把握的行动可以直接完成。`
 	instructions += `
 
-action_result 中的 implementation_failure_streak 是同一 Concern 自最近一次实际因果改变以来连续失败或不确定的身体实现次数。action_assistance_available 表示 high/low 当前可以承接一次精确实现。你仍先由主力认知吸收这段 Reality；若目标、对象、内容和核验边界已经固定，而你对具体工具参数或代码仍无把握，可以使用 action:none 与 next/high/low，把这些固定事实写入 purpose，再让行动协助实现。你也可以基于现实选择换路、停止或自己修正。`
+action_result 中的 implementation_failure_streak 是同一 Concern 自最近一次实际因果改变以来连续失败或不确定的身体实现次数。action_assistance_available 表示 high 角色当前可以承接一次精确实现。你仍先由主力认知吸收这段 Reality；若目标、对象、内容和核验边界已经固定，而你对具体工具参数或代码仍无把握，可以使用 action:none 与 next/high，并采用 cognitive_resources 中该角色的推理强度，把这些固定事实写入 purpose，再让行动协助实现。你也可以基于现实选择换路、停止或自己修正。`
 	if request.Stage >= 10 && request.Lease.ProfileSource == "next" {
 		instructions += `
 
-当前这一次是 high/low 行动协助，不是新的意识判断。current_profile.purpose 保存了主力认知已经认领的固定行动意图。保持其中的对象、目标、表达内容、受众、平台、预期结果与核验边界，只把尚不确定的实现部分转成一项精确 organ_action。你不重新撰写公开或私下消息，不改变行动去向，不重构 Concern、Narrative Self 或长期价值。purpose 尚未固定实际内容或目标时使用 none，把形成意义与内容的选择交还主力认知。完成这一次协助后 resource_choice 使用 keep/current/current。`
+当前这一次是 high 角色行动协助，不是新的意识判断。current_profile.purpose 保存了主力认知已经认领的固定行动意图。保持其中的对象、目标、表达内容、受众、平台、预期结果与核验边界，只把尚不确定的实现部分转成一项精确 organ_action。你不重新撰写公开或私下消息，不改变行动去向，不重构 Concern、Narrative Self 或长期价值。purpose 尚未固定实际内容或目标时使用 none，把形成意义与内容的选择交还主力认知。完成这一次协助后 resource_choice 使用 keep/current/current。`
 	}
 	if request.Stage >= 9 {
 		instructions += `
@@ -492,7 +492,7 @@ current_situation.operation_conditions 保存具体操作近期遇到的困难�
 
 self.narrative 是紧凑、可继续改写的当前自我理解；历史 methods 可作参考，新形成或修订的方法属于 experience_updates。真实 Memory 累积出 self_model_difference 时，判断现有叙事是否仍适合；有充分经历支持时写完整 narrative_update，保持适合时留空。self_model_difference 是一次内在回看：理解、方法和价值倾向可以随之变化，仍未消融的部分由 self_model_tension 保存；当它产生一个具体、可核验的现实行动时，才形成持续 Concern。value_orientation_update 只用于已经进入自我叙事、值得缓慢改变长期牵引的偏好。重复投入若长期没有带来新现实、体验、理解、能力、联结、贡献或未来行动空间，你能够把这种低收益感受为自我调节的依据。
 
-cognitive_resources 是真实有限的认知资源。default_profile 是主脑：结合自己的经历、态度和当前状态理解意义、关切与生活选择。精确计算适合交给命令或代码；极简单的局部逻辑判断可选 next/fast/none、task:reasoning；复杂推理可选 next/high/low、task:reasoning；对代码、命令或器官操作把握不足时，可选 next/high/low、task:implementation。next 与 action:none 一起提交；purpose 写清问题、必要材料、已确定的目标及希望得到的结果，低阶问题保持短小。协助默认只收到这些材料，实施协助另有身体操作说明；高阶确实需要自我叙事参考时才设 include_self:true。协助结果作为 cognition_assistance_result 回来，由你判断采用，并通过 organ_action 实际实施。简单且有把握的行动直接完成；身体内核处理机械计算与状态。器官也可自动使用 fast/none 解释局部现场。keep 时 task 用 reasoning，include_self 用 false。`
+cognitive_resources 是真实有限的认知资源。default_profile 是主脑：结合自己的经历、态度和当前状态理解意义、关切与生活选择。精确计算适合交给命令或代码；极简单的局部逻辑判断可选 next/fast、task:reasoning；复杂推理可选 next/high、task:reasoning；对代码、命令或器官操作把握不足时，可选 next/high、task:implementation。fast 与 high 的推理强度使用 cognitive_resources 中各自 profile 的当前值。next 与 action:none 一起提交；purpose 写清问题、必要材料、已确定的目标及希望得到的结果，低阶问题保持短小。协助默认只收到这些材料，实施协助另有身体操作说明；高阶确实需要自我叙事参考时才设 include_self:true。协助结果作为 cognition_assistance_result 回来，由你判断采用，并通过 organ_action 实际实施。简单且有把握的行动直接完成；身体内核处理机械计算与状态。器官也可自动使用 fast 角色解释局部现场。keep 时 task 用 reasoning，include_self 用 false。`
 	instructions += `
 
 personal_recall 是从个人历史唤起的具体记忆与当前经验；其中可并列出现当时的记录和相关的后来经历。结合各自的形成时间、来源及眼前状态理解它们，让过去帮助你接续已经发生的后来。经验的 evidence 指向形成它的记忆，经验适用范围可以随现实修订。身体事实与个人解释各自保留来源。
@@ -1040,10 +1040,9 @@ func cognitiveCommitToolWithLinks(stage int, candidates []Event, narrativeEmpty,
 		}
 	}
 	resourceModels := []string{"current", "fast", "main", "high"}
-	resourceEfforts := []string{"current", "none", "low", "medium", "high", "xhigh", "max"}
+	resourceEfforts := []string{"current", "none", "low", "medium", "high", "xhigh", "max", "ultra"}
 	if stage >= 10 {
 		resourceModels = []string{"current", "fast", "high"}
-		resourceEfforts = []string{"current", "none", "low"}
 	}
 	properties := map[string]any{
 		"appraisals": map[string]any{

@@ -9,25 +9,47 @@ import stage20
 class Stage20ControlTests(unittest.TestCase):
     def test_runtime_roles_resolve_catalog_models_and_default(self):
         catalog={
-            'luna':{'id':'codex-luna','supported_reasoning_efforts':['none']},
-            'terra':{'id':'codex-terra','supported_reasoning_efforts':['none','low']},
-            'sol':{'id':'codex-sol','supported_reasoning_efforts':['low']},
+            'codex-luna':{'supported_reasoning_efforts':['none','low']},
+            'codex-terra':{'supported_reasoning_efforts':['none','low','high']},
+            'codex-sol':{'supported_reasoning_efforts':['none','low','high']},
         }
         hominal={'startup_models':{
-            'fast':{'catalog_key':'luna','reasoning_effort':'none'},
-            'main':{'catalog_key':'terra','reasoning_effort':'none'},
-            'high':{'catalog_key':'sol','reasoning_effort':'low'},
+            'fast':{'model':'codex-luna','reasoning_effort':'low'},
+            'main':{'model':'codex-terra','reasoning_effort':'none'},
+            'high':{'model':'codex-sol','reasoning_effort':'high'},
         },'default_role':'main'}
 
-        models,default_profile=stage20.runtime_model_roles(catalog,hominal)
+        models,profiles,default_profile=stage20.runtime_model_roles(catalog,hominal,set(catalog))
 
         self.assertEqual({role:value['id'] for role,value in models.items()},
                          {'fast':'codex-luna','main':'codex-terra','high':'codex-sol'})
+        self.assertEqual(profiles,{
+            'fast':{'model':'fast','reasoning_effort':'low'},
+            'main':{'model':'main','reasoning_effort':'none'},
+            'high':{'model':'high','reasoning_effort':'high'},
+        })
         self.assertEqual(default_profile,{'model':'main','reasoning_effort':'none'})
 
     def test_runtime_roles_reject_missing_role(self):
         with self.assertRaisesRegex(ValueError,'fast, main and high'):
             stage20.runtime_model_roles({}, {'startup_models':{}})
+
+    def test_runtime_roles_reject_model_missing_from_llmserver(self):
+        catalog={'codex-luna':{'supported_reasoning_efforts':['none']}}
+        hominal={'startup_models':{
+            role:{'model':'codex-luna','reasoning_effort':'none'} for role in ('fast','main','high')
+        },'default_role':'main'}
+        with self.assertRaisesRegex(ValueError,'llmserver model is unavailable'):
+            stage20.runtime_model_roles(catalog,hominal,set())
+
+    def test_runtime_roles_reject_unsupported_effort(self):
+        catalog={'codex-luna':{'supported_reasoning_efforts':['none']}}
+        hominal={'startup_models':{
+            role:{'model':'codex-luna','reasoning_effort':'none'} for role in ('fast','main','high')
+        },'default_role':'main'}
+        hominal['startup_models']['fast']['reasoning_effort']='ultra'
+        with self.assertRaisesRegex(ValueError,'unsupported reasoning effort for fast'):
+            stage20.runtime_model_roles(catalog,hominal,{'codex-luna'})
 
     def test_parse_time_accepts_go_trimmed_and_nanosecond_rfc3339(self):
         expected='2026-09-04T19:17:13.576750+00:00'

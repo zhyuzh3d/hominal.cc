@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Independent A1X laboratory. Never imports legacy Lab or original private settings."""
-import argparse,hashlib,json,os,pathlib,re,shlex,shutil,subprocess,tarfile,tempfile,time,uuid
+import argparse,hashlib,json,os,pathlib,re,shlex,shutil,subprocess,tarfile,tempfile,time,urllib.request,uuid
 from datetime import datetime,timezone,timedelta
 import yaml
 from stage20_config import dynamics_config,seed_config
@@ -46,11 +46,12 @@ YAML_FIELD_COMMENTS={
     'note':'对配置边界或风险的简短说明。','base_url':'llmserver统一接口根地址。',
     'api_key':'llmserver访问令牌；敏感字段，仅保存在0600私密配置中。','adapter':'模型网关协议适配器。',
     'max_output_tokens':'单次模型响应允许的最大输出Token数。','window_id':'当前允许输入的KWin窗口标识。',
-    'surface':'输入范围对应的受控界面名称。','terra':'模型目录中的Terra配置。','luna':'模型目录中的Luna配置。',
-    'sol':'模型目录中的Sol配置。','hominal':'Hominal启动时采用的运行角色配置。','startup_models':'三个稳定运行角色到模型目录的映射。',
+    'surface':'输入范围对应的受控界面名称。','codex-terra':'llmserver公开模型codex-terra。',
+    'codex-luna':'llmserver公开模型codex-luna。','codex-sol':'llmserver公开模型codex-sol。',
+    'hominal':'Hominal启动时采用的运行角色配置。','startup_models':'三个稳定运行角色到模型目录的映射。',
     'default_role':'新个体启动时使用的默认主脑角色。','fast':'低成本快速推理角色。','main':'默认主脑推理角色。',
-    'high':'复杂任务或实现协助角色。','catalog_key':'该运行角色引用的models.yaml目录键。',
-    'id':'当前对象或模型的稳定标识。','supported_reasoning_efforts':'该模型允许的推理强度。',
+    'high':'复杂任务或实现协助角色。','role_profiles':'启动配置解析后的三个运行档位。',
+    'id':'实际提交给llmserver的公开模型ID。','supported_reasoning_efforts':'llmserver部署允许的推理强度数组。',
     'input_per_million_microusd':'每百万输入Token的微美元价格。','cached_input_per_million_microusd':'每百万缓存输入Token的微美元价格。',
     'output_per_million_microusd':'每百万输出Token的微美元价格。','stage':'Hominal实验阶段号。',
     'cognitive_core':'连续认知核心版本。','engineering':'是否为工程测试运行。','generation_kind':'本次生命运行的实验类型。',
@@ -62,7 +63,7 @@ YAML_FIELD_COMMENTS={
     'organ_id':'负责该界面的器官标识。','description':'对象、界面或字段用途说明。','supports':'该界面支持的生命价值方向。',
     'cognitive_resource':'模型角色、价格、额度和保护策略。','price_table_version':'本次价格表的证据版本。',
     'rolling_hour_limit_microusd':'滚动一小时费用上限，单位微美元。','rolling_day_limit_microusd':'滚动24小时费用上限，单位微美元。',
-    'models':'按fast、main、high运行角色展开的模型及确认价格。','initial_default_profile':'个体初始主脑角色与推理强度。','model':'运行时使用的模型角色。',
+    'models':'按fast、main、high运行角色展开的模型及确认价格。','initial_default_profile':'个体初始主脑角色与推理强度。','model':'模型名称；启动映射中为llmserver公开ID，运行档位中为fast、main或high。',
     'reasoning_effort':'模型推理强度。','validation_retry_per_focus':'单个注意焦点允许的结构校验重试次数。',
     'continuation_per_focus':'单个注意焦点允许的函数后续请求次数。','paid_failure_threshold':'进入模型保护前的付费失败门槛。',
     'paid_failure_window_minutes':'统计付费失败的时间窗口分钟数。','model_protection_minutes':'触发保护后的暂停分钟数。',
@@ -143,19 +144,26 @@ def intervention(kind,detail):
     p=ARCHIVE/'interventions.jsonl';p.parent.mkdir(parents=True,exist_ok=True)
     with p.open('a') as f:f.write(json.dumps({'at':datetime.now(timezone.utc).isoformat(),'kind':kind,'detail':detail},ensure_ascii=False)+'\n')
 
-def runtime_model_roles(catalog,hominal):
+def llmserver_model_ids(gateway):
+    request=urllib.request.Request(gateway['base_url'].rstrip('/')+'/v1/models',headers={'Authorization':'Bearer '+gateway['api_key']})
+    with urllib.request.urlopen(request,timeout=15) as response:data=json.load(response)
+    return {item['id'] for item in data.get('data',[]) if isinstance(item,dict) and item.get('id')}
+
+def runtime_model_roles(catalog,hominal,available_model_ids=None):
     """Resolve stable runtime roles to concrete entries in the model catalog."""
     startup=hominal.get('startup_models',{});default_role=hominal.get('default_role','main')
     if set(startup)!={'fast','main','high'}:
         raise ValueError('xconfig hominal.startup_models must contain fast, main and high')
-    runtime_models={}
+    runtime_models={};role_profiles={}
     for role in ('fast','main','high'):
-        selection=startup[role];catalog_key=selection.get('catalog_key','');effort=selection.get('reasoning_effort','')
-        if catalog_key not in catalog:raise ValueError('unknown models.yaml catalog key for '+role+': '+str(catalog_key))
-        if effort not in catalog[catalog_key].get('supported_reasoning_efforts',[]):raise ValueError('unsupported reasoning effort for '+role+': '+str(effort))
-        runtime_models[role]=json.loads(json.dumps(catalog[catalog_key]))
+        selection=startup[role];model_id=selection.get('model','');effort=selection.get('reasoning_effort','')
+        if model_id not in catalog:raise ValueError('unknown models.yaml model for '+role+': '+str(model_id))
+        if available_model_ids is not None and model_id not in available_model_ids:raise ValueError('llmserver model is unavailable for '+role+': '+str(model_id))
+        if effort not in catalog[model_id].get('supported_reasoning_efforts',[]):raise ValueError('unsupported reasoning effort for '+role+': '+str(effort))
+        runtime_models[role]={'id':model_id,**json.loads(json.dumps(catalog[model_id]))}
+        role_profiles[role]={'model':role,'reasoning_effort':effort}
     if default_role not in startup:raise ValueError('xconfig hominal.default_role must name a startup model role')
-    return runtime_models,{'model':default_role,'reasoning_effort':startup[default_role]['reasoning_effort']}
+    return runtime_models,role_profiles,dict(role_profiles[default_role])
 
 def prepare():
     stopped()
@@ -203,10 +211,10 @@ def body_up():
     raise RuntimeError('visual body did not become ready; inspect user service logs')
 
 def config(instance,minutes):
-    models=remote_json('cat '+REMOTE+'/private/models.json')
-    write_yaml(PRIVATE/'models.yaml',models)
+    models=read_yaml(PRIVATE/'models.yaml')
     gateway=read_yaml(PRIVATE/'gateway.yaml');gateway['max_output_tokens']=2200
-    runtime_models,default_profile=runtime_model_roles(models,XCONFIG.get('hominal',{}))
+    available_model_ids=llmserver_model_ids(gateway)
+    runtime_models,role_profiles,default_profile=runtime_model_roles(models,XCONFIG.get('hominal',{}),available_model_ids)
     birth=('Alice，你现在生活在AOKZOE A1X掌机的Bazzite KDE桌面，主机当前名为bazzite。生命进程以普通用户AOKZOE运行，没有管理员授权。'
       '宿主系统根目录使用只读镜像；根目录可用字节为0不代表用户数据盘已满。用户空间可写，宿主驱动与系统更新由导师维护。'
       '这具身体有RTX 5060 Ti 16GB显卡。视觉器官使用本地模型读取真实屏幕并提出定位，输入器官实际触控、输入和滚动。'
@@ -223,7 +231,7 @@ def config(instance,minutes):
         'surfaces':[{'id':'workbench','organ_id':'desktop','description':'本地工作室当前呈现的内容，以及可接触的阅读材料和笔记空间',
                      'supports':['exploration','vitality']}]},
       'cognitive_resource':{'price_table_version':'llmserver-confirmed-stage20-preflight','rolling_hour_limit_microusd':5000000,
-        'rolling_day_limit_microusd':50000000,'models':runtime_models,
+        'rolling_day_limit_microusd':50000000,'models':runtime_models,'role_profiles':role_profiles,
         'initial_default_profile':default_profile,'validation_retry_per_focus':1,
         'continuation_per_focus':1,'paid_failure_threshold':3,'paid_failure_window_minutes':10,'model_protection_minutes':10},
       'dynamics':dynamics_config(20),'seed':seed_config()}

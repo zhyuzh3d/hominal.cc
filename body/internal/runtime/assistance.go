@@ -34,9 +34,11 @@ func assistanceContext(request CognitiveRequest) (map[string]any, error) {
 	if contract.Task != "reasoning" && contract.Task != "implementation" {
 		return nil, errors.New("unknown assistance task")
 	}
-	if request.Profile != (CognitiveProfile{Model: "high", ReasoningEffort: "low"}) &&
-		!(request.Profile == (CognitiveProfile{Model: "fast", ReasoningEffort: "none"}) && contract.Task == "reasoning" && !contract.IncludeSelf) {
-		return nil, errors.New("assistance requires fast/none reasoning or high/low")
+	highProfile := roleProfile(request.Config.CognitiveResource, "high")
+	fastProfile := roleProfile(request.Config.CognitiveResource, "fast")
+	if request.Profile != highProfile &&
+		!(request.Profile == fastProfile && contract.Task == "reasoning" && !contract.IncludeSelf) {
+		return nil, errors.New("assistance requires the configured fast role for simple reasoning or high role for complex reasoning and implementation")
 	}
 	question := strings.TrimSpace(request.Lease.ProfilePurpose)
 	if question == "" {

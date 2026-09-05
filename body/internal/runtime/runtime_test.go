@@ -77,6 +77,11 @@ func testConfig(stage int) Config {
 				"main": {ID: "gpt-5.6-terra", InputPerMillionMicrousd: 2_000_000, CachedInputPerMillionMicrousd: 200_000, OutputPerMillionMicrousd: 12_000_000, SupportedReasoningEfforts: []string{"none", "low", "medium", "high", "xhigh", "max"}},
 				"high": {ID: "gpt-5.6-sol", InputPerMillionMicrousd: 4_000_000, CachedInputPerMillionMicrousd: 400_000, OutputPerMillionMicrousd: 20_000_000, SupportedReasoningEfforts: []string{"none", "low", "medium", "high", "xhigh", "max"}},
 			},
+			RoleProfiles: map[string]CognitiveProfile{
+				"fast": {Model: "fast", ReasoningEffort: "none"},
+				"main": {Model: "main", ReasoningEffort: "medium"},
+				"high": {Model: "high", ReasoningEffort: "low"},
+			},
 			InitialDefaultProfile:   CognitiveProfile{Model: "main", ReasoningEffort: "medium"},
 			ValidationRetryPerFocus: 1, ContinuationPerFocus: 1,
 			PaidFailureThreshold: 3, PaidFailureWindowMinutes: 10, ModelProtectionMinutes: 10,

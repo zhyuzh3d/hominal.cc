@@ -1456,11 +1456,9 @@ func (r *Runtime) recoveryProfile(failedModel string) (CognitiveProfile, bool) {
 		if protected, _ := modelProtected(r.state, model, time.Now().UTC()); protected {
 			continue
 		}
-		for _, effort := range []string{"low", "none", "medium"} {
-			profile := CognitiveProfile{Model: model, ReasoningEffort: effort}
-			if validateProfile(r.config.CognitiveResource, profile) == nil {
-				return profile, true
-			}
+		profile := roleProfile(r.config.CognitiveResource, model)
+		if validateProfile(r.config.CognitiveResource, profile) == nil {
+			return profile, true
 		}
 	}
 	return CognitiveProfile{}, false

@@ -36,6 +36,9 @@ func normalizeResourceConfig(config *Config) error {
 	if len(resource.Models) != 3 {
 		return fmt.Errorf("cognitive resource requires exactly three models, got %d", len(resource.Models))
 	}
+	if len(resource.RoleProfiles) != 3 {
+		return fmt.Errorf("cognitive resource requires exactly three role profiles, got %d", len(resource.RoleProfiles))
+	}
 	for _, name := range []string{"fast", "main", "high"} {
 		model, ok := resource.Models[name]
 		if !ok || strings.TrimSpace(model.ID) == "" {
@@ -47,9 +50,19 @@ func normalizeResourceConfig(config *Config) error {
 		if len(model.SupportedReasoningEfforts) == 0 {
 			return fmt.Errorf("cognitive model %q has no reasoning efforts", name)
 		}
+		profile, ok := resource.RoleProfiles[name]
+		if !ok || profile.Model != name {
+			return fmt.Errorf("cognitive role profile %q is required and must select its own role", name)
+		}
+		if err := validateProfile(*resource, profile); err != nil {
+			return fmt.Errorf("cognitive role profile %q: %w", name, err)
+		}
 	}
 	if err := validateProfile(*resource, resource.InitialDefaultProfile); err != nil {
 		return fmt.Errorf("initial cognitive profile: %w", err)
+	}
+	if selected, ok := resource.RoleProfiles[resource.InitialDefaultProfile.Model]; !ok || selected != resource.InitialDefaultProfile {
+		return errors.New("initial cognitive profile must equal one configured role profile")
 	}
 	if resource.ValidationRetryPerFocus <= 0 {
 		resource.ValidationRetryPerFocus = 1
@@ -82,10 +95,14 @@ func validateProfile(resource CognitiveResourceConfig, profile CognitiveProfile)
 	return fmt.Errorf("model %q does not support reasoning effort %q", profile.Model, profile.ReasoningEffort)
 }
 
+func roleProfile(resource CognitiveResourceConfig, role string) CognitiveProfile {
+	return resource.RoleProfiles[role]
+}
+
 func cognitiveProfileRank(profile CognitiveProfile) int {
 	modelRank := map[string]int{"fast": 0, "main": 10, "high": 20}[profile.Model]
 	effortRank := map[string]int{
-		"none": 0, "low": 1, "medium": 2, "high": 3, "xhigh": 4, "max": 5,
+		"none": 0, "low": 1, "medium": 2, "high": 3, "xhigh": 4, "max": 5, "ultra": 6,
 	}[profile.ReasoningEffort]
 	return modelRank + effortRank
 }
@@ -337,11 +354,9 @@ func (r *Runtime) validationRecoveryProfile(failed CognitiveProfile) (CognitiveP
 		if protected, _ := modelProtected(r.state, model, time.Now().UTC()); protected {
 			continue
 		}
-		for _, effort := range []string{"medium", failed.ReasoningEffort, "low", "high", "none"} {
-			profile := CognitiveProfile{Model: model, ReasoningEffort: effort}
-			if validateProfile(r.config.CognitiveResource, profile) == nil {
-				return profile, true
-			}
+		profile := roleProfile(r.config.CognitiveResource, model)
+		if validateProfile(r.config.CognitiveResource, profile) == nil {
+			return profile, true
 		}
 	}
 	return CognitiveProfile{}, false
@@ -403,15 +418,8 @@ func (r *Runtime) affordableResourceFallback(reservation ModelReservation, now t
 		if protected, _ := modelProtected(r.state, modelName, now); protected {
 			continue
 		}
-		effort := ""
-		for _, candidate := range []string{"none", "low", "medium"} {
-			profile := CognitiveProfile{Model: modelName, ReasoningEffort: candidate}
-			if validateProfile(r.config.CognitiveResource, profile) == nil {
-				effort = candidate
-				break
-			}
-		}
-		if effort == "" {
+		profile := roleProfile(r.config.CognitiveResource, modelName)
+		if validateProfile(r.config.CognitiveResource, profile) != nil {
 			continue
 		}
 		cost := reservationCost(model, reservation.InputTokenUpperBound, r.config.ModelGateway.MaxOutputTokens)
@@ -419,7 +427,7 @@ func (r *Runtime) affordableResourceFallback(reservation ModelReservation, now t
 			continue
 		}
 		if selected.Model == "" || cost < selectedCost {
-			selected = CognitiveProfile{Model: modelName, ReasoningEffort: effort}
+			selected = profile
 			selectedCost = cost
 		}
 	}
@@ -521,13 +529,14 @@ func resourceView(request CognitiveRequest, inputTokenEstimate int) map[string]a
 	main := cognitiveProfileResourceView(request.Config, mainProfile, inputTokenEstimate)
 	main["role"] = "main"
 	main["use"] = "绝大多数感知、意义判断、关切、生活决策与现实结果吸收"
-	actionAssistProfile := CognitiveProfile{Model: "high", ReasoningEffort: "low"}
+	actionAssistProfile := roleProfile(request.Config.CognitiveResource, "high")
 	actionAssist := cognitiveProfileResourceView(request.Config, actionAssistProfile, inputTokenEstimate)
 	actionAssist["role"] = "action_assistance"
 	actionAssist["use"] = "主脑对复杂逻辑、代码、命令或工具实现把握不足时的一次性协助；结果交还主脑采用"
 	actionAssist["context"] = "默认仅问题和必要材料；implementation 增加操作契约；include_self:true 时增加当前叙事参考"
-	local := cognitiveProfileResourceView(request.Config, CognitiveProfile{Model: "fast", ReasoningEffort: "none"}, 600)
-	local["use"] = "极简单的局部逻辑判断；next/fast/none、task:reasoning，短问题与必要材料，最多200输出token"
+	fastProfile := roleProfile(request.Config.CognitiveResource, "fast")
+	local := cognitiveProfileResourceView(request.Config, fastProfile, 600)
+	local["use"] = "极简单的局部逻辑判断；使用fast角色配置的推理强度，短问题与必要材料，最多200输出token"
 	local["context"] = "局部材料，无自动自我叙事或个人回忆"
 	view := map[string]any{
 		"current_profile": map[string]any{
@@ -552,7 +561,7 @@ func resourceView(request CognitiveRequest, inputTokenEstimate int) map[string]a
 			"action_assistance": actionAssist,
 			"local_reasoning":   local,
 			"organ_instinct": map[string]any{
-				"profile":               CognitiveProfile{Model: "fast", ReasoningEffort: "none"},
+				"profile":               fastProfile,
 				"use":                   "器官按需解释局部含糊材料，共用身体额度，由器官自动请求",
 				"model_choice_required": false,
 			},

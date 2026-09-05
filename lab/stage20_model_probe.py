@@ -8,11 +8,11 @@ ROOT=pathlib.Path(os.environ.get('HOMINAL20_ROOT',str(pathlib.Path.home()/'.loca
 
 def main():
     gateway=json.loads((ROOT/'private/gateway.json').read_text())
-    records=[]; models={}
+    records=[]; validated={}
     if (ROOT/'evidence/model-preflight.json').exists():
         raise RuntimeError('preflight already recorded; inspect it before authorizing another paid run')
-    for role,effort in [('terra','none'),('luna','none'),('sol','low')]:
-        body={'model':'codex-'+role,'input':'Call gateway_probe with ok=true. No other action.',
+    for role,model_id,effort in [('main','codex-terra','none'),('fast','codex-luna','none'),('high','codex-sol','low')]:
+        body={'model':model_id,'input':'Call gateway_probe with ok=true. No other action.',
           'reasoning':{'effort':effort},'max_output_tokens':1024,'store':False,
           'tools':[{'type':'function','name':'gateway_probe','description':'Confirm the real function contract.',
             'strict':True,'parameters':{'type':'object','properties':{'ok':{'type':'boolean'}},'required':['ok'],'additionalProperties':False}}],
@@ -37,16 +37,19 @@ def main():
             f.write(json.dumps(usage)+'\n');f.flush();os.fsync(f.fileno())
         calls=[x for x in response.get('output',[]) if x.get('type')=='function_call']
         valid=len(calls)==1 and calls[0]['name']=='gateway_probe' and json.loads(calls[0]['arguments'])=={'ok':True}
-        record={'role':role,'effort':effort,'valid':valid,'seconds':round(time.monotonic()-start,3),'billing':billing,'response':response}
+        record={'role':role,'model':model_id,'effort':effort,'valid':valid,'seconds':round(time.monotonic()-start,3),'billing':billing,'response':response}
         records.append(record)
         (ROOT/'evidence/model-preflight.json').write_text(json.dumps(records,ensure_ascii=False,indent=2))
         print(json.dumps({k:v for k,v in record.items() if k!='response'}),flush=True)
         if not valid: raise RuntimeError('function contract failed')
         p=billing['unit_prices']
-        models[role]={'id':'codex-'+role,'supported_reasoning_efforts':[effort],
+        validated[model_id]={'validated_reasoning_efforts':[effort],
             'input_per_million_microusd':int(Decimal(p['input_per_million'])*1000000),
             'cached_input_per_million_microusd':int(Decimal(p.get('cached_input_per_million',p['input_per_million']))*1000000),
             'output_per_million_microusd':int(Decimal(p['output_per_million'])*1000000)}
-    (ROOT/'private/models.json').write_text(json.dumps(models,indent=2))
+    # A successful probe proves only the tested effort. The complete supported
+    # effort arrays remain configuration facts sourced from llmserver, so a
+    # one-effort smoke test must never overwrite the model catalog.
+    (ROOT/'evidence/model-preflight-catalog.json').write_text(json.dumps(validated,indent=2))
 
 if __name__=='__main__': main()

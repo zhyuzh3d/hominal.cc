@@ -59,14 +59,32 @@ func TestAssistanceContextSeparatesRoles(t *testing.T) {
 	}
 }
 
+func TestAssistanceUsesConfiguredRoleEfforts(t *testing.T) {
+	fast := CognitiveProfile{Model: "fast", ReasoningEffort: "low"}
+	request := assistanceTestRequest(fast, "reasoning", false)
+	request.Config.CognitiveResource.RoleProfiles["fast"] = fast
+	if _, err := assistanceContext(request); err != nil {
+		t.Fatalf("configured fast effort was rejected: %v", err)
+	}
+
+	high := CognitiveProfile{Model: "high", ReasoningEffort: "high"}
+	request = assistanceTestRequest(high, "implementation", false)
+	request.Config.CognitiveResource.RoleProfiles["high"] = high
+	if _, err := assistanceContext(request); err != nil {
+		t.Fatalf("configured high effort was rejected: %v", err)
+	}
+}
+
 func TestAssistanceNativeCallAndSharedAccounting(t *testing.T) {
 	for _, model := range []string{"fast", "high"} {
 		t.Run(model, func(t *testing.T) {
-			effort := "none"
+			effort := "low"
 			if model == "high" {
-				effort = "low"
+				effort = "high"
 			}
-			request := assistanceTestRequest(CognitiveProfile{Model: model, ReasoningEffort: effort}, "reasoning", false)
+			profile := CognitiveProfile{Model: model, ReasoningEffort: effort}
+			request := assistanceTestRequest(profile, "reasoning", false)
+			request.Config.CognitiveResource.RoleProfiles[model] = profile
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 				var body map[string]any
 				if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
@@ -80,6 +98,10 @@ func TestAssistanceNativeCallAndSharedAccounting(t *testing.T) {
 				}
 				if body["tool_choice"].(map[string]any)["name"] != "assistance_result" || body["parallel_tool_calls"] != false {
 					t.Error("assistance did not use a single native function")
+				}
+				reasoning, _ := body["reasoning"].(map[string]any)
+				if body["model"] != request.Config.CognitiveResource.Models[model].ID || reasoning["effort"] != effort {
+					t.Errorf("wire request did not use configured model profile: model=%v reasoning=%v", body["model"], reasoning)
 				}
 				if model == "fast" && body["max_output_tokens"] != float64(200) {
 					t.Error("low-tier output is not compact")

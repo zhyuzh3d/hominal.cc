@@ -39,6 +39,7 @@ type CognitiveResourceConfig struct {
 	RollingHourLimitMicrousd  int64                           `json:"rolling_hour_limit_microusd"`
 	RollingDayLimitMicrousd   int64                           `json:"rolling_day_limit_microusd"`
 	Models                    map[string]CognitiveModelConfig `json:"models"`
+	RoleProfiles              map[string]CognitiveProfile     `json:"role_profiles"`
 	InitialDefaultProfile     CognitiveProfile                `json:"initial_default_profile"`
 	ValidationRetryPerFocus   int                             `json:"validation_retry_per_focus"`
 	DisableValidationFallback bool                            `json:"disable_validation_fallback,omitempty"`

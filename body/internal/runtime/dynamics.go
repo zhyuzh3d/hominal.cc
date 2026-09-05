@@ -1207,7 +1207,7 @@ func (r *Runtime) applyCognitiveCommit(commit CognitiveCommit) error {
 // annotateActionAssistanceOpportunity makes a bodily implementation limit
 // visible without bypassing the main consciousness. The main profile first
 // absorbs Reality and remains free to retry, change route, stop, or ask for one
-// serial high/low implementation through the existing resource choice.
+// serial high-role implementation through the existing resource choice.
 func (r *Runtime) annotateActionAssistanceOpportunity(action *ActionState, concernID string) {
 	if r.state.Stage < 10 || action == nil || action.Kind != "organ_action" || strings.TrimSpace(concernID) == "" {
 		return
@@ -1286,7 +1286,7 @@ func (r *Runtime) annotateActionAssistanceOpportunity(action *ActionState, conce
 		return
 	}
 	action.ImplementationFailureStreak = failures
-	profile := CognitiveProfile{Model: "high", ReasoningEffort: "low"}
+	profile := roleProfile(r.config.CognitiveResource, "high")
 	protected, _ := modelProtected(r.state, profile.Model, time.Now().UTC())
 	if failures >= 2 && validateProfile(r.config.CognitiveResource, profile) == nil && !protected {
 		action.ActionAssistanceAvailable = true
@@ -2445,9 +2445,9 @@ func (r *Runtime) validateResourceChoice(choice CognitiveResourceChoice, focusID
 		if r.state.Lease != nil && r.state.Lease.ProfileSource == "next" && choice.Apply != "keep" {
 			return CognitiveProfile{}, errors.New("local assistance is one-use and returns to the main profile")
 		}
-		if choice.Apply == "next" && profile != (CognitiveProfile{Model: "high", ReasoningEffort: "low"}) {
-			if profile != (CognitiveProfile{Model: "fast", ReasoningEffort: "none"}) || assistanceTask(choice.Task) != "reasoning" {
-				return CognitiveProfile{}, errors.New("serial assistance uses fast/none for simple reasoning or high/low for complex reasoning and implementation")
+		if choice.Apply == "next" && profile != roleProfile(r.config.CognitiveResource, "high") {
+			if profile != roleProfile(r.config.CognitiveResource, "fast") || assistanceTask(choice.Task) != "reasoning" {
+				return CognitiveProfile{}, errors.New("serial assistance uses the configured fast role for simple reasoning or high role for complex reasoning and implementation")
 			}
 		}
 		if choice.Apply == "next" {

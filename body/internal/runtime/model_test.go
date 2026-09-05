@@ -89,7 +89,7 @@ func TestStageFourModelUsesOneForcedCognitiveCommit(t *testing.T) {
 		if !strings.Contains(instructions, "associative_recall") || !strings.Contains(instructions, "不是方向、目标、命令或奖励") {
 			t.Fatalf("stage four did not preserve Alice's agency over programmatic variation: %q", instructions)
 		}
-		if !strings.Contains(instructions, "default_profile 是本代主力认知") || !strings.Contains(instructions, "high/low 是进阶行动协助") || !strings.Contains(instructions, "确定性的本能与机械状态工作由身体内核完成") || !strings.Contains(instructions, "next 只安排同一因果线程中紧接着的一次认知") {
+		if !strings.Contains(instructions, "default_profile 是本代主力认知") || !strings.Contains(instructions, "high 角色是进阶行动协助") || !strings.Contains(instructions, "确定性的本能与机械状态工作由身体内核完成") || !strings.Contains(instructions, "next 只安排同一因果线程中紧接着的一次认知") {
 			t.Fatalf("resource choice semantics remained ambiguous: %q", instructions)
 		}
 		if !strings.Contains(instructions, "机器可读的键值") || !strings.Contains(instructions, "读取到一项声明") {

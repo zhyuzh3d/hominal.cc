@@ -3,9 +3,18 @@ package runtime
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestResourceConfigRejectsRoleEffortOutsideModelSupport(t *testing.T) {
+	config := testConfig(20)
+	config.CognitiveResource.RoleProfiles["fast"] = CognitiveProfile{Model: "fast", ReasoningEffort: "ultra"}
+	if err := normalizeResourceConfig(&config); err == nil || !strings.Contains(err.Error(), "does not support") {
+		t.Fatalf("unsupported configured role effort was accepted: %v", err)
+	}
+}
 
 func TestCognitiveCostUsesCachedInputWithoutDoubleCountingReasoning(t *testing.T) {
 	model := testConfig(4).CognitiveResource.Models["main"]

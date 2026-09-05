@@ -6,7 +6,7 @@
 
 [开发计划](plans/stage-20.0-development.md)与[实验计划](plans/stage-20.0-experiments.md)说明目标和验收边界；[实验记录](plans/stage-20.0-results.md)区分工程通过项、失败样本和个人实际经历。`lineage`、旧阶段计划与文档作为历史参考，不代表20.0当前运行状态。
 
-运行时只使用`fast`、`main`、`high`三个稳定角色，启动配置把它们映射到llmserver模型目录。当前映射是`fast → luna/none`、`main → terra/none`、`high → sol/low`，默认主脑为`main`。这样更换具体模型时不必改动认知与资源调度代码。滚动一小时5美元、24小时50美元的费用账本跨个体保留；未知账单采用持久化保守预留。模型资格和凭据存放在仓库外，不提交到Git。
+运行时只使用`fast`、`main`、`high`三个稳定角色，启动配置把它们映射到llmserver模型目录。目录键直接使用`/v1/models`返回的公开ID，每个模型只保存一份配置并列出完整`supported_reasoning_efforts`数组；启动映射为各角色选择模型和其中一个推理强度。当前映射是`fast → codex-luna/none`、`main → codex-terra/none`、`high → codex-sol/low`，默认主脑为`main`。启动时还会读取当前Token可见的`/v1/models`并拒绝不存在的模型。这样更换模型或推理强度时不必改动认知与资源调度代码。滚动一小时5美元、24小时50美元的费用账本跨个体保留；未知账单采用持久化保守预留。模型资格和凭据存放在仓库外，不提交到Git。
 
 独立Lab入口：
 
@@ -20,7 +20,7 @@ python3 lab/stage20.py stop --reason completed_observation
 
 `prepare`编译并上传冻结发布；运行中的个体必须先停止归档。`start`启动临时用户服务、独立浏览器与空白作品空间，封存身份并设置设备本地截止。`stop`停止生命、保存离机档案，再释放实验服务。它们不会添加开机启动，不修改系统驱动。导师通道见`mentor`与`outbox`子命令；所有人工提示与环境变更应写入干预记录。
 
-代码在本目录；私密配置在`../xconfigs/hominal20`；设备数据在`~/.local/share/hominal20`；Mac离机档案在`~/HominalStage20Lab`。`xconfig.yaml`记录A1X固定地址、SSH用户、专用密钥路径、双方指纹，以及`fast/main/high`启动映射；`models.yaml`保存可选模型目录，`gateway.yaml`、`runtime.yaml`和`input-scope.yaml`保存其余带逐字段注释的20.0配置。Lab直接读取这些YAML，并只在向现有Go内核和设备器官交付时生成权限受限的JSON。私钥和网关令牌只留在该仓库外目录，明文SSH密码不写入配置。
+代码在本目录；私密配置在`../xconfigs/hominal20`；设备数据在`~/.local/share/hominal20`；Mac离机档案在`~/HominalStage20Lab`。`xconfig.yaml`记录A1X固定地址、SSH用户、专用密钥路径、双方指纹，以及`fast/main/high`的模型和推理强度选择；`models.yaml`以llmserver公开模型ID为键保存能力与价格目录，`gateway.yaml`、`runtime.yaml`和`input-scope.yaml`保存其余带逐字段注释的20.0配置。Lab直接读取这些YAML，并只在向现有Go内核和设备器官交付时生成权限受限的JSON。私钥和网关令牌只留在该仓库外目录，明文SSH密码不写入配置。
 
 实验截图、模型权重、账号状态和个体历史不得提交。工程测试使用Lab的DOM/文件真值核对结果，视觉器官不会得到这些答案。
 
