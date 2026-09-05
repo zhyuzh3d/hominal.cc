@@ -16,6 +16,7 @@
 **/secrets.yml
 **/*.pem
 **/*.key
+**/*_ed25519
 
 # Lab runtime and raw evidence stay outside version control.
 /.lab-runtime/

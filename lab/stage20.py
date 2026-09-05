@@ -9,20 +9,115 @@ REPO=pathlib.Path(__file__).resolve().parents[1]
 REMOTE='/home/AOKZOE/.local/share/hominal20'
 PRIVATE=REPO.parent/'xconfigs/hominal20'
 ARCHIVE=pathlib.Path.home()/'HominalStage20Lab'
-HOST='AOKZOE@192.168.124.31'
-SOCKET=os.environ.get('HOMINAL20_SSH_SOCKET','/tmp/codex-hominal20')
-SSH=['ssh','-S',SOCKET,'-o','BatchMode=yes','-o','ConnectTimeout=8',HOST]
+XCONFIG_PATH=PRIVATE/'xconfig.yaml'
+XCONFIG=yaml.safe_load(XCONFIG_PATH.read_text()) if XCONFIG_PATH.exists() else {}
+SSH_CONFIG=XCONFIG.get('ssh',{})
+SSH_ADDRESS=str(SSH_CONFIG.get('address','192.168.124.31'))
+SSH_USER=str(SSH_CONFIG.get('user','AOKZOE'))
+SSH_PORT=int(SSH_CONFIG.get('port',22))
+identity_value=str(SSH_CONFIG.get('identity_file','')).strip()
+identity=pathlib.Path(identity_value).expanduser() if identity_value else None
+if identity and not identity.is_absolute():identity=PRIVATE/identity
+SSH_IDENTITY=identity.resolve() if identity else None
+HOST=SSH_USER+'@'+SSH_ADDRESS
+SOCKET=os.environ.get('HOMINAL20_SSH_SOCKET','').strip()
+SSH_OPTIONS=['-p',str(SSH_PORT),'-o','BatchMode=yes','-o','ConnectTimeout=8','-o','StrictHostKeyChecking=yes']
+if SSH_IDENTITY:SSH_OPTIONS+=['-i',str(SSH_IDENTITY),'-o','IdentitiesOnly=yes']
+if SOCKET:SSH_OPTIONS+=['-S',SOCKET]
+SSH=['ssh']+SSH_OPTIONS+[HOST]
 ENV={'HOMINAL20_ROOT':REMOTE,'XDG_RUNTIME_DIR':'/run/user/1000','DBUS_SESSION_BUS_ADDRESS':'unix:path=/run/user/1000/bus',
      'WAYLAND_DISPLAY':'wayland-0','QT_QPA_PLATFORM':'wayland','HOMINAL_RESOURCE_LEDGER':REMOTE+'/state/cognitive-usage.jsonl',
      'HOMINAL_MENTOR_SOCKET':REMOTE+'/services/mentor/hominal.sock','HOMINAL_ORGAN_RUNTIME_DIR':REMOTE+'/services/organs'}
+
+YAML_FIELD_COMMENTS={
+    'schema':'配置文件结构版本，用于识别字段语义。','device':'A1X设备及当前网络、系统事实。',
+    'name':'设备或对象的稳定名称。','hostname':'设备当前主机名。','address':'设备固定IPv4地址。',
+    'fixed_ipv4':'是否要求保持固定IPv4地址。','wifi_connection':'NetworkManager中的Wi-Fi连接名称。',
+    'wifi_interface':'设备上的Wi-Fi网络接口。','wifi_mac_address':'Wi-Fi接口MAC地址，用于网络识别和唤醒实验。',
+    'os':'设备操作系统与版本。','desktop':'图形桌面与显示协议。','hardware_role':'设备在Hominal实验中的用途。',
+    'ssh':'SSH连接参数；不在此文件保存明文密码。','host_alias':'供人和自动化使用的SSH别名。',
+    'port':'SSH服务端口。','user':'SSH登录用户名。','authentication':'首选SSH认证方式。',
+    'identity_file':'专用SSH私钥路径；文件权限必须为0600。','public_key_file':'对应公钥路径，可用于重新部署授权。',
+    'public_key_algorithm':'SSH密钥算法。','public_key_fingerprint':'客户端公钥指纹，用于核验密钥。',
+    'server_host_key_algorithm':'设备SSH服务端主机密钥算法。','server_host_key_fingerprint':'设备SSH主机密钥指纹，用于防止连错主机。',
+    'password_fallback':'密钥不可用时的处理方式；不记录密码值。','wake':'睡眠与远程唤醒能力快照。',
+    'sleep_mode':'内核当前采用的睡眠模式。','wowlan_supported':'Wi-Fi硬件是否声明支持无线唤醒。',
+    'wowlan_enabled':'当前是否已启用无线唤醒。','remote_wake_currently_available':'当前是否具备已验证的远程唤醒能力。',
+    'note':'对配置边界或风险的简短说明。','base_url':'llmserver统一接口根地址。',
+    'api_key':'llmserver访问令牌；敏感字段，仅保存在0600私密配置中。','adapter':'模型网关协议适配器。',
+    'max_output_tokens':'单次模型响应允许的最大输出Token数。','window_id':'当前允许输入的KWin窗口标识。',
+    'surface':'输入范围对应的受控界面名称。','terra':'主模型角色配置。','luna':'低成本模型角色配置。',
+    'sol':'高阶模型角色配置。','id':'当前对象或模型的稳定标识。','supported_reasoning_efforts':'该模型允许的推理强度。',
+    'input_per_million_microusd':'每百万输入Token的微美元价格。','cached_input_per_million_microusd':'每百万缓存输入Token的微美元价格。',
+    'output_per_million_microusd':'每百万输出Token的微美元价格。','stage':'Hominal实验阶段号。',
+    'cognitive_core':'连续认知核心版本。','engineering':'是否为工程测试运行。','generation_kind':'本次生命运行的实验类型。',
+    'generation_window_seconds':'初始运行窗口秒数。','birth_brief':'提供给新个体的设备事实、能力和边界。',
+    'pulse':'生命循环节拍配置。','interval_seconds':'快速生命脉冲间隔秒数。','slow_scan_seconds':'低频环境扫描间隔秒数。',
+    'model_gateway':'主脑访问llmserver的运行参数。','platform':'当前身体所在平台及可接触界面。',
+    'desktop_service':'图形登录管理服务。','data_root':'设备上的20.0数据根目录。','life_root':'当前个体生命目录。',
+    'desktop_home':'普通桌面用户主目录。','service':'当前生命进程的systemd用户服务。','surfaces':'明确授权给个体的界面列表。',
+    'organ_id':'负责该界面的器官标识。','description':'对象、界面或字段用途说明。','supports':'该界面支持的生命价值方向。',
+    'cognitive_resource':'模型角色、价格、额度和保护策略。','price_table_version':'本次价格表的证据版本。',
+    'rolling_hour_limit_microusd':'滚动一小时费用上限，单位微美元。','rolling_day_limit_microusd':'滚动24小时费用上限，单位微美元。',
+    'models':'三档模型及确认价格。','initial_default_profile':'个体初始主模型与推理强度。','model':'使用的模型角色。',
+    'reasoning_effort':'模型推理强度。','validation_retry_per_focus':'单个注意焦点允许的结构校验重试次数。',
+    'continuation_per_focus':'单个注意焦点允许的函数后续请求次数。','paid_failure_threshold':'进入模型保护前的付费失败门槛。',
+    'paid_failure_window_minutes':'统计付费失败的时间窗口分钟数。','model_protection_minutes':'触发保护后的暂停分钟数。',
+    'dynamics':'注意、关切、价值和完整性的动力学参数。','seed':'新个体的最小初始身份与价值种子。',
+    'gender':'种子自我描述中的性别。','age':'种子自我描述中的年龄。','life_form':'种子自我描述中的生命形态。',
+    'value_orientation':'六项生命价值的初始方向。','reality_integrity_sensitivity':'对现实一致性差异的敏感度。',
+    'semantic_text':'种子身份的简短语义描述。','affect_return_rate':'情感状态回归基线的速度。',
+    'concern_base_drive':'活跃关切进入注意的基础驱动力。','concern_urgency_weight':'关切紧迫度对注意竞争的权重。',
+    'concern_growth_gain':'未解决差异推动关切增长的增益。','concern_resolution_gain':'现实进展推动关切消退的增益。',
+    'concern_natural_decay_rate':'关切在无新增事实时的自然衰减率。','attention_affect_weight':'情感强度在注意评分中的权重。',
+    'attention_value_weight':'生命价值在注意评分中的权重。','attention_novelty_weight':'新颖性在注意评分中的权重。',
+    'attention_cost_weight':'认知与行动成本在注意评分中的权重。','attention_threshold':'候选进入认知的最低注意分数。',
+    'attention_candidate_limit':'每轮参与竞争的注意候选上限。','attention_revisit_seconds':'普通关切再次进入注意前的最短间隔。',
+    'attention_maximum_idle_seconds':'即使没有强候选也要重新检查的最长空闲时间。','difference_decay_rate':'未强化差异的自然衰减率。',
+    'difference_learning_rate':'现实后果更新预测差异的学习率。','value_idle_growth':'长期未满足价值的自然增长率。',
+    'exploration_unknown_growth':'未知环境推动探索价值增长的速度。','exploration_relief':'获得可靠新事实后探索张力的缓解量。',
+    'value_activation_gain':'相关现实事件激活价值的增益。','value_activation_return_rate':'价值激活回归基线的速度。',
+    'value_satiation_gain':'价值获得满足后的饱和增益。','value_satiation_return_rate':'价值饱和状态回落的速度。',
+    'value_orientation_gain':'种子价值方向对当前价值的影响强度。','integrity_persistence':'现实完整性差异的持续系数。',
+    'integrity_gap_gain':'发现事实矛盾时完整性差异的增长量。','integrity_repair_gain':'事实得到修复或核验时完整性差异的降低量。',
+    'integrity_mirror_threshold':'完整性差异进入自我镜像的阈值。','continuance':'维持生命连续性的初始权重。',
+    'exploration':'探索未知事物的初始权重。','agency':'自主选择和行动的初始权重。',
+    'vitality':'接触环境并保持活力的初始权重。','relatedness':'建立真实关系的初始权重。',
+    'contribution':'创造、表达和贡献的初始权重。'
+}
 
 def run(args,**kw): return subprocess.run(args,check=True,text=True,capture_output=True,**kw).stdout
 def remote(script,**kw):return run(SSH+[script],**kw)
 def remote_json(script):return json.loads(remote(script))
 def write_json(path,obj):
     path.parent.mkdir(parents=True,exist_ok=True,mode=0o700);tmp=path.with_suffix('.tmp');tmp.write_text(json.dumps(obj,ensure_ascii=False,indent=2));tmp.chmod(0o600);tmp.replace(path)
+def read_yaml(path):
+    value=yaml.safe_load(path.read_text())
+    if not isinstance(value,dict):raise ValueError('YAML root must be a mapping: '+str(path))
+    return value
+def write_yaml(path,obj):
+    """Write readable YAML and keep a short comment before every mapping field."""
+    raw=yaml.safe_dump(obj,allow_unicode=True,sort_keys=False,width=120)
+    lines=[]
+    for line in raw.splitlines():
+        match=re.match(r'^(\s*)(?:- )?([A-Za-z0-9_-]+):',line)
+        if match:
+            indent,key=match.groups()
+            lines.append(indent+'# '+YAML_FIELD_COMMENTS.get(key,'配置字段 '+key+'。'))
+        lines.append(line)
+    path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+    tmp=path.with_suffix(path.suffix+'.tmp');tmp.write_text('\n'.join(lines)+'\n');tmp.chmod(0o600);tmp.replace(path)
+def copy_json_object(obj,dest):
+    with tempfile.NamedTemporaryFile('w',encoding='utf-8',prefix='hominal20-json-',suffix='.json',delete=False) as handle:
+        temp=pathlib.Path(handle.name);json.dump(obj,handle,ensure_ascii=False,indent=2)
+    try:
+        temp.chmod(0o600);copy(temp,dest)
+    finally:
+        temp.unlink(missing_ok=True)
 def copy(source,dest,fetch=False):
-    args=['scp','-o','ControlPath='+SOCKET]
+    args=['scp','-P',str(SSH_PORT),'-o','BatchMode=yes','-o','ConnectTimeout=8','-o','StrictHostKeyChecking=yes']
+    if SSH_IDENTITY:args+=['-i',str(SSH_IDENTITY),'-o','IdentitiesOnly=yes']
+    if SOCKET:args+=['-o','ControlPath='+SOCKET]
     run(args+([HOST+':'+source,str(dest)] if fetch else [str(source),HOST+':'+dest]))
 def stamp():return datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
 def parse_time(value):
@@ -91,8 +186,9 @@ def body_up():
     raise RuntimeError('visual body did not become ready; inspect user service logs')
 
 def config(instance,minutes):
-    copy(REMOTE+'/private/models.json',PRIVATE/'models.json',True)
-    gateway=json.loads((PRIVATE/'gateway.json').read_text());gateway['max_output_tokens']=2200
+    models=remote_json('cat '+REMOTE+'/private/models.json')
+    write_yaml(PRIVATE/'models.yaml',models)
+    gateway=read_yaml(PRIVATE/'gateway.yaml');gateway['max_output_tokens']=2200
     birth=('Alice，你现在生活在AOKZOE A1X掌机的Bazzite KDE桌面，主机当前名为bazzite。生命进程以普通用户AOKZOE运行，没有管理员授权。'
       '宿主系统根目录使用只读镜像；根目录可用字节为0不代表用户数据盘已满。用户空间可写，宿主驱动与系统更新由导师维护。'
       '这具身体有RTX 5060 Ti 16GB显卡。视觉器官使用本地模型读取真实屏幕并提出定位，输入器官实际触控、输入和滚动。'
@@ -109,7 +205,7 @@ def config(instance,minutes):
         'surfaces':[{'id':'workbench','organ_id':'desktop','description':'本地工作室当前呈现的内容，以及可接触的阅读材料和笔记空间',
                      'supports':['exploration','vitality']}]},
       'cognitive_resource':{'price_table_version':'llmserver-confirmed-stage20-preflight','rolling_hour_limit_microusd':5000000,
-        'rolling_day_limit_microusd':50000000,'models':json.loads((PRIVATE/'models.json').read_text()),
+        'rolling_day_limit_microusd':50000000,'models':models,
         'initial_default_profile':{'model':'terra','reasoning_effort':'none'},'validation_retry_per_focus':1,
         'continuation_per_focus':1,'paid_failure_threshold':3,'paid_failure_window_minutes':10,'model_protection_minutes':10},
       'dynamics':dynamics_config(20),'seed':seed_config()}
@@ -140,11 +236,11 @@ def start(minutes):
     remote(shlex.join(['node',scripts+'stage20_cdp.mjs','location.href="http://127.0.0.1:8760/";true']))
     remote(shlex.join(['node',scripts+'stage20_cdp.mjs','fullscreen']))
     geometry=remote_json(shlex.join(['/usr/bin/python3',scripts+'stage20_window.py']))
-    scope=PRIVATE/'input-scope.json';write_json(scope,{'window_id':geometry['id'],'surface':'workbench'})
-    copy(scope,REMOTE+'/services/input-scope.json')
-    cfg=config(instance,minutes);path=PRIVATE/'runtime.json';write_json(path,cfg)
+    scope_value={'window_id':geometry['id'],'surface':'workbench'};scope=PRIVATE/'input-scope.yaml';write_yaml(scope,scope_value)
+    copy_json_object(scope_value,REMOTE+'/services/input-scope.json')
+    cfg=config(instance,minutes);path=PRIVATE/'runtime.yaml';write_yaml(path,cfg)
     remote('umask 077; mkdir -p '+instance+'/birth; cp -a '+REMOTE+'/releases/'+release+'/body '+instance+'/body; cp '+REMOTE+'/releases/'+release+'/release.json '+instance+'/birth/release.json')
-    copy(path,REMOTE+'/private/runtime.json')
+    copy_json_object(cfg,REMOTE+'/private/runtime.json')
     public=json.loads(json.dumps(cfg));public['model_gateway']['api_key']='<runtime-only>';write_json(ARCHIVE/'samples'/ident/'runtime-public.json',public)
     args=['systemd-run','--user','--unit=hominal20-life','--collect','--working-directory='+instance,
           '--property=TimeoutStopSec=45s','--property=RuntimeMaxSec=1920s',

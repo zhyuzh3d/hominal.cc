@@ -20,7 +20,9 @@ python3 lab/stage20.py stop --reason completed_observation
 
 `prepare`编译并上传冻结发布；运行中的个体必须先停止归档。`start`启动临时用户服务、独立浏览器与空白作品空间，封存身份并设置设备本地截止。`stop`停止生命、保存离机档案，再释放实验服务。它们不会添加开机启动，不修改系统驱动。导师通道见`mentor`与`outbox`子命令；所有人工提示与环境变更应写入干预记录。
 
-代码在本目录；私密配置在`../xconfigs/hominal20`；设备数据在`~/.local/share/hominal20`；Mac离机档案在`~/HominalStage20Lab`。实验截图、模型权重、账号状态和个体历史不得提交。工程测试使用Lab的DOM/文件真值核对结果，视觉器官不会得到这些答案。
+代码在本目录；私密配置在`../xconfigs/hominal20`；设备数据在`~/.local/share/hominal20`；Mac离机档案在`~/HominalStage20Lab`。`xconfig.yaml`记录A1X固定地址、SSH用户、专用密钥路径与双方指纹，`gateway.yaml`、`models.yaml`、`runtime.yaml`和`input-scope.yaml`保存带逐字段注释的20.0配置。Lab直接读取这些YAML，并只在向现有Go内核和设备器官交付时生成权限受限的JSON。私钥和网关令牌只留在该仓库外目录，明文SSH密码不写入配置。
+
+实验截图、模型权重、账号状态和个体历史不得提交。工程测试使用Lab的DOM/文件真值核对结果，视觉器官不会得到这些答案。
 
 协议与内核验证使用`go test -race ./body/...`，桌面边界单测使用`python3 body/tools/test_desktop.py`，实验控制时间兼容测试使用`PYTHONPATH=lab python3 -m unittest lab.test_stage20`。实机基准、布局干预和窗口真值工具位于`lab/stage20_*.py`。工程任务和人工修复不算自主成长证据。
 
