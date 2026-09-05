@@ -18,11 +18,11 @@ func TestRegistryDiscoversAndInvokesAProtocolOrgan(t *testing.T) {
 	adapter := filepath.Join(root, "body", "bin", "test-organ")
 	script := `#!/bin/sh
 case "$1" in
-describe) printf '%s\n' '{"schema":"hominal.organ-description/v1","id":"test","name":"Test sense","command":"test-organ","capabilities":["observe","orient","perform"],"operations":["touch"],"guidance":"test guidance"}' ;;
+describe) printf '%s\n' '{"schema":"hominal.organ-description/v1","id":"test","name":"Test sense","command":"test-organ","capabilities":["observe","orient","perform"],"operations":["touch"],"operation_inputs":{"touch":"{\"target\":\"fact\"}"},"guidance":"test guidance"}' ;;
 health) printf '%s\n' '{"schema":"hominal.organ-health/v1","id":"test","status":"ready","accepting":true,"in_flight":0,"queued":0}' ;;
 observe) printf '%s\n' '{"schema":"hominal.organ-observation/v1","organ_id":"test","surface_id":"current","observed_at":"2026-09-01T00:00:00Z","context":["room"],"objects":[{"id":"one","content":"a fact"}]}' ;;
 orient) printf '%s\n' '{"schema":"hominal.organ-orientation/v1","organ_id":"test","status":"moved","observed_at":"2026-09-01T00:00:01Z","detail":"one step"}' ;;
-perform) printf '%s\n' '{"schema":"hominal.organ-action-result/v1","organ_id":"test","action_id":"action-test","status":"completed","observed_at":"2026-09-01T00:00:02Z","summary":"done","output":"fact"}' ;;
+perform) printf '%s\n' '{"schema":"hominal.organ-action-result/v1","organ_id":"test","action_id":"action-test","status":"completed","effect":"changed","observed_at":"2026-09-01T00:00:02Z","summary":"done","output":"fact"}' ;;
 *) exit 2 ;;
 esac
 `
@@ -45,6 +45,8 @@ esac
 		t.Fatalf("unexpected body snapshot: %#v", snapshot)
 	} else if len(snapshot.Operations) != 1 || snapshot.Operations[0] != "touch" {
 		t.Fatalf("body snapshot omitted the action catalog: %#v", snapshot)
+	} else if snapshot.OperationInputs["touch"] != `{"target":"fact"}` {
+		t.Fatalf("body snapshot omitted the action input contract: %#v", snapshot)
 	}
 	observation, err := registry.Observe(context.Background(), "test")
 	if err != nil {

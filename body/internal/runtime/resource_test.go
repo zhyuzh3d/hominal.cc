@@ -2,10 +2,32 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestCompactUsageViewKeepsResourceFactWithoutInternalIdentifiers(t *testing.T) {
+	record := &UsageRecord{
+		CallID: "private-call", LeaseID: "private-lease", FocusID: "private-focus", ProfilePurpose: strings.Repeat("implementation detail ", 20),
+		Time: "2026-09-05T00:00:00Z", EffectiveModel: "deepseek-v4-flash", ReasoningEffort: "none",
+		ActualMicrousd: 1234, Status: "completed", CostConfirmed: true,
+	}
+	encoded, _ := json.Marshal(compactUsageView(record))
+	text := string(encoded)
+	for _, fact := range []string{"2026-09-05T00:00:00Z", "deepseek-v4-flash", "1234", "completed"} {
+		if !strings.Contains(text, fact) {
+			t.Fatalf("compact spend lost resource fact %q: %s", fact, text)
+		}
+	}
+	for _, internal := range []string{"private-call", "private-lease", "private-focus", "implementation detail"} {
+		if strings.Contains(text, internal) {
+			t.Fatalf("compact spend repeated internal field %q: %s", internal, text)
+		}
+	}
+}
 
 func TestCognitiveCostUsesCachedInputWithoutDoubleCountingReasoning(t *testing.T) {
 	model := testConfig(4).CognitiveResource.Models["terra"]
@@ -68,7 +90,7 @@ func TestUnaffordablePreferredProfileFallsBackWithoutTakingAwayTheChoice(t *test
 		t.Fatal("an unaffordable preferred profile was reserved")
 	}
 	next := runtime.state.CognitiveResource.NextProfile
-	if next == nil || next.FocusID != "resource-focus" || next.Profile.Model != "luna" || next.Source != "resource_fallback" {
+	if next == nil || next.FocusID != "resource-focus" || next.Profile != (CognitiveProfile{Model: "luna", ReasoningEffort: "none"}) || next.Source != "resource_fallback" {
 		t.Fatalf("the affordable metabolic fallback was not prepared: %#v", next)
 	}
 	if runtime.state.CognitiveResource.Limited != nil {
@@ -349,6 +371,34 @@ func TestContinuationCanScheduleRealityAbsorptionOnlyWhenItActs(t *testing.T) {
 	}
 }
 
+func TestStageTenAssistanceUsesExplicitlyContinuedConcern(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(10), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.state.Concerns = []Concern{{ID: "owned-concern", Strength: 0.4, Resolution: "hold"}}
+	runtime.state.Lease = &Lease{
+		ID: "lease", FocusID: "mentor-reply", Profile: CognitiveProfile{Model: "terra", ReasoningEffort: "none"},
+	}
+	runtime.activeCandidates = map[string]Event{
+		"mentor-reply": {ID: "mentor-reply", Kind: "mentor_received", ConcernID: "settled-old-concern"},
+	}
+	choice := CognitiveResourceChoice{
+		Apply: "next", Model: "sol", ReasoningEffort: "low", Purpose: "实现已认领且目标固定的身体动作",
+	}
+	profile, err := runtime.validateResourceChoice(choice, "mentor-reply", "none", "owned-concern")
+	if err != nil {
+		t.Fatalf("explicit concern continuation was ignored by resource validation: %v", err)
+	}
+	if err := runtime.applyResourceChoice(choice, profile, "mentor-reply", "owned-concern"); err != nil {
+		t.Fatal(err)
+	}
+	continuation := runtime.state.Background[len(runtime.state.Background)-1]
+	if continuation.Kind != "cognition_continuation" || continuation.ConcernID != "owned-concern" {
+		t.Fatalf("assistance continuation split from the adopted concern: %#v", continuation)
+	}
+}
+
 func TestSerialContinuationKeepsTheCurrentConcernIdentity(t *testing.T) {
 	runtime, err := New(t.TempDir(), "instance", testConfig(8), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
 	if err != nil {
@@ -419,7 +469,7 @@ func TestActionRealityConsumesNextProfileInsteadOfAddingPostRealityThought(t *te
 	}
 }
 
-func TestRepeatedPaidUnusableResponsesTemporarilyProtectModel(t *testing.T) {
+func TestRepeatedPaidUnusableResponsesStayLocalToTheirFocus(t *testing.T) {
 	runtime, err := New(t.TempDir(), "instance", testConfig(4), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
 	if err != nil {
 		t.Fatal(err)
@@ -434,28 +484,28 @@ func TestRepeatedPaidUnusableResponsesTemporarilyProtectModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !protected {
-		t.Fatal("repeated paid unusable responses did not protect the model")
+	if protected {
+		t.Fatal("local output validation disabled the model for unrelated cognition")
 	}
-	if active, _ := modelProtected(runtime.state, "terra", time.Now().UTC()); !active {
-		t.Fatal("model protection was not active")
+	if active, _ := modelProtected(runtime.state, "terra", time.Now().UTC()); active {
+		t.Fatal("local output validation created a global model circuit")
 	}
 }
 
-func TestRepeatedUnconfirmedGatewayFailuresProtectOnceAndOfferRecovery(t *testing.T) {
+func TestRepeatedModelSpecificGatewayFailuresProtectOnceAndOfferRecovery(t *testing.T) {
 	runtime, err := New(t.TempDir(), "instance", testConfig(5), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for index, category := range []string{"rate_limited", "upstream_unavailable", "upstream_unavailable"} {
+	for index := 0; index < 3; index++ {
 		runtime.state.Usage = append(runtime.state.Usage, UsageRecord{
 			Time:           time.Now().UTC().Add(-time.Duration(2-index) * time.Second).Format(time.RFC3339Nano),
-			RequestedModel: "terra", Status: "failure_cost_unconfirmed", FailureCategory: category,
+			RequestedModel: "terra", Status: "failure_cost_unconfirmed", FailureCategory: "function_call_not_supported",
 		})
 	}
 	protected, err := runtime.protectModelAfterFailures("terra")
 	if err != nil || !protected {
-		t.Fatalf("unconfirmed gateway failures did not protect the model: %v", err)
+		t.Fatalf("model-specific gateway failures did not protect the model: %v", err)
 	}
 	if len(runtime.state.Background) != 1 || runtime.state.Background[0].Kind != "cognitive_resource_change" {
 		t.Fatalf("model protection did not create exactly one body fact: %#v", runtime.state.Background)
@@ -469,5 +519,25 @@ func TestRepeatedUnconfirmedGatewayFailuresProtectOnceAndOfferRecovery(t *testin
 	profile, ok := runtime.recoveryProfile("terra")
 	if !ok || profile.Model != "sol" || profile.ReasoningEffort != "low" {
 		t.Fatalf("the bounded action-capable recovery cognition was unavailable: %#v", profile)
+	}
+}
+
+func TestSharedInfrastructureFailureDoesNotProtectOrSwitchModel(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(10), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 4; index++ {
+		runtime.state.Usage = append(runtime.state.Usage, UsageRecord{
+			Time:           time.Now().UTC().Add(-time.Duration(index) * time.Second).Format(time.RFC3339Nano),
+			RequestedModel: "luna", Status: "failure_cost_unconfirmed", FailureCategory: "upstream_unavailable",
+		})
+	}
+	protected, err := runtime.protectModelAfterFailures("luna")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if protected {
+		t.Fatal("a shared infrastructure interruption was attributed to Luna's cognitive ability")
 	}
 }

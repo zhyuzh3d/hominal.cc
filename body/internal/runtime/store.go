@@ -84,7 +84,7 @@ func (s *Store) LoadUsage(since time.Time) ([]UsageRecord, error) {
 		if err != nil || at.Before(since) || record.LeaseID == "" {
 			continue
 		}
-		latest[record.LeaseID] = record
+		latest[usageKey(record)] = record
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
@@ -179,6 +179,31 @@ func (s *Store) Load() (*State, error) {
 	var state State
 	if err := json.Unmarshal(data, &state); err != nil {
 		return nil, fmt.Errorf("decode current state: %w", err)
+	}
+	if state.LearningVersion < 2 {
+		var legacy struct {
+			Experiences []Memory `json:"experiences"`
+			Total       uint64   `json:"total_experiences"`
+			Commitments []struct {
+				ID       string `json:"id"`
+				MemoryID string `json:"experience_id"`
+			} `json:"commitments"`
+		}
+		if err := json.Unmarshal(data, &legacy); err != nil {
+			return nil, err
+		}
+		if len(state.Memories) == 0 && len(legacy.Experiences) > 0 {
+			state.Memories, state.TotalMemories = legacy.Experiences, legacy.Total
+			state.Experiences = nil
+		}
+		for i := range state.Commitments {
+			for _, old := range legacy.Commitments {
+				if state.Commitments[i].ID == old.ID && state.Commitments[i].MemoryID == "" {
+					state.Commitments[i].MemoryID = old.MemoryID
+				}
+			}
+		}
+		state.LearningVersion = 2
 	}
 	if state.Schema != stateSchema {
 		return nil, fmt.Errorf("unsupported state schema %q", state.Schema)

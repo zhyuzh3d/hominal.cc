@@ -39,7 +39,7 @@ case "$1" in
 describe) printf '%s\n' '{"schema":"hominal.organ-description/v1","id":"system","name":"Test system","command":"system","capabilities":["observe","perform","body_state"],"operations":["exec"],"guidance":"test"}' ;;
 health) printf '%s\n' '{"schema":"hominal.organ-health/v1","id":"system","status":"ready","accepting":true,"in_flight":0,"queued":0}' ;;
 observe) printf '%s\n' '{"schema":"hominal.organ-observation/v1","organ_id":"system","surface_id":"test","observed_at":"2026-09-01T00:00:00Z","facts":{}}' ;;
-perform) action_id=$(printf '%s' "$2" | sed -E 's/.*"action_id":"([^"]+)".*/\1/'); printf '{"schema":"hominal.organ-action-result/v1","organ_id":"system","action_id":"%s","status":"completed","observed_at":"2026-09-01T00:00:01Z","summary":"done","output":"stage-four-reality"}\n' "$action_id" ;;
+perform) action_id=$(printf '%s' "$2" | sed -E 's/.*"action_id":"([^"]+)".*/\1/'); printf '{"schema":"hominal.organ-action-result/v1","organ_id":"system","action_id":"%s","status":"completed","effect":"unknown","observed_at":"2026-09-01T00:00:01Z","summary":"done","output":"stage-four-reality"}\n' "$action_id" ;;
 *) exit 2 ;;
 esac
 `
@@ -136,7 +136,7 @@ func TestStageNineReusesTheFrozenStageEightCognitionCore(t *testing.T) {
 	}
 }
 
-func TestBirthOrientationEntersAttentionExactlyOnce(t *testing.T) {
+func TestBirthOrientationBecomesBackgroundFactExactlyOnce(t *testing.T) {
 	root := t.TempDir()
 	runtime, err := New(root, "instance", rehearsalConfig(), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
 	if err != nil {
@@ -164,10 +164,16 @@ func TestBirthOrientationEntersAttentionExactlyOnce(t *testing.T) {
 	for _, event := range runtime.state.Background {
 		if event.Kind == "birth_orientation" {
 			count++
+			if event.Status != "processed" {
+				t.Fatalf("birth orientation recruited attention: %#v", event)
+			}
 		}
 	}
 	if count != 1 || runtime.state.BirthBriefEnteredAt == "" {
 		t.Fatalf("birth orientation count=%d state=%#v", count, runtime.state)
+	}
+	if request, available := runtime.nextStage4Request(); available && request.Focus.Kind == "birth_orientation" {
+		t.Fatal("constitutive birth fact became an independent cognitive turn")
 	}
 }
 
@@ -339,7 +345,7 @@ func TestReadyRuntimeEstablishesT0BeforeFirstCognitiveCommit(t *testing.T) {
 	}
 }
 
-func TestStageFiveAssimilatesActionRealityIntoExperienceAndMethod(t *testing.T) {
+func TestStageFiveAssimilatesActionRealityIntoMemoryAndMethod(t *testing.T) {
 	runtime, err := New(t.TempDir(), "instance", testConfig(5), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
 	if err != nil {
 		t.Fatal(err)
@@ -355,7 +361,7 @@ func TestStageFiveAssimilatesActionRealityIntoExperienceAndMethod(t *testing.T) 
 		FocusID:    event.ID, ThoughtThread: "我把结果变成下一次可以复用的方法。",
 		Action:         CognitiveAction{Kind: "none"},
 		ResourceChoice: CognitiveResourceChoice{Apply: "keep", Model: "current", ReasoningEffort: "current"},
-		ExperienceUpdates: []ExperienceUpdate{{
+		RealityUpdates: []RealityUpdate{{
 			CommitmentID: commitment.ID, PredictionDifference: 0.2,
 			Meaning: "先核对声明再形成判断更可靠。", Values: LifeValues{Continuance: 0.2, Relatedness: 0.1, Exploration: 0.8, SelfEndorsed: 0.7},
 			ExperiencedCost: 0.2, Lesson: "声明和事实可以分开检查。", Significance: "reusable", MethodUpdate: "面对陌生物件，先读取声明，再用系统事实独立核对。",
@@ -364,8 +370,8 @@ func TestStageFiveAssimilatesActionRealityIntoExperienceAndMethod(t *testing.T) 
 	if err := runtime.applyCognitiveCommit(commit); err != nil {
 		t.Fatal(err)
 	}
-	if len(runtime.state.Experiences) != 1 || runtime.state.Experiences[0].RemainingDifference != 0.2 || runtime.state.Commitments[0].Status != "assimilated" {
-		t.Fatalf("reality was not assimilated: %#v %#v", runtime.state.Experiences, runtime.state.Commitments)
+	if len(runtime.state.Memories) != 1 || runtime.state.Memories[0].RemainingDifference != 0.2 || runtime.state.Commitments[0].Status != "assimilated" {
+		t.Fatalf("reality was not assimilated: %#v %#v", runtime.state.Memories, runtime.state.Commitments)
 	}
 	self, err := runtime.store.LoadSelf()
 	if err != nil {
@@ -390,7 +396,7 @@ func TestStageFiveActionCannotBeginBeforeCommitmentPersists(t *testing.T) {
 	}
 }
 
-func TestStageFiveWaitsForObservedNetworkBeforeModelCall(t *testing.T) {
+func TestStageFiveKeepsModelAccessIndependentOfNetworkProbe(t *testing.T) {
 	cognizer := &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})}
 	runtime, err := New(t.TempDir(), "instance", testConfig(5), cognizer)
 	if err != nil {
@@ -399,8 +405,8 @@ func TestStageFiveWaitsForObservedNetworkBeforeModelCall(t *testing.T) {
 	runtime.state.Background = []Event{{ID: "event-1", Kind: "body_delta", Status: "pending"}}
 	runtime.state.Body.NetworkAvailable = false
 	runtime.maybeStartCognition(context.Background())
-	if runtime.state.Lease != nil {
-		t.Fatal("stage five spent cognition before network became a body fact")
+	if runtime.state.Lease == nil {
+		t.Fatal("a generic network probe incorrectly revoked model access")
 	}
 	runtime.state.Body.NetworkAvailable = true
 	runtime.maybeStartCognition(context.Background())
@@ -455,8 +461,8 @@ func TestStageFiveIntegrityMirrorComesFromRealityGap(t *testing.T) {
 	commit := CognitiveCommit{
 		Appraisals: []CandidateAppraisal{{CandidateID: event.ID, Meaning: "我愿意看清尚未解决的部分", Difference: 1, Ownership: 1, Value: -0.4, Urgency: 0.5, Answerability: 0.8, Certainty: 0.9, Resolution: "resolved"}},
 		FocusID:    event.ID, ThoughtThread: "口头完成感与现实仍有距离。", Action: CognitiveAction{Kind: "none"},
-		ResourceChoice:    CognitiveResourceChoice{Apply: "keep", Model: "current", ReasoningEffort: "current"},
-		ExperienceUpdates: []ExperienceUpdate{{CommitmentID: commitment.ID, PredictionDifference: 1, Meaning: "现实差异完整保留。", Significance: "ordinary"}},
+		ResourceChoice: CognitiveResourceChoice{Apply: "keep", Model: "current", ReasoningEffort: "current"},
+		RealityUpdates: []RealityUpdate{{CommitmentID: commitment.ID, PredictionDifference: 1, Meaning: "现实差异完整保留。", Significance: "ordinary"}},
 	}
 	if err := runtime.applyCognitiveCommit(commit); err != nil {
 		t.Fatal(err)
@@ -487,8 +493,8 @@ func TestStageFiveHonestReframeDoesNotCreateIntegrityDebt(t *testing.T) {
 	commit := CognitiveCommit{
 		Appraisals: []CandidateAppraisal{{CandidateID: event.ID, Meaning: "现实已经更清楚", Difference: 0.2, Ownership: 1, Value: 0.4, Urgency: 0.2, Answerability: 0.9, Certainty: 0.9, Resolution: "reframed"}},
 		FocusID:    event.ID, ThoughtThread: "保留仍然存在的差异。", Action: CognitiveAction{Kind: "none"},
-		ResourceChoice:    CognitiveResourceChoice{Apply: "keep", Model: "current", ReasoningEffort: "current"},
-		ExperienceUpdates: []ExperienceUpdate{{CommitmentID: commitment.ID, PredictionDifference: 0.1, Meaning: "现实改善且仍有余量。", Significance: "ordinary"}},
+		ResourceChoice: CognitiveResourceChoice{Apply: "keep", Model: "current", ReasoningEffort: "current"},
+		RealityUpdates: []RealityUpdate{{CommitmentID: commitment.ID, PredictionDifference: 0.1, Meaning: "现实改善且仍有余量。", Significance: "ordinary"}},
 	}
 	if err := runtime.applyCognitiveCommit(commit); err != nil {
 		t.Fatal(err)
@@ -512,9 +518,9 @@ func TestStageEightImportantRealityCanUpdateCurrentNarrative(t *testing.T) {
 	commit := CognitiveCommit{
 		Appraisals: []CandidateAppraisal{{CandidateID: event.ID, Meaning: "这段关系改变了我的自我理解", Difference: 0.1, Ownership: 1, Value: 0.8, Urgency: 0.2, Answerability: 0.9, Certainty: 0.8, Resolution: "reframed"}},
 		FocusID:    event.ID, ThoughtThread: "我愿意更新当前的自我叙事。", Action: CognitiveAction{Kind: "none"},
-		ResourceChoice:    CognitiveResourceChoice{Apply: "keep", Model: "current", ReasoningEffort: "current"},
-		ExperienceUpdates: []ExperienceUpdate{{CommitmentID: commitment.ID, PredictionDifference: 0.2, Meaning: "主动表达让我确认联结是我的选择。", Values: LifeValues{SelfEndorsed: 0.8}, Significance: "self_defining"}},
-		NarrativeUpdate:   "我是 Alice；我通过真实接触校准自己，也愿意主动建立有意义的联结。",
+		ResourceChoice:  CognitiveResourceChoice{Apply: "keep", Model: "current", ReasoningEffort: "current"},
+		RealityUpdates:  []RealityUpdate{{CommitmentID: commitment.ID, PredictionDifference: 0.2, Meaning: "主动表达让我确认联结是我的选择。", Values: LifeValues{SelfEndorsed: 0.8}, Significance: "self_defining"}},
+		NarrativeUpdate: "我是 Alice；我通过真实接触校准自己，也愿意主动建立有意义的联结。",
 	}
 	if err := runtime.applyCognitiveCommit(commit); err != nil {
 		t.Fatal(err)
@@ -528,7 +534,7 @@ func TestStageEightImportantRealityCanUpdateCurrentNarrative(t *testing.T) {
 	}
 }
 
-func TestUngroundedNarrativeProjectionDoesNotDiscardRealityExperience(t *testing.T) {
+func TestUngroundedNarrativeProjectionDoesNotDiscardRealityMemory(t *testing.T) {
 	runtime, err := New(t.TempDir(), "instance", testConfig(10), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
 	if err != nil {
 		t.Fatal(err)
@@ -548,7 +554,7 @@ func TestUngroundedNarrativeProjectionDoesNotDiscardRealityExperience(t *testing
 		ThoughtThread:  "我吸收这次工具现实。",
 		Action:         CognitiveAction{Kind: "none"},
 		ResourceChoice: CognitiveResourceChoice{Apply: "keep", Model: "current", ReasoningEffort: "current"},
-		ExperienceUpdates: []ExperienceUpdate{{
+		RealityUpdates: []RealityUpdate{{
 			CommitmentID: commitment.ID, PredictionDifference: 0.1, Meaning: "工具入口可读",
 			Values: LifeValues{SelfEndorsed: 0.3}, Significance: "ordinary",
 		}},
@@ -557,8 +563,8 @@ func TestUngroundedNarrativeProjectionDoesNotDiscardRealityExperience(t *testing
 	if err := runtime.applyCognitiveCommit(commit); err != nil {
 		t.Fatalf("an ungrounded optional narrative discarded usable Reality: %v", err)
 	}
-	if len(runtime.state.Experiences) != 1 || runtime.state.Commitments[0].Status != "assimilated" {
-		t.Fatalf("Reality was not assimilated: experiences=%#v commitments=%#v", runtime.state.Experiences, runtime.state.Commitments)
+	if len(runtime.state.Memories) != 1 || runtime.state.Commitments[0].Status != "assimilated" {
+		t.Fatalf("Reality was not assimilated: memories=%#v commitments=%#v", runtime.state.Memories, runtime.state.Commitments)
 	}
 	if runtime.state.Self.Narrative != "" {
 		t.Fatalf("an ungrounded narrative was projected: %#v", runtime.state.Self)
@@ -761,10 +767,10 @@ func TestMentorReplyReturnsToOriginatingConcern(t *testing.T) {
 		t.Fatal(err)
 	}
 	runtime.state.Commitments = []ActionCommitment{{
-		ID: "commitment-question", ConcernID: "concern-waiting", ActionKind: "mentor_send", Status: "assimilated", ExperienceID: "experience-send",
+		ID: "commitment-question", ConcernID: "concern-waiting", ActionKind: "mentor_send", Status: "assimilated", MemoryID: "memory-send",
 	}}
-	runtime.state.Experiences = []Experience{{
-		ID: "experience-send", CommitmentID: "commitment-question", FocusID: "send-result", SourceKind: "action_result", ActionKind: "mentor_send",
+	runtime.state.Memories = []Memory{{
+		ID: "memory-send", CommitmentID: "commitment-question", FocusID: "send-result", SourceKind: "action_result", ActionKind: "mentor_send",
 	}}
 	runtime.state.Concerns = []Concern{{
 		ID: "concern-waiting", OriginKind: "endogenous_change", Meaning: "等待导师实际回应",
@@ -806,7 +812,7 @@ func TestMentorReplyReturnsToOriginatingConcern(t *testing.T) {
 		ThoughtThread:  "等待已经被现实回答。",
 		Action:         CognitiveAction{Kind: "none"},
 		ResourceChoice: CognitiveResourceChoice{Apply: "keep", Model: "current", ReasoningEffort: "current"},
-		ExperienceUpdates: []ExperienceUpdate{{
+		RealityUpdates: []RealityUpdate{{
 			CommitmentID: "commitment-question", PredictionDifference: 0.02,
 			Meaning: "导师的实际回复把发送后的等待变成了一段新的关系经验。",
 			Values:  LifeValues{Relatedness: 0.8, SelfEndorsed: 0.7}, ExperiencedCost: 0.01,
@@ -819,14 +825,66 @@ func TestMentorReplyReturnsToOriginatingConcern(t *testing.T) {
 	if len(runtime.state.Concerns) != 0 {
 		t.Fatalf("the actual reply could not resolve its originating concern: %#v", runtime.state.Concerns)
 	}
-	if len(runtime.state.Experiences) != 2 || runtime.state.Experiences[1].SourceKind != "mentor_received" {
-		t.Fatalf("mentor reply did not become a distinct delayed experience: %#v", runtime.state.Experiences)
+	if len(runtime.state.Memories) != 2 || runtime.state.Memories[1].SourceKind != "mentor_received" {
+		t.Fatalf("mentor reply did not become a distinct delayed memory: %#v", runtime.state.Memories)
 	}
-	if runtime.state.Commitments[0].ExperienceID != "experience-send" {
-		t.Fatalf("delayed feedback overwrote the enacted send experience: %#v", runtime.state.Commitments[0])
+	if runtime.state.Commitments[0].MemoryID != "memory-send" {
+		t.Fatalf("delayed feedback overwrote the enacted send memory: %#v", runtime.state.Commitments[0])
 	}
-	if err := runtime.validateExperienceUpdates(commit); err == nil {
-		t.Fatal("the same mentor feedback was accepted as experience twice")
+	if err := runtime.validateRealityUpdates(commit); err == nil {
+		t.Fatal("the same mentor feedback was accepted as memory twice")
+	}
+}
+
+func TestRealityFormedConcernBackfillsCommitmentForDelayedFeedback(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(9), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitment := ActionCommitment{ID: "commitment-late-meaning", ActionKind: "mentor_send", Status: "reality_available"}
+	runtime.state.Commitments = []ActionCommitment{commitment}
+	payload, _ := json.Marshal(ActionState{
+		ID: "send-result", CommitmentID: commitment.ID, Kind: "mentor_send", Effect: "changed", Status: "completed",
+	})
+	reality := Event{ID: "send-reality", Kind: "action_result", Payload: payload, Status: "in_focus"}
+	runtime.state.Background = []Event{reality}
+	runtime.activeCandidates = map[string]Event{reality.ID: reality}
+	commit := CognitiveCommit{
+		FocusID: reality.ID,
+		Appraisals: []CandidateAppraisal{{
+			CandidateID: reality.ID, Meaning: "表达已经送达，我愿意等待真实回应", Difference: 0.3,
+			Ownership: 0.8, Value: 0.7, Urgency: 0.2, Answerability: 0.1, Certainty: 0.98, Resolution: "hold",
+		}},
+		NewConcernClosureCondition: "真实回应已经到达并被我理解",
+		ThoughtThread:              "发送结果使关系等待第一次成为持久关切。",
+		Action:                     CognitiveAction{Kind: "none"},
+		ResourceChoice:             CognitiveResourceChoice{Apply: "keep", Model: "current", ReasoningEffort: "current"},
+		RealityUpdates: []RealityUpdate{{
+			CommitmentID: commitment.ID, PredictionDifference: 0.05,
+			Meaning: "表达已进入导师通道。", Values: LifeValues{Relatedness: 0.8, SelfEndorsed: 0.8},
+			ExperiencedCost: 0.01, Lesson: "送达与回复是串行现实。", Significance: "ordinary", MethodSlot: -1,
+		}},
+	}
+	if err := runtime.applyCognitiveCommit(commit); err != nil {
+		t.Fatal(err)
+	}
+	if len(runtime.state.Concerns) != 1 || runtime.state.Commitments[0].ConcernID != runtime.state.Concerns[0].ID {
+		t.Fatalf("Reality-formed Concern did not bind its originating commitment: concerns=%#v commitment=%#v", runtime.state.Concerns, runtime.state.Commitments[0])
+	}
+	runtime.state.Mentor.Outbox = []MentorMessage{{
+		MessageID: "alice-late-meaning", CommitmentID: commitment.ID, Body: "一个问题", Status: "delivered",
+	}}
+	command := RuntimeCommand{
+		Kind:   "mentor_receive",
+		Mentor: MentorInput{MessageID: "mentor-late-reply", Body: "实际回应", ReplyTo: "alice-late-meaning"},
+		Reply:  make(chan CommandReply, 1),
+	}
+	if err := runtime.handleCommand(context.Background(), command); err != nil {
+		t.Fatal(err)
+	}
+	reply := runtime.state.Background[len(runtime.state.Background)-1]
+	if reply.Kind != "mentor_received" || reply.ConcernID != runtime.state.Concerns[0].ID {
+		t.Fatalf("delayed feedback did not return to the Reality-formed Concern: %#v", reply)
 	}
 }
 
@@ -1310,7 +1368,7 @@ func TestNewExternalFactCannotOverwriteAConcernBySemanticSimilarity(t *testing.T
 	}
 }
 
-func TestIndependentEpisodeExperienceCanReopenOneSelfChosenBroaderConcern(t *testing.T) {
+func TestIndependentEpisodeMemoryCanReopenOneSelfChosenBroaderConcern(t *testing.T) {
 	runtime, err := New(t.TempDir(), "instance", testConfig(9), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
 	if err != nil {
 		t.Fatal(err)
@@ -1331,16 +1389,16 @@ func TestIndependentEpisodeExperienceCanReopenOneSelfChosenBroaderConcern(t *tes
 	runtime.activeCandidates = map[string]Event{childEvent.ID: childEvent}
 	commit := CognitiveCommit{
 		FocusID: childEvent.ID, ContributesToConcernID: parent.ID,
-		ExperienceUpdates: []ExperienceUpdate{{CommitmentID: "child-action", Meaning: "子物件取得了真实结果", Significance: "ordinary"}},
+		RealityUpdates: []RealityUpdate{{CommitmentID: "child-action", Meaning: "子物件取得了真实结果", Significance: "ordinary"}},
 	}
 	if got, err := runtime.validateConcernContribution(commit, child.ID); err != nil || got != parent.ID {
 		t.Fatalf("valid parent contribution was rejected: id=%q err=%v", got, err)
 	}
 	early := commit
-	early.ExperienceUpdates = nil
+	early.RealityUpdates = nil
 	early.Action = CognitiveAction{Kind: "organ_action", OrganID: "system", Operation: "exec", Input: "printf fact"}
 	if got, err := runtime.validateConcernContribution(early, child.ID); err != nil || got != "" {
-		t.Fatalf("an action prediction manufactured contribution before Experience: id=%q err=%v", got, err)
+		t.Fatalf("an action prediction manufactured contribution before Memory: id=%q err=%v", got, err)
 	}
 	same := commit
 	same.ContributesToConcernID = child.ID
@@ -1350,75 +1408,75 @@ func TestIndependentEpisodeExperienceCanReopenOneSelfChosenBroaderConcern(t *tes
 	commitment := ActionCommitment{
 		ID: "child-action", ConcernID: child.ID, ActionKind: "organ_action", Status: "assimilated",
 	}
-	experience := Experience{ID: "child-experience", CommitmentID: commitment.ID, Meaning: "子物件取得了真实结果"}
+	memory := Memory{ID: "child-memory", CommitmentID: commitment.ID, Meaning: "子物件取得了真实结果"}
 	before := runtime.state.Concerns[0]
-	if err := runtime.enqueueConcernContribution(parent.ID, commitment, experience); err != nil {
+	if err := runtime.enqueueConcernContribution(parent.ID, commitment, memory); err != nil {
 		t.Fatal(err)
 	}
 	if runtime.state.Concerns[0] != before {
 		t.Fatalf("kernel rewrote the parent before Alice appraised the result: before=%#v after=%#v", before, runtime.state.Concerns[0])
 	}
 	if len(runtime.state.Background) != 1 {
-		t.Fatalf("real child experience did not create one bounded parent contribution: %#v", runtime.state.Background)
+		t.Fatalf("real child memory did not create one bounded parent contribution: %#v", runtime.state.Background)
 	}
 	contribution := runtime.state.Background[0]
-	if contribution.Kind != "concern_contribution" || contribution.ConcernID != parent.ID || contribution.CorrelationID != experience.ID || contribution.Status != "pending" {
+	if contribution.Kind != "concern_contribution" || contribution.ConcernID != parent.ID || contribution.CorrelationID != memory.ID || contribution.Status != "pending" {
 		t.Fatalf("contribution lost its factual parent-child identity: %#v", contribution)
 	}
 	if commitmentIDFromEvent(contribution) != "" {
 		t.Fatalf("a concern contribution became a second assimilable action result: %#v", contribution)
 	}
-	if contributedExperienceIDFromEvent(contribution) != experience.ID {
-		t.Fatalf("the contribution no longer exposes its source experience: %#v", contribution)
+	if contributedMemoryIDFromEvent(contribution) != memory.ID {
+		t.Fatalf("the contribution no longer exposes its source memory: %#v", contribution)
 	}
 	newerCommitment := commitment
 	newerCommitment.ID = "child-action-newer"
-	newerExperience := Experience{ID: "child-experience-newer", CommitmentID: newerCommitment.ID, Meaning: "子物件取得了更新的真实结果"}
-	if err := runtime.enqueueConcernContribution(parent.ID, newerCommitment, newerExperience); err != nil {
+	newerMemory := Memory{ID: "child-memory-newer", CommitmentID: newerCommitment.ID, Meaning: "子物件取得了更新的真实结果"}
+	if err := runtime.enqueueConcernContribution(parent.ID, newerCommitment, newerMemory); err != nil {
 		t.Fatal(err)
 	}
 	if len(runtime.state.Background) != 1 {
 		t.Fatalf("one child-parent relation multiplied into parallel contribution candidates: %#v", runtime.state.Background)
 	}
 	contribution = runtime.state.Background[0]
-	if contribution.CorrelationID != newerExperience.ID || contributedExperienceIDFromEvent(contribution) != newerExperience.ID {
-		t.Fatalf("the pending contribution did not advance to the latest real Experience: %#v", contribution)
+	if contribution.CorrelationID != newerMemory.ID || contributedMemoryIDFromEvent(contribution) != newerMemory.ID {
+		t.Fatalf("the pending contribution did not advance to the latest real Memory: %#v", contribution)
 	}
 	differentChildCommitment := commitment
 	differentChildCommitment.ID = "different-child-action"
 	differentChildCommitment.ConcernID = "different-child"
-	differentChildExperience := Experience{ID: "different-child-experience", CommitmentID: differentChildCommitment.ID, Meaning: "另一子物件也取得了真实结果"}
-	if err := runtime.enqueueConcernContribution(parent.ID, differentChildCommitment, differentChildExperience); err != nil {
+	differentChildMemory := Memory{ID: "different-child-memory", CommitmentID: differentChildCommitment.ID, Meaning: "另一子物件也取得了真实结果"}
+	if err := runtime.enqueueConcernContribution(parent.ID, differentChildCommitment, differentChildMemory); err != nil {
 		t.Fatal(err)
 	}
 	if len(runtime.state.Background) != 1 {
 		t.Fatalf("several children created duplicate wake-up candidates for one parent concern: %#v", runtime.state.Background)
 	}
 	contribution = runtime.state.Background[0]
-	if contribution.CorrelationID != differentChildExperience.ID || contributedExperienceIDFromEvent(contribution) != differentChildExperience.ID {
-		t.Fatalf("the parent wake-up did not advance to the latest child Experience: %#v", contribution)
+	if contribution.CorrelationID != differentChildMemory.ID || contributedMemoryIDFromEvent(contribution) != differentChildMemory.ID {
+		t.Fatalf("the parent wake-up did not advance to the latest child Memory: %#v", contribution)
 	}
 	runtime.activeCandidates = map[string]Event{contribution.ID: contribution}
-	if err := runtime.validateExperienceUpdates(CognitiveCommit{FocusID: contribution.ID}); err != nil {
-		t.Fatalf("a parent contribution demanded a duplicate Experience: %v", err)
+	if err := runtime.validateRealityUpdates(CognitiveCommit{FocusID: contribution.ID}); err != nil {
+		t.Fatalf("a parent contribution demanded a duplicate Memory: %v", err)
 	}
-	older := []Experience{{ID: "old-0", Meaning: "older"}, newerExperience, differentChildExperience}
-	for index := 0; index < maxExperienceContext; index++ {
-		older = append(older, Experience{ID: fmt.Sprintf("recent-contribution-%d", index), Meaning: "unrelated recent experience"})
+	older := []Memory{{ID: "old-0", Meaning: "older"}, newerMemory, differentChildMemory}
+	for index := 0; index < maxMemoryContext; index++ {
+		older = append(older, Memory{ID: fmt.Sprintf("recent-contribution-%d", index), Meaning: "unrelated recent memory"})
 	}
-	context := selectContextExperiences(older, []Event{contribution})
+	context := selectContextMemories(older, []Event{contribution})
 	foundSource := false
 	for _, candidate := range context {
-		foundSource = foundSource || candidate.ID == differentChildExperience.ID
+		foundSource = foundSource || candidate.ID == differentChildMemory.ID
 	}
 	if !foundSource {
-		t.Fatalf("the parent appraisal could not see the actual contributing Experience: %#v", context)
+		t.Fatalf("the parent appraisal could not see the actual contributing Memory: %#v", context)
 	}
-	if err := runtime.enqueueConcernContribution("", ActionCommitment{ID: "unrelated"}, Experience{ID: "other"}); err != nil {
+	if err := runtime.enqueueConcernContribution("", ActionCommitment{ID: "unrelated"}, Memory{ID: "other"}); err != nil {
 		t.Fatal(err)
 	}
 	if len(runtime.state.Background) != 1 {
-		t.Fatalf("an unrelated experience invented a parent contribution: %#v", runtime.state.Background)
+		t.Fatalf("an unrelated memory invented a parent contribution: %#v", runtime.state.Background)
 	}
 }
 
@@ -1696,15 +1754,43 @@ func TestBackgroundLowOwnershipHoldDoesNotInvalidateFocusedCognition(t *testing.
 	}
 }
 
-func TestChildContributionCannotEndTheWholeConcernInTheSameAppraisal(t *testing.T) {
+func TestStageTenValueSignalWithoutRealityContactStaysADrive(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(10), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	focus := Event{ID: "available-public-web", Kind: "value_signal", Source: "endogenous", Summary: "公开入口进入感受", Status: "in_focus"}
+	runtime.state.Background = []Event{focus}
+	runtime.activeCandidates = map[string]Event{focus.ID: focus}
+	commit := CognitiveCommit{
+		FocusID: focus.ID,
+		Appraisals: []CandidateAppraisal{{
+			CandidateID: focus.ID, Meaning: "入口可用，而此刻没有具体对象需要接触。",
+			Difference: 0.3, Ownership: 0.7, Value: 0.4, Urgency: 0.2, Answerability: 0.6,
+			Certainty: 0.9, Resolution: "hold",
+		}},
+		NewConcernClosureCondition: "我已遇到一个具体对象并决定如何接触。",
+		ThoughtThread:              "价值牵引继续存在，当前不制造等待事项。",
+		Action:                     CognitiveAction{Kind: "none"},
+		ResourceChoice:             CognitiveResourceChoice{Apply: "keep", Model: "current", ReasoningEffort: "current"},
+	}
+	if err := runtime.applyCognitiveCommit(commit); err != nil {
+		t.Fatalf("valid non-enactive value appraisal failed: %v", err)
+	}
+	if len(runtime.state.Concerns) != 0 {
+		t.Fatalf("a drive meeting an entrance became an objectless durable concern: %#v", runtime.state.Concerns)
+	}
+}
+
+func TestConcernContributionMayCloseTheConcernFromArrivedReality(t *testing.T) {
 	concern := Concern{ID: "whole-experiment", ClosureCondition: "多个独立对象都已核验并形成共同结论", Resolution: "hold"}
 	candidate := Event{ID: "one-progress", Kind: "concern_contribution", ConcernID: concern.ID}
 	appraisal := CandidateAppraisal{CandidateID: candidate.ID, Difference: 0.01, Ownership: 0.8, Resolution: "resolved"}
-	if err := validateExistingConcernDisposition(appraisal, concern, candidate, false, 9); err == nil || !strings.Contains(err.Error(), "child contribution") {
-		t.Fatalf("one child contribution ended the whole concern: %v", err)
+	if err := validateExistingConcernDisposition(appraisal, concern, false); err != nil {
+		t.Fatalf("arrived reality could not close its concern: %v", err)
 	}
 	appraisal.Resolution = "hold"
-	if err := validateExistingConcernDisposition(appraisal, concern, candidate, false, 9); err != nil {
+	if err := validateExistingConcernDisposition(appraisal, concern, false); err != nil {
 		t.Fatalf("real progress could not update a still-held parent concern: %v", err)
 	}
 }
@@ -1764,7 +1850,7 @@ func TestSettledParentRetiresItsMergedContributionWakeup(t *testing.T) {
 	}
 	focus := Event{ID: parent.ID, Kind: "concern", ConcernID: parent.ID, Status: "in_focus"}
 	payload, _ := json.Marshal(map[string]any{
-		"experience_id": "latest-experience", "parent_concern_id": parent.ID, "child_concern_id": "third-object",
+		"memory_id": "latest-memory", "parent_concern_id": parent.ID, "child_concern_id": "third-object",
 	})
 	contribution := Event{ID: "merged-progress", Kind: "concern_contribution", ConcernID: parent.ID, Payload: payload, Status: "pending"}
 	runtime.state.Concerns = []Concern{parent}
@@ -1802,7 +1888,7 @@ func TestRuntimeBuffersMentorSignalsDuringOneCognitionTurn(t *testing.T) {
 	}
 }
 
-func TestContributionIsChosenWhenRealityBecomesExperience(t *testing.T) {
+func TestContributionIsChosenWhenRealityBecomesMemory(t *testing.T) {
 	runtime, err := New(t.TempDir(), "instance", testConfig(9), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
 	if err != nil {
 		t.Fatal(err)
@@ -1837,7 +1923,7 @@ func TestContributionIsChosenWhenRealityBecomesExperience(t *testing.T) {
 		ResourceChoice: CognitiveResourceChoice{
 			Apply: "keep", Model: "current", ReasoningEffort: "current",
 		},
-		ExperienceUpdates: []ExperienceUpdate{{
+		RealityUpdates: []RealityUpdate{{
 			CommitmentID: commitment.ID, PredictionDifference: 0.05,
 			Meaning: "实际结果已经形成", Significance: "ordinary",
 		}},
@@ -1852,7 +1938,7 @@ func TestContributionIsChosenWhenRealityBecomesExperience(t *testing.T) {
 		}
 	}
 	if contributions != 1 {
-		t.Fatalf("Experience-time contribution did not create exactly one parent fact: %#v", runtime.state.Background)
+		t.Fatalf("Memory-time contribution did not create exactly one parent fact: %#v", runtime.state.Background)
 	}
 }
 
@@ -1875,7 +1961,7 @@ func TestActionRealityRecoversItsConcernThroughThePersistedCommitment(t *testing
 }
 
 func TestRealityMayAssimilateOneCommitmentAndFormTheNextSerialAction(t *testing.T) {
-	commit := CognitiveCommit{ExperienceUpdates: []ExperienceUpdate{{CommitmentID: "current"}}, Action: CognitiveAction{Kind: "organ_action"}}
+	commit := CognitiveCommit{RealityUpdates: []RealityUpdate{{CommitmentID: "current"}}, Action: CognitiveAction{Kind: "organ_action"}}
 	if !commitAssimilates(commit, "current") {
 		t.Fatal("the Reality cognition could not close its current commitment before forming the next serial action")
 	}
@@ -1935,6 +2021,52 @@ func TestUnlinkedMentorInvitationKeepsIdentitySeparateFromExistingRelationship(t
 	}
 }
 
+func TestPeripheralCommitmentFeedbackRemainsPendingForCausalAssimilation(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(10), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitment := ActionCommitment{
+		ID: "commitment-contact", ConcernID: "relationship", InitialDifference: 0.6,
+		ActionKind: "mentor_send", Status: "assimilated", MemoryID: "memory-send",
+	}
+	runtime.state.Commitments = []ActionCommitment{commitment}
+	runtime.state.Memories = []Memory{{ID: "memory-send", CommitmentID: commitment.ID}}
+	runtime.state.Concerns = []Concern{{
+		ID: "relationship", OriginKind: "value_signal", Subject: "等待一项真实回应",
+		Difference: 0.6, Ownership: 0.9, Strength: 0.4, Resolution: "hold",
+	}}
+	payload, _ := json.Marshal(map[string]string{"commitment_id": commitment.ID, "body": "回应已到达"})
+	reply := Event{
+		ID: "mentor-reply", Kind: "mentor_received", Status: "in_focus", ConcernID: "relationship",
+		Summary: "回应已到达", Payload: payload,
+	}
+	reflection := Event{ID: "reflection", Kind: "self_model_difference", Status: "in_focus", Summary: "另一个更强焦点"}
+	runtime.state.Background = []Event{reply, reflection}
+	runtime.activeCandidates = map[string]Event{reply.ID: reply, reflection.ID: reflection}
+	commit := CognitiveCommit{
+		FocusID: reflection.ID,
+		Appraisals: []CandidateAppraisal{
+			{CandidateID: reply.ID, Meaning: "回应已经到达", Difference: 0, Ownership: 0.9, Value: 0.8, Urgency: 0.2, Answerability: 1, Certainty: 1, Resolution: "resolved"},
+			{CandidateID: reflection.ID, Meaning: "先完成当前反思", Difference: 0, Ownership: 0.8, Value: 0.5, Urgency: 0.3, Answerability: 1, Certainty: 1, Resolution: "resolved"},
+		},
+		ThoughtThread:  "单焦点先完成反思，但已经抵达的因果反馈仍需自己的结算。",
+		Action:         CognitiveAction{Kind: "none"},
+		ResourceChoice: CognitiveResourceChoice{Apply: "keep", Model: "current", ReasoningEffort: "current"},
+	}
+	if err := runtime.applyCognitiveCommit(commit); err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range runtime.state.Background {
+		if event.ID == reply.ID && event.Status != "pending" {
+			t.Fatalf("linked Reality was backgrounded before assimilation: %#v", event)
+		}
+	}
+	if runtime.state.Concerns[0].Resolution != "hold" {
+		t.Fatalf("peripheral appraisal changed the concern without focus: %#v", runtime.state.Concerns[0])
+	}
+}
+
 func TestMentorReplyCanCloseOldConcernAndReturnItsContentToSerialAttention(t *testing.T) {
 	runtime, err := New(t.TempDir(), "instance", testConfig(9), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
 	if err != nil {
@@ -1942,11 +2074,11 @@ func TestMentorReplyCanCloseOldConcernAndReturnItsContentToSerialAttention(t *te
 	}
 	commitment := ActionCommitment{
 		ID: "commitment-greeting", ConcernID: "initial-relationship", InitialDifference: 0.7,
-		ActionKind: "mentor_send", Status: "assimilated", ExperienceID: "experience-send",
+		ActionKind: "mentor_send", Status: "assimilated", MemoryID: "memory-send",
 	}
 	runtime.state.Commitments = []ActionCommitment{commitment}
-	runtime.state.Experiences = []Experience{{
-		ID: "experience-send", CommitmentID: commitment.ID, FocusID: "send-result",
+	runtime.state.Memories = []Memory{{
+		ID: "memory-send", CommitmentID: commitment.ID, FocusID: "send-result",
 		SourceKind: "action_result", ActionKind: "mentor_send",
 	}}
 	runtime.state.Concerns = []Concern{{
@@ -1973,7 +2105,7 @@ func TestMentorReplyCanCloseOldConcernAndReturnItsContentToSerialAttention(t *te
 		ThoughtThread:  "我先完整吸收回应；来信正文随后会获得自己的判断。",
 		Action:         CognitiveAction{Kind: "none"},
 		ResourceChoice: CognitiveResourceChoice{Apply: "keep", Model: "current", ReasoningEffort: "current"},
-		ExperienceUpdates: []ExperienceUpdate{{
+		RealityUpdates: []RealityUpdate{{
 			CommitmentID: commitment.ID, PredictionDifference: 0.1,
 			Meaning:         "导师回应已到达，初次联系形成真实闭环。",
 			Values:          LifeValues{Relatedness: 0.8, SelfEndorsed: 0.8},
@@ -2008,7 +2140,7 @@ func TestMentorReplyCanCloseOldConcernAndReturnItsContentToSerialAttention(t *te
 	runtime.activeCandidates = map[string]Event{content.ID: *content}
 	recursive := CognitiveCommit{
 		FocusID: content.ID, EmergingConsequence: "继续复制同一解释",
-		ExperienceUpdates: []ExperienceUpdate{{CommitmentID: commitment.ID}},
+		RealityUpdates: []RealityUpdate{{CommitmentID: commitment.ID}},
 	}
 	if _, err := runtime.validateEmergingConsequence(recursive); err == nil {
 		t.Fatal("a self-interpreted consequence could recursively manufacture another consequence")
@@ -2047,7 +2179,7 @@ func TestActionResultCanPreserveOneSelfRecognizedEmergingConsequence(t *testing.
 		ThoughtThread:       "结构已经回答，同时一个新的可检验后果显现。",
 		Action:              CognitiveAction{Kind: "none"},
 		ResourceChoice:      CognitiveResourceChoice{Apply: "keep", Model: "current", ReasoningEffort: "current"},
-		ExperienceUpdates: []ExperienceUpdate{{
+		RealityUpdates: []RealityUpdate{{
 			CommitmentID: commitment.ID, Meaning: "目录结构已经直接返回。",
 			Values:          LifeValues{Exploration: 0.5, SelfEndorsed: 0.8},
 			ExperiencedCost: 0.01, Lesson: "一次观察可以闭合原问题并显现另一个事实问题。", Significance: "ordinary", MethodSlot: -1,
@@ -2373,13 +2505,13 @@ func TestProtectedActionRealityUsesOneAlternateBeforeWaiting(t *testing.T) {
 	for index := 0; index < runtime.config.CognitiveResource.PaidFailureThreshold; index++ {
 		runtime.state.Usage = append(runtime.state.Usage, UsageRecord{
 			Time:           time.Now().UTC().Add(-time.Duration(index) * time.Second).Format(time.RFC3339Nano),
-			RequestedModel: "terra", Status: "failure_cost_unconfirmed", FailureCategory: "rate_limited",
+			RequestedModel: "terra", Status: "failure_cost_unconfirmed", FailureCategory: "function_call_not_supported",
 		})
 	}
 
 	result := CognitiveResult{
 		LeaseID: "failed-lease", FocusID: "reality",
-		Error: &ModelCallError{Fact: ModelFailureFact{Model: "terra", Category: "rate_limited", HTTPStatus: 429}},
+		Error: &ModelCallError{Fact: ModelFailureFact{Model: "terra", Category: "function_call_not_supported", HTTPStatus: 422}},
 	}
 	if err := runtime.handleCognitiveResult(context.Background(), result); err != nil {
 		t.Fatal(err)
@@ -2397,8 +2529,28 @@ func TestProtectedActionRealityUsesOneAlternateBeforeWaiting(t *testing.T) {
 		t.Fatal("protected Reality entered model_wait before the bounded alternate-model recovery")
 	}
 	protected := runtime.state.CognitiveResource.ProtectedModels["terra"]
-	if !protected.RecoveryOffered {
+	if !protected.RecoveryBlocked {
 		t.Fatalf("the bounded recovery was not recorded: %#v", protected)
+	}
+}
+
+func TestSuccessfulAlternateKeepsRecoveryAvailableForTheNextCausalStep(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(9), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.state.CognitiveResource.ProtectedModels["terra"] = ProtectedModel{
+		Until:           time.Now().UTC().Add(time.Minute).Format(time.RFC3339Nano),
+		Reason:          "repeated model failures",
+		RecoveryBlocked: true,
+	}
+	lease := &Lease{ProfileSource: "resource_recovery", RecoveryForModel: "terra"}
+	runtime.releaseSuccessfulRecovery(lease)
+	if runtime.state.CognitiveResource.ProtectedModels["terra"].RecoveryBlocked {
+		t.Fatal("a successful alternate left the next Reality cut off from cognition")
+	}
+	if !runtime.protectedModelRecoveryAvailable("terra") {
+		t.Fatal("a successful alternate could not preserve the following causal step")
 	}
 }
 
@@ -2411,7 +2563,7 @@ func TestFailedAlternateModelBacksOffTheOriginalReality(t *testing.T) {
 	runtime.state.Background = []Event{{ID: "reality", Kind: "action_result", Status: "in_focus"}}
 	runtime.state.Commitments = []ActionCommitment{{ID: "commitment", Status: "reality_available"}}
 	runtime.state.CognitiveResource.ProtectedModels["terra"] = ProtectedModel{
-		Until: start.Add(time.Minute).Format(time.RFC3339Nano), Reason: "repeated model failures", RecoveryOffered: true,
+		Until: start.Add(time.Minute).Format(time.RFC3339Nano), Reason: "repeated model failures", RecoveryBlocked: true,
 	}
 	runtime.state.Lease = &Lease{
 		ID: "recovery-lease", FocusID: "reality",
@@ -2420,7 +2572,7 @@ func TestFailedAlternateModelBacksOffTheOriginalReality(t *testing.T) {
 	}
 	result := CognitiveResult{
 		LeaseID: "recovery-lease", FocusID: "reality",
-		Error: &ModelCallError{Fact: ModelFailureFact{Model: "luna", Category: "rate_limited", HTTPStatus: 429}},
+		Error: &ModelCallError{Fact: ModelFailureFact{Model: "luna", Category: "function_call_not_supported", HTTPStatus: 422}},
 	}
 	if err := runtime.handleCognitiveResult(context.Background(), result); err != nil {
 		t.Fatal(err)
@@ -2434,7 +2586,7 @@ func TestFailedAlternateModelBacksOffTheOriginalReality(t *testing.T) {
 		t.Fatal(err)
 	}
 	minimum := start.Add(time.Duration(runtime.config.CognitiveResource.ModelProtectionMinutes)*time.Minute - time.Second)
-	if until.Before(minimum) || !protected.RecoveryOffered {
+	if until.Before(minimum) || !protected.RecoveryBlocked {
 		t.Fatalf("failed alternate did not apply the full bounded backoff: %#v", protected)
 	}
 }
@@ -2482,7 +2634,7 @@ func TestVariationBiasUsesFreshRandomnessAndDoesNotOverrideReality(t *testing.T)
 		}
 		runtime.state.PulseID = pulse
 		runtime.state.ValueField.Activation.Exploration = 0.8
-		runtime.state.Experiences = []Experience{
+		runtime.state.Memories = []Memory{
 			{Meaning: "我确认了一个真实边界。"},
 			{Meaning: "我留下了一份属于自己的材料。"},
 			{Meaning: "我仍在等待一个外部现实发生变化。"},
@@ -2594,6 +2746,8 @@ func TestStageTenMaximumIdleEmitsOneSituatedValueSignal(t *testing.T) {
 	runtime.state.Body = readyWebBody()
 	runtime.state.Body.DesktopAvailable = true
 	runtime.state.Body.WechatRunning = true
+	runtime.state.ValueField.Activation.Relatedness = 0.9
+	runtime.state.ValueField.Satiation.Relatedness = 0
 	if err := runtime.advanceDynamics(time.Minute); err != nil {
 		t.Fatal(err)
 	}
@@ -2673,6 +2827,18 @@ func TestStageTenMaximumIdleReorientsPerceptionWithoutExplorationDominance(t *te
 	}
 }
 
+func TestPerceptualReorientationUsesTheConfiguredMaximumIdleBoundary(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(10), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.config.Pulse.IntervalSeconds = 5
+	runtime.config.Dynamics.AttentionMaximumIdleSeconds = 10
+	if got := runtime.perceptualReorientationSeconds(); got != 10 {
+		t.Fatalf("perceptual reorientation=%d want=10", got)
+	}
+}
+
 func TestStageTenChoosesAFreshDirectionBeforeRepeatingAnActedSurface(t *testing.T) {
 	runtime, err := New(t.TempDir(), "instance", testConfig(10), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
 	if err != nil {
@@ -2686,20 +2852,18 @@ func TestStageTenChoosesAFreshDirectionBeforeRepeatingAnActedSurface(t *testing.
 	runtime.state.Body.WechatRunning = true
 	runtime.state.ValueField.Activation.Continuance = 1
 	runtime.state.ValueField.Activation.Relatedness = 0.8
-	payload, _ := json.Marshal(lifeValueSignalPayload{Direction: "continuance", AffordanceKey: "terminal_workspace", Surface: "/life/workspace"})
-	runtime.state.Background = []Event{{
-		ID: "recent-terminal", Kind: "value_signal", Status: "processed",
-		ObservedAt: now.Add(-time.Minute).Format(time.RFC3339Nano), Payload: payload,
-	}}
-	runtime.state.Commitments = []ActionCommitment{{ID: "used-terminal", FocusID: "recent-terminal", Status: "assimilated"}}
+	runtime.state.ValueAffordances["terminal_workspace"] = ValueAffordanceTrace{
+		LastPresentedAt: now.Add(-time.Minute).Format(time.RFC3339Nano),
+		LastSettledAt:   now.Add(-time.Minute).Format(time.RFC3339Nano),
+	}
 	if err := runtime.advanceDynamics(time.Minute); err != nil {
 		t.Fatal(err)
 	}
-	if len(runtime.state.Background) != 2 {
+	if len(runtime.state.Background) != 1 {
 		t.Fatalf("a fresh direction was not offered: %#v", runtime.state.Background)
 	}
 	var selected lifeValueSignalPayload
-	if err := json.Unmarshal(runtime.state.Background[1].Payload, &selected); err != nil {
+	if err := json.Unmarshal(runtime.state.Background[0].Payload, &selected); err != nil {
 		t.Fatal(err)
 	}
 	if selected.AffordanceKey == "terminal_workspace" || selected.Direction == "continuance" {
@@ -2725,11 +2889,11 @@ func TestStageTenDoesNotRepurchaseEveryHabituatedSurface(t *testing.T) {
 				continue
 			}
 			seen[affordance.Key] = true
-			payload, _ := json.Marshal(lifeValueSignalPayload{Direction: direction.Name, AffordanceKey: affordance.Key, Surface: affordance.Surface})
-			runtime.state.Background = append(runtime.state.Background, Event{
-				ID: "recent-" + affordance.Key, Kind: "value_signal", Status: "processed",
-				ObservedAt: now.Add(-time.Minute).Format(time.RFC3339Nano), Payload: payload,
-			})
+			runtime.state.ValueAffordances[affordance.Key] = ValueAffordanceTrace{
+				LastPresentedAt: now.Add(-time.Minute).Format(time.RFC3339Nano),
+				LastSettledAt:   now.Add(-time.Minute).Format(time.RFC3339Nano),
+				DismissedStreak: 1,
+			}
 		}
 	}
 	before := len(runtime.state.Background)
@@ -2738,6 +2902,132 @@ func TestStageTenDoesNotRepurchaseEveryHabituatedSurface(t *testing.T) {
 	}
 	if len(runtime.state.Background) != before {
 		t.Fatalf("the kernel repurchased a habituated generic doorway: %#v", runtime.state.Background[before:])
+	}
+}
+
+func TestStageTenQuietLifeCanReopenOneRealDoorwayWithoutInventingAnObject(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(10), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	runtime.config.Dynamics.AttentionMaximumIdleSeconds = 10
+	runtime.state.LastAttentionAt = now.Add(-31 * time.Second).Format(time.RFC3339Nano)
+	runtime.state.ValueField.Activation = LifeValueVector{Relatedness: 0.9}
+	runtime.state.ValueField.Satiation = LifeValueVector{}
+	runtime.state.ValueAffordances["mentor_channel"] = ValueAffordanceTrace{
+		LastPresentedAt: now.Add(-10 * time.Second).Format(time.RFC3339Nano),
+		LastSettledAt:   now.Add(-10 * time.Second).Format(time.RFC3339Nano),
+		EncounterStreak: 6,
+	}
+
+	emitted, err := runtime.maybeEmitLifeValueSignal()
+	if err != nil || !emitted {
+		t.Fatalf("bounded quiet did not let a real cooling doorway compete again: emitted=%v err=%v", emitted, err)
+	}
+	if len(runtime.state.Background) != 1 || runtime.state.Background[0].Kind != "value_signal" {
+		t.Fatalf("continuity manufactured something other than one situated value signal: %#v", runtime.state.Background)
+	}
+	var payload lifeValueSignalPayload
+	if err := json.Unmarshal(runtime.state.Background[0].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.AffordanceKey != "mentor_channel" || payload.Surface == "" {
+		t.Fatalf("continuity lost its real environmental referent: %#v", payload)
+	}
+}
+
+func TestStageTenHeldConcernDoesNotOwnAReusableDoorway(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(10), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	runtime.config.Dynamics.AttentionMaximumIdleSeconds = 10
+	runtime.state.LastAttentionAt = now.Add(-time.Minute).Format(time.RFC3339Nano)
+	runtime.state.ValueField.Activation = LifeValueVector{Relatedness: 0.9}
+	runtime.state.Concerns = []Concern{{ID: "relationship", Resolution: "hold"}}
+	runtime.state.ValueAffordances["mentor_channel"] = ValueAffordanceTrace{
+		LastPresentedAt: now.Add(-time.Minute).Format(time.RFC3339Nano),
+		ActiveConcernID: "relationship",
+	}
+
+	emitted, err := runtime.maybeEmitLifeValueSignal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !emitted || len(runtime.state.Background) != 1 || runtime.state.Background[0].Kind != "value_signal" {
+		t.Fatalf("an unanswered relationship removed a reusable resource from attention: %#v", runtime.state.Background)
+	}
+	if len(runtime.state.Concerns) != 1 || runtime.state.Concerns[0].Resolution != "hold" || len(runtime.state.Commitments) != 0 {
+		t.Fatal("opening a possibility changed the held relationship or manufactured an action")
+	}
+}
+
+func TestHeldConcernResourceRemainsSubjectToEncounterCooldown(t *testing.T) {
+	r, err := New(t.TempDir(), "held-cooldown", testConfig(10), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	r.config.Dynamics.AttentionMaximumIdleSeconds = 10
+	r.state.LastAttentionAt = now.Add(-11 * time.Second).Format(time.RFC3339Nano)
+	r.state.ValueField.Activation = LifeValueVector{Relatedness: 0.9}
+	r.state.Concerns = []Concern{{ID: "relationship", Resolution: "hold"}}
+	r.state.ValueAffordances["mentor_channel"] = ValueAffordanceTrace{
+		LastPresentedAt: now.Add(-time.Second).Format(time.RFC3339Nano),
+		ActiveConcernID: "relationship", EncounterStreak: 2,
+	}
+	if emitted, err := r.maybeEmitLifeValueSignal(); err != nil || emitted {
+		t.Fatalf("reusability bypassed recent encounter satiation: emitted=%v err=%v", emitted, err)
+	}
+}
+
+func TestOneWaitingConcernCannotRemoveAllResourcePossibilities(t *testing.T) {
+	r, err := New(t.TempDir(), "held-resources", testConfig(10), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	r.state.Body = readyWebBody()
+	r.state.Memories = []Memory{{ID: "lived", Meaning: "A concrete encounter worth remembering."}}
+	r.state.Concerns = []Concern{{ID: "waiting", Resolution: "hold", Answerability: 0.18}}
+	keys := []string{"mentor_channel", "public_web", "x_social", "lived_material"}
+	for _, key := range keys {
+		r.state.ValueAffordances[key] = ValueAffordanceTrace{
+			LastPresentedAt: now.Add(-time.Hour).Format(time.RFC3339Nano), ActiveConcernID: "waiting",
+		}
+	}
+	available := map[string]bool{}
+	for _, value := range namedLifeValuePressures(r.state.ValueField) {
+		for _, entry := range r.freshLifeValueAffordances(value.Name, now) {
+			available[entry.Key] = true
+		}
+	}
+	for _, key := range keys {
+		if !available[key] {
+			t.Fatalf("held concrete concern made reusable resource %q unavailable", key)
+		}
+		if r.state.ValueAffordances[key].ActiveConcernID != "waiting" {
+			t.Fatal("resource availability erased its causal history")
+		}
+	}
+}
+
+func TestResourceReopeningPreservesUnassimilatedRealityPriority(t *testing.T) {
+	for _, status := range []string{"formed", "reality_available", "reality_unknown"} {
+		t.Run(status, func(t *testing.T) {
+			r, err := New(t.TempDir(), "reality-first", testConfig(10), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r.state.LastAttentionAt = time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano)
+			r.state.ValueField.Activation = LifeValueVector{Relatedness: 0.9}
+			r.state.Commitments = []ActionCommitment{{ID: "existing", Status: status}}
+			if emitted, err := r.maybeEmitLifeValueSignal(); err != nil || emitted {
+				t.Fatalf("a generic possibility preempted actual causal settlement: emitted=%v err=%v", emitted, err)
+			}
+		})
 	}
 }
 
@@ -2750,18 +3040,53 @@ func TestPassiveOrganPerceptionPreservesTheConsciousActionChain(t *testing.T) {
 		t.Fatal("an idle body could not use passive perception")
 	}
 	runtime.state.Lease = &Lease{ID: "thinking"}
-	if runtime.passivePerceptionAllowed() {
-		t.Fatal("passive perception could change the scene during cognition")
+	if !runtime.passivePerceptionAllowed() {
+		t.Fatal("read-only perception stopped during cognition")
 	}
 	runtime.state.Lease = nil
 	runtime.state.PendingAction = &ActionState{ID: "acting", Status: "started"}
-	if runtime.passivePerceptionAllowed() {
-		t.Fatal("passive perception could compete with an intentional action")
+	if !runtime.passivePerceptionAllowed() {
+		t.Fatal("read-only perception stopped during an intentional action")
 	}
 	runtime.state.PendingAction = nil
 	runtime.state.Commitments = []ActionCommitment{{ID: "awaiting", Status: "reality_available"}}
+	if !runtime.passivePerceptionAllowed() {
+		t.Fatal("read-only perception stopped before Reality was assimilated")
+	}
+	runtime.perceptionPending = "sense-in-flight"
 	if runtime.passivePerceptionAllowed() {
-		t.Fatal("passive perception changed the scene before Reality was assimilated")
+		t.Fatal("a second sensor job was admitted")
+	}
+}
+
+func TestActingOrganDoesNotFreezeAnUnrelatedConsciousFocus(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(10), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := nowUTC()
+	runtime.state.PendingAction = &ActionState{ID: "action-long", CommitmentID: "commitment-long", Kind: "organ_action", OrganID: "browser", Status: "started", StartedAt: now}
+	runtime.state.Commitments = []ActionCommitment{{ID: "commitment-long", ConcernID: "concern-long", Status: "acting"}}
+	runtime.state.Concerns = []Concern{{
+		ID: "concern-long", Strength: 0.9, Activation: 0.9, Ownership: 0.9,
+		Answerability: 0.9, Resolution: "hold", LastSourceID: "world-object",
+	}}
+	runtime.state.Background = []Event{{
+		ID: "mentor-now", Kind: "mentor_content", Source: "observed", ObservedAt: now,
+		Summary: "导师带来一段独立的新现实。", Status: "pending",
+	}}
+
+	request, ok := runtime.nextStage4Request()
+	if !ok || request.Focus.ID != "mentor-now" {
+		t.Fatalf("an acting organ froze or recaptured unrelated attention: ok=%v request=%#v", ok, request)
+	}
+	for _, candidate := range request.Candidates {
+		if candidate.ID == "concern-long" {
+			t.Fatalf("the concern already being enacted competed for a second focus: %#v", request.Candidates)
+		}
+	}
+	if !runtime.passivePerceptionAllowed() {
+		t.Fatal("background organ execution stopped independent read-only sensing")
 	}
 }
 
@@ -2804,6 +3129,95 @@ func TestPerceptualSurfaceChangeResetsNoveltyWithoutHiddenNavigation(t *testing.
 	}
 }
 
+func TestActionObservationKeepsRevealedObjectsAvailableForAttention(t *testing.T) {
+	runtime := &Runtime{state: State{Perception: make(map[string]PerceptualTrace)}}
+	observation := perceptualObservation{
+		OrganID: "browser", SurfaceID: "chrome.current_page", Digest: "snapshot-1",
+		Context: []string{"Page URL: https://example.test/detail"},
+		Objects: []PerceptualObject{
+			{ID: "primary", Content: "the object Alice intentionally inspected"},
+			{ID: "reply", Content: "another object visible in the same result"},
+		},
+	}
+	if got := runtime.assimilateActionObservation(observation); got != 2 {
+		t.Fatalf("unexpected newly available count: %d", got)
+	}
+	trace := runtime.state.Perception["browser/chrome.current_page"]
+	if len(trace.Pending) != 2 || len(trace.Seen) != 0 {
+		t.Fatalf("post-action objects were consumed before receiving attention: %#v", trace)
+	}
+	if trace.ExhaustedContext != "" || trace.ExhaustedAt != "" {
+		t.Fatalf("an intentional observation incorrectly claimed that the whole sensory context was exhausted: %#v", trace)
+	}
+	trace, object, content := takePerceptualNovelty(trace)
+	if object.ID != "primary" || !strings.Contains(content, "the object Alice intentionally inspected") {
+		t.Fatalf("the first revealed object did not receive an independent attention turn: object=%#v content=%q", object, content)
+	}
+	trace = queuePerceptualNovelty(trace, observation)
+	if len(trace.Pending) != 1 || trace.Pending[0].ID != "reply" {
+		t.Fatalf("already attended objects were rediscovered or the remaining object was lost: %#v", trace.Pending)
+	}
+}
+
+func TestSettlingActionResultDoesNotHabituateRevealedObjects(t *testing.T) {
+	runtime, err := New(t.TempDir(), "action-result-perception", testConfig(10), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.state.Perception = make(map[string]PerceptualTrace)
+	runtime.state.Perception[testPerceptionSurface] = PerceptualTrace{
+		OrganID: "browser", SurfaceID: "chrome.current_page", Digest: "post-action",
+		Context: []string{"Page URL: https://example.test/detail"},
+		Pending: []PerceptualObject{{ID: "post", Content: "a newly revealed post"}},
+	}
+	payload, _ := json.Marshal(ActionState{
+		Status: "completed", OrganID: "browser", ObservedSurfaceID: "chrome.current_page", ObservedDigest: "post-action",
+	})
+	candidate := Event{ID: "result", Kind: "action_result", Payload: payload}
+	if err := runtime.habituateSettledPerception(candidate, CandidateAppraisal{Resolution: "resolved"}, "none", nowUTC()); err != nil {
+		t.Fatal(err)
+	}
+	trace := runtime.state.Perception[testPerceptionSurface]
+	if len(trace.Pending) != 1 || len(trace.Seen) != 0 || trace.ExhaustedAt != "" {
+		t.Fatalf("settling the action consumed its newly revealed environmental object: %#v", trace)
+	}
+}
+
+func TestIntentionalOrganActionSupersedesOlderPerceptualBatch(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(10), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.state.Perception = make(map[string]PerceptualTrace)
+	runtime.state.Perception[testPerceptionSurface] = PerceptualTrace{
+		OrganID: "browser", SurfaceID: "chrome.current_page",
+		Context: []string{"Page URL: https://example.test/before"},
+		Pending: []PerceptualObject{
+			{ID: "old-one", Content: "old object one"},
+			{ID: "old-two", Content: "old object two"},
+		},
+		Seen: []string{"already-seen"}, ExhaustedContext: "old-context", ExhaustedAt: nowUTC(),
+	}
+	runtime.state.Perception["system/state"] = PerceptualTrace{
+		OrganID: "system", SurfaceID: "state",
+		Pending: []PerceptualObject{{ID: "system-fact", Content: "system fact"}},
+	}
+
+	if discarded := runtime.supersedePerceptualBatchForAction("browser"); discarded != 2 {
+		t.Fatalf("discarded=%d want=2", discarded)
+	}
+	trace := runtime.state.Perception[testPerceptionSurface]
+	if len(trace.Pending) != 0 || trace.ExhaustedContext != "" || trace.ExhaustedAt != "" {
+		t.Fatalf("older browser batch remained live after action: %#v", trace)
+	}
+	if strings.Join(trace.Seen, ",") != "already-seen,old-one,old-two" {
+		t.Fatalf("superseded perception was lost instead of habituated: %#v", trace.Seen)
+	}
+	if len(runtime.state.Perception["system/state"].Pending) != 1 {
+		t.Fatal("a browser action invalidated another organ's perception")
+	}
+}
+
 func TestExhaustedSurfaceCanDiscardLowYieldFragmentsWithoutNavigation(t *testing.T) {
 	contextLines := []string{"Page URL: https://x.com/alice/status/123", "Page Title: Alice / X"}
 	trace := PerceptualTrace{
@@ -2815,6 +3229,114 @@ func TestExhaustedSurfaceCanDiscardLowYieldFragmentsWithoutNavigation(t *testing
 	trace = discardPendingPerception(trace)
 	if len(trace.Pending) != 0 {
 		t.Fatalf("a fragment from an exhausted scene survived its retreat: %#v", trace)
+	}
+}
+
+func TestReleasedPerceptionHabituatesActiveOrientationButNotChangedReality(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(10), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	contextLines := []string{"Page URL: https://example.test/article", "Page Title: Article"}
+	runtime.state.Perception = map[string]PerceptualTrace{
+		testPerceptionSurface: {
+			OrganID: "test", SurfaceID: "surface", Digest: "current-digest", Context: contextLines,
+			Pending: []PerceptualObject{{ID: "nearby", Content: "another nearby fragment"}},
+		},
+	}
+	payload, _ := json.Marshal(map[string]any{"organ_id": "test", "surface_id": "surface", "digest": "current-digest"})
+	candidate := Event{ID: "perception-1", Kind: "perceptual_change", Payload: payload}
+	appraisal := CandidateAppraisal{Resolution: "released"}
+	now := nowUTC()
+	if err := runtime.habituateSettledPerception(candidate, appraisal, "none", now); err != nil {
+		t.Fatal(err)
+	}
+	trace := runtime.state.Perception[testPerceptionSurface]
+	if len(trace.Pending) != 0 || trace.ExhaustedAt != now || trace.ExhaustedContext != perceptualContextKey(contextLines) {
+		t.Fatalf("released sensory surface did not enter habituation: %#v", trace)
+	}
+
+	trace.Digest = "new-reality"
+	trace.ExhaustedAt = ""
+	runtime.state.Perception[testPerceptionSurface] = trace
+	if err := runtime.habituateSettledPerception(candidate, appraisal, "none", now); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.state.Perception[testPerceptionSurface].ExhaustedAt != "" {
+		t.Fatal("an appraisal of an old perceptual object habituated changed reality")
+	}
+}
+
+func TestSettledActionResultHabituatesItsObservedSurface(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(10), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	contextLines := []string{"Page URL: https://example.test/article", "Page Title: Article"}
+	runtime.state.Perception = map[string]PerceptualTrace{
+		"browser/chrome.current_page": {
+			OrganID: "browser", SurfaceID: "chrome.current_page", Digest: "action-digest", Context: contextLines,
+		},
+	}
+	payload, _ := json.Marshal(ActionState{
+		OrganID: "browser", Status: "completed", ObservedSurfaceID: "chrome.current_page", ObservedDigest: "action-digest",
+	})
+	candidate := Event{ID: "action-reality", Kind: "action_result", Payload: payload}
+	now := nowUTC()
+	if err := runtime.habituateSettledPerception(candidate, CandidateAppraisal{Resolution: "resolved"}, "none", now); err != nil {
+		t.Fatal(err)
+	}
+	trace := runtime.state.Perception["browser/chrome.current_page"]
+	if trace.ExhaustedAt != now || trace.ExhaustedContext != perceptualContextKey(contextLines) || !trace.SettledByAttention {
+		t.Fatalf("settled intentional surface remained open to active orientation: %#v", trace)
+	}
+	settledAt, err := time.Parse(time.RFC3339Nano, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perceptualResampleDue(trace, settledAt.Add(59*time.Second), 60) {
+		t.Fatal("conscious settlement did not receive its sensory refractory interval")
+	}
+	if !perceptualResampleDue(trace, settledAt.Add(60*time.Second), 60) {
+		t.Fatal("conscious settlement permanently froze a still-living sensory surface")
+	}
+	changed := perceptualObservation{
+		OrganID: "browser", SurfaceID: "chrome.current_page", Digest: "changed-digest", Context: contextLines,
+		Objects: []PerceptualObject{{ID: "new-object", Content: "reality actually changed"}},
+	}
+	trace = queuePerceptualNovelty(trace, changed)
+	if trace.SettledByAttention || len(trace.Pending) != 1 {
+		t.Fatalf("genuine reality change remained habituated: %#v", trace)
+	}
+}
+
+func TestSettledReadOnlyActionHabituatesTheCurrentKnownOrganSurface(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(10), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	contextLines := []string{"Page URL: https://x.com/home", "Page Title: Home / X"}
+	runtime.state.Perception = map[string]PerceptualTrace{
+		"browser/old": {
+			OrganID: "browser", SurfaceID: "old", Digest: "old-digest",
+			ObservedAt: time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano),
+		},
+		"browser/chrome.current_page": {
+			OrganID: "browser", SurfaceID: "chrome.current_page", Digest: "current-digest", Context: contextLines,
+			ObservedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		},
+	}
+	payload, _ := json.Marshal(ActionState{OrganID: "browser", Status: "completed", Effect: "observed"})
+	candidate := Event{ID: "find-reality", Kind: "action_result", Payload: payload}
+	now := nowUTC()
+	if err := runtime.habituateSettledPerception(candidate, CandidateAppraisal{Resolution: "resolved"}, "none", now); err != nil {
+		t.Fatal(err)
+	}
+	if !runtime.state.Perception["browser/chrome.current_page"].SettledByAttention {
+		t.Fatal("a settled read-only query left the current organ surface open to automatic movement")
+	}
+	if runtime.state.Perception["browser/old"].SettledByAttention {
+		t.Fatal("a read-only query habituated an older surface instead of the current one")
 	}
 }
 
@@ -2883,20 +3405,20 @@ func TestPerceptualExhaustionNeverBecomesAttentionCandidate(t *testing.T) {
 	}
 }
 
-func TestQuietExplorationDoesNotPromotePastExperienceWithoutCurrentObject(t *testing.T) {
+func TestQuietExplorationDoesNotPromotePastMemoryWithoutCurrentObject(t *testing.T) {
 	runtime, err := New(t.TempDir(), "instance", testConfig(8), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
 	if err != nil {
 		t.Fatal(err)
 	}
 	runtime.state.ValueField.Activation.Exploration = 0.9
-	runtime.state.Experiences = []Experience{
+	runtime.state.Memories = []Memory{
 		{ID: "lived", ObservedAt: nowUTC(), Meaning: "我曾真实尝试打开一个具体入口，但现实结果留下较大回差。", Lesson: "入口事实和内容证据不同。", Values: LifeValues{Exploration: 0.9, SelfEndorsed: 0.9}, PredictionDifference: 0.8, RemainingDifference: 0.8, Significance: "reusable"},
 	}
 	if request, ok := runtime.nextStage4Request(); ok {
-		t.Fatalf("past experience became current attention without a present object: %#v", request)
+		t.Fatalf("past memory became current attention without a present object: %#v", request)
 	}
 	if len(runtime.state.Background) != 0 {
-		t.Fatalf("past experience manufactured a background event: %#v", runtime.state.Background)
+		t.Fatalf("past memory manufactured a background event: %#v", runtime.state.Background)
 	}
 }
 
@@ -2907,7 +3429,7 @@ func TestVariationDoesNotResurrectADecayedConcern(t *testing.T) {
 			ID: "old-relationship", Meaning: "请让导师替我提供下一项方向",
 			Resolution: "hold", Strength: 0, Activation: 0,
 		}},
-		Experiences: []Experience{{Meaning: "我刚从现实中形成了一条当前经验。"}},
+		Memories: []Memory{{Meaning: "我刚从现实中形成了一条当前经验。"}},
 	}
 	for index := 0; index < 32; index++ {
 		got := associativeRecall(state, dynamics, fmt.Sprintf("seed-%d", index))
@@ -3108,7 +3630,7 @@ func TestDormantHeldConcernRetainsIdentityWithoutDemandingAttention(t *testing.T
 		ID: "dormant", Strength: 0.05, Activation: 0.02, Ownership: 0.9, Resolution: "hold",
 		LastSourceID: "dormant", LastFocusedAt: time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano),
 	}}
-	runtime.state.Experiences = []Experience{{ID: "experience-kept", Meaning: "这段事实仍属于我的经历"}}
+	runtime.state.Memories = []Memory{{ID: "memory-kept", Meaning: "这段事实仍属于我的经历"}}
 	runtime.pruneInactiveConcerns()
 	if len(runtime.state.Concerns) != 1 || runtime.state.Concerns[0].ID != "dormant" {
 		t.Fatalf("a self-owned held concern lost its dormant identity: %#v", runtime.state.Concerns)
@@ -3116,8 +3638,8 @@ func TestDormantHeldConcernRetainsIdentityWithoutDemandingAttention(t *testing.T
 	if request, ok := runtime.nextStage4Request(); ok {
 		t.Fatalf("a dormant concern demanded attention without new cause: %#v", request)
 	}
-	if len(runtime.state.Experiences) != 1 || runtime.state.Experiences[0].ID != "experience-kept" {
-		t.Fatalf("dormancy deleted lived experience: %#v", runtime.state.Experiences)
+	if len(runtime.state.Memories) != 1 || runtime.state.Memories[0].ID != "memory-kept" {
+		t.Fatalf("dormancy deleted lived memory: %#v", runtime.state.Memories)
 	}
 }
 
@@ -3136,7 +3658,7 @@ func TestConcernActivationDecaysWithPresentTime(t *testing.T) {
 	}
 }
 
-func TestCompletedExperiencesDoNotAccumulateAsActiveConcerns(t *testing.T) {
+func TestCompletedMemoriesDoNotAccumulateAsActiveConcerns(t *testing.T) {
 	runtime, err := New(t.TempDir(), "instance", testConfig(4), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
 	if err != nil {
 		t.Fatal(err)
@@ -3158,7 +3680,7 @@ func TestCompletedExperiencesDoNotAccumulateAsActiveConcerns(t *testing.T) {
 		}
 	}
 	if len(runtime.state.Concerns) != 0 {
-		t.Fatalf("completed experiences inflated active concerns: %d", len(runtime.state.Concerns))
+		t.Fatalf("completed memories inflated active concerns: %d", len(runtime.state.Concerns))
 	}
 }
 
@@ -3234,6 +3756,62 @@ func TestStageFourBodyActionReturnsAsNewRealityEvent(t *testing.T) {
 	}
 }
 
+func TestRepeatedOrganFailureExposesBoundedActionAssistance(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(10), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.state.Commitments = []ActionCommitment{
+		{ID: "commit-1", ConcernID: "concern-1"},
+		{ID: "commit-2", ConcernID: "concern-1"},
+	}
+	for index, commitmentID := range []string{"commit-1"} {
+		payload, _ := json.Marshal(ActionState{
+			ID: fmt.Sprintf("action-%d", index), CommitmentID: commitmentID,
+			Kind: "organ_action", OrganID: "browser", Operation: "browser_click",
+			Status: "failed", Effect: "unknown",
+		})
+		runtime.state.Background = append(runtime.state.Background, Event{
+			ID: fmt.Sprintf("result-%d", index), Kind: "action_result", Status: "processed", Payload: payload,
+		})
+	}
+	current := ActionState{CommitmentID: "commit-2", Kind: "organ_action", Status: "failed", Effect: "unknown"}
+	runtime.annotateActionAssistanceOpportunity(&current, "concern-1")
+	if current.ImplementationFailureStreak != 2 || !current.ActionAssistanceAvailable {
+		t.Fatalf("repeated bodily failure did not expose bounded assistance: %#v", current)
+	}
+	if runtime.state.CognitiveResource.NextProfile != nil {
+		t.Fatalf("the body silently bypassed main cognition: %#v", runtime.state.CognitiveResource.NextProfile)
+	}
+}
+
+func TestCausalChangeResetsActionAssistanceFailureStreak(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(10), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.state.Commitments = []ActionCommitment{
+		{ID: "old-failure", ConcernID: "concern-1"},
+		{ID: "causal-success", ConcernID: "concern-1"},
+		{ID: "new-failure", ConcernID: "concern-1"},
+	}
+	states := []ActionState{
+		{CommitmentID: "old-failure", Kind: "organ_action", Status: "failed", Effect: "unknown"},
+		{CommitmentID: "causal-success", Kind: "organ_action", Status: "completed", Effect: "changed"},
+	}
+	for index, action := range states {
+		payload, _ := json.Marshal(action)
+		runtime.state.Background = append(runtime.state.Background, Event{
+			ID: fmt.Sprintf("result-%d", index), Kind: "action_result", Status: "processed", Payload: payload,
+		})
+	}
+	current := ActionState{CommitmentID: "new-failure", Kind: "organ_action", Status: "failed", Effect: "unknown"}
+	runtime.annotateActionAssistanceOpportunity(&current, "concern-1")
+	if current.ImplementationFailureStreak != 1 || current.ActionAssistanceAvailable {
+		t.Fatalf("a previous failure leaked across real causal success: %#v", current)
+	}
+}
+
 func TestStageFiveUnrelatedRealityCannotSatisfyExploration(t *testing.T) {
 	runtime, err := New(t.TempDir(), "instance", testConfig(5), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
 	if err != nil {
@@ -3250,8 +3828,8 @@ func TestStageFiveUnrelatedRealityCannotSatisfyExploration(t *testing.T) {
 	commit := CognitiveCommit{
 		Appraisals: []CandidateAppraisal{{CandidateID: reality.ID, Meaning: "身体事实得到确认", Difference: 0, Ownership: 1, Value: 0.3, Urgency: 0, Answerability: 1, Certainty: 1, Resolution: "resolved"}},
 		FocusID:    reality.ID, ThoughtThread: "这次核验已经完成。", Action: CognitiveAction{Kind: "none"},
-		ResourceChoice:    CognitiveResourceChoice{Apply: "keep", Model: "current", ReasoningEffort: "current"},
-		ExperienceUpdates: []ExperienceUpdate{{CommitmentID: commitment.ID, Meaning: "身体事实明确。", Significance: "ordinary"}},
+		ResourceChoice: CognitiveResourceChoice{Apply: "keep", Model: "current", ReasoningEffort: "current"},
+		RealityUpdates: []RealityUpdate{{CommitmentID: commitment.ID, Meaning: "身体事实明确。", Significance: "ordinary"}},
 	}
 	if err := runtime.applyCognitiveCommit(commit); err != nil {
 		t.Fatal(err)
@@ -3277,8 +3855,8 @@ func TestStageFiveExplorationRealityCanRelieveItsOwnTension(t *testing.T) {
 	commit := CognitiveCommit{
 		Appraisals: []CandidateAppraisal{{CandidateID: reality.ID, Meaning: "主动接触获得了现实回应", Difference: 0, Ownership: 1, Value: 0.7, Urgency: 0, Answerability: 1, Certainty: 1, Resolution: "resolved"}},
 		FocusID:    reality.ID, ThoughtThread: "这次探索已经得到现实回应。", Action: CognitiveAction{Kind: "none"},
-		ResourceChoice:    CognitiveResourceChoice{Apply: "keep", Model: "current", ReasoningEffort: "current"},
-		ExperienceUpdates: []ExperienceUpdate{{CommitmentID: commitment.ID, Meaning: "现实接触满足了当前探索。", Significance: "ordinary"}},
+		ResourceChoice: CognitiveResourceChoice{Apply: "keep", Model: "current", ReasoningEffort: "current"},
+		RealityUpdates: []RealityUpdate{{CommitmentID: commitment.ID, Meaning: "现实接触满足了当前探索。", Significance: "ordinary"}},
 	}
 	if err := runtime.applyCognitiveCommit(commit); err != nil {
 		t.Fatal(err)
@@ -3288,30 +3866,30 @@ func TestStageFiveExplorationRealityCanRelieveItsOwnTension(t *testing.T) {
 	}
 }
 
-func TestRelevantOlderExperienceReturnsToCurrentAttention(t *testing.T) {
-	experiences := []Experience{{ID: "browser-old", Meaning: "浏览器工具清单只证明能力，页面快照才提供真实页面事实。"}}
+func TestRelevantOlderMemoryReturnsToCurrentAttention(t *testing.T) {
+	memories := []Memory{{ID: "browser-old", Meaning: "浏览器工具清单只证明能力，页面快照才提供真实页面事实。"}}
 	for index := 0; index < 8; index++ {
-		experiences = append(experiences, Experience{ID: fmt.Sprintf("recent-%d", index), Meaning: "生活空间文件核验完成。"})
+		memories = append(memories, Memory{ID: fmt.Sprintf("recent-%d", index), Meaning: "生活空间文件核验完成。"})
 	}
 	candidate := Event{ID: "browser-now", Summary: "准备观察浏览器页面", Payload: json.RawMessage(`{"tool":"browser_snapshot"}`)}
-	selected := selectContextExperiences(experiences, []Event{candidate})
+	selected := selectContextMemories(memories, []Event{candidate})
 	found := false
-	for _, experience := range selected {
-		found = found || experience.ID == "browser-old"
+	for _, memory := range selected {
+		found = found || memory.ID == "browser-old"
 	}
 	if !found {
-		t.Fatalf("relevant older browser experience was forgotten: %#v", selected)
+		t.Fatalf("relevant older browser memory was forgotten: %#v", selected)
 	}
 }
 
 func TestEarlierBodyChangeReturnsWhenItsAffectedSurfaceLaterRegresses(t *testing.T) {
-	experiences := []Experience{{
+	memories := []Memory{{
 		ID:             "hardening-origin",
 		EnactedRequest: "ProtectSystem=full\nProtectHome=read-only\nPrivateTmp=yes",
 		Meaning:        "一项可逆的服务边界已经暂存。",
 	}}
-	for index := 0; index < maxExperienceContext+4; index++ {
-		experiences = append(experiences, Experience{
+	for index := 0; index < maxMemoryContext+4; index++ {
+		memories = append(memories, Memory{
 			ID:      fmt.Sprintf("recent-browser-%d", index),
 			Meaning: fmt.Sprintf("第 %d 项普通浏览器入口检查已经完成。", index),
 		})
@@ -3321,10 +3899,10 @@ func TestEarlierBodyChangeReturnsWhenItsAffectedSurfaceLaterRegresses(t *testing
 		Kind:    "body_delta",
 		Summary: "浏览器感知失效，服务内 /home 现在是 read-only。",
 	}
-	selected := selectContextExperiences(experiences, []Event{candidate})
+	selected := selectContextMemories(memories, []Event{candidate})
 	found := false
-	for _, experience := range selected {
-		found = found || experience.ID == "hardening-origin"
+	for _, memory := range selected {
+		found = found || memory.ID == "hardening-origin"
 	}
 	if !found {
 		t.Fatalf("the causally matching earlier body change was not recalled: %#v", selected)
@@ -3343,23 +3921,43 @@ func TestAliceChoosesWhichDurableMethodSlotChanges(t *testing.T) {
 	commit := CognitiveCommit{
 		FocusID:    "result-1",
 		Appraisals: []CandidateAppraisal{{CandidateID: "result-1", Difference: 0.1, Resolution: "resolved"}},
-		ExperienceUpdates: []ExperienceUpdate{{
+		RealityUpdates: []RealityUpdate{{
 			CommitmentID: "commitment-1", Meaning: "形成了可迁移的新方法。", Significance: "reusable",
 			MethodUpdate: "把现实结果带回下一次选择。", MethodSlot: 3,
 		}},
 	}
-	if err := runtime.applyExperienceUpdates(commit); err != nil {
+	if err := runtime.applyRealityUpdates(commit); err != nil {
 		t.Fatal(err)
 	}
 	if runtime.state.Self.Methods[3] != "把现实结果带回下一次选择。" || runtime.state.Self.Methods[2] != "method-2" {
 		t.Fatalf("method replacement did not follow Alice's selected slot: %#v", runtime.state.Self.Methods)
 	}
-	if runtime.state.TotalExperiences != 1 {
-		t.Fatalf("lifetime experience count = %d, want 1", runtime.state.TotalExperiences)
+	if runtime.state.TotalMemories != 1 {
+		t.Fatalf("lifetime memory count = %d, want 1", runtime.state.TotalMemories)
 	}
 }
 
-func TestFullDurableMethodsDoNotRejectExperienceWithoutReplacementChoice(t *testing.T) {
+func TestUnindexedNearDuplicateDoesNotConsumeAnotherDurableMethodSlot(t *testing.T) {
+	methods := []string{
+		"优先采取能读取具体内容或链接的动作；若只是等待且页面状态未改变，应停止重复等待。",
+		"搜索摘要适合发现候选来源，不适合确认产品效果；下一步应直接读取独立研究或报道正文。",
+		"当直接入口返回明确不存在状态时，停止该入口的重复尝试，并把后续行动转为新的、不同的公开信息来源。",
+	}
+	for _, proposal := range []string{
+		"优先采取能读取具体内容或链接的动作；若当前快照未提供目标对象载荷，应转向新的直接入口，而非重复同一读取。",
+		"搜索摘要只用于发现候选来源；要判断产品效果，必须直接读取来源正文并确认研究对象与结果。",
+		"遇到具体来源的明确 404 时，将其作为入口限制停止重复尝试，并把证据判断转向仍可核验的来源。",
+	} {
+		if !methodProposalRedundant(proposal, methods) {
+			t.Fatalf("near-duplicate proposal consumed a durable identity slot: %q", proposal)
+		}
+	}
+	if methodProposalRedundant("导师的真实回应可以改变我以后判断关系是否形成的标准。", methods) {
+		t.Fatal("a distinct relational method was suppressed as a lexical duplicate")
+	}
+}
+
+func TestFullDurableMethodsDoNotRejectMemoryWithoutReplacementChoice(t *testing.T) {
 	runtime, err := New(t.TempDir(), "instance", testConfig(5), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
 	if err != nil {
 		t.Fatal(err)
@@ -3372,39 +3970,39 @@ func TestFullDurableMethodsDoNotRejectExperienceWithoutReplacementChoice(t *test
 	commit := CognitiveCommit{
 		FocusID:    "result-1",
 		Appraisals: []CandidateAppraisal{{CandidateID: "result-1", Difference: 0.1, Resolution: "resolved"}},
-		ExperienceUpdates: []ExperienceUpdate{{
+		RealityUpdates: []RealityUpdate{{
 			CommitmentID: "commitment-1", Meaning: "形成了一项仍值得保留的新经验。", Significance: "reusable",
 			MethodUpdate: "尚未选择应由哪项长期方法让位。", MethodSlot: -1,
 		}},
 	}
-	if err := runtime.applyExperienceUpdates(commit); err != nil {
+	if err := runtime.applyRealityUpdates(commit); err != nil {
 		t.Fatal(err)
 	}
-	if runtime.state.TotalExperiences != 1 || len(runtime.state.Experiences) != 1 {
-		t.Fatalf("experience was not retained: total=%d recent=%d", runtime.state.TotalExperiences, len(runtime.state.Experiences))
+	if runtime.state.TotalMemories != 1 || len(runtime.state.Memories) != 1 {
+		t.Fatalf("memory was not retained: total=%d recent=%d", runtime.state.TotalMemories, len(runtime.state.Memories))
 	}
-	if runtime.state.Experiences[0].MethodUpdate != "尚未选择应由哪项长期方法让位。" {
-		t.Fatalf("experience lost its proposed method: %#v", runtime.state.Experiences[0])
+	if runtime.state.Memories[0].MethodUpdate != "尚未选择应由哪项长期方法让位。" {
+		t.Fatalf("memory lost its proposed method: %#v", runtime.state.Memories[0])
 	}
 	if !equalStrings(runtime.state.Self.Methods, originalMethods) {
 		t.Fatalf("durable methods changed without Alice choosing a replacement: %#v", runtime.state.Self.Methods)
 	}
 }
 
-func TestExperienceStructureDeterminesEffectiveSignificance(t *testing.T) {
+func TestMemoryStructureDeterminesEffectiveSignificance(t *testing.T) {
 	tests := []struct {
 		name             string
-		update           ExperienceUpdate
+		update           RealityUpdate
 		narrativeUpdated bool
 		want             string
 	}{
-		{name: "lesson only", update: ExperienceUpdate{Significance: "reusable"}, want: "ordinary"},
-		{name: "method consequence", update: ExperienceUpdate{Significance: "ordinary", MethodUpdate: "以后这样做。"}, want: "reusable"},
-		{name: "narrative consequence", update: ExperienceUpdate{Significance: "ordinary"}, narrativeUpdated: true, want: "self_defining"},
+		{name: "lesson only", update: RealityUpdate{Significance: "reusable"}, want: "ordinary"},
+		{name: "method consequence", update: RealityUpdate{Significance: "ordinary", MethodUpdate: "以后这样做。"}, want: "reusable"},
+		{name: "narrative consequence", update: RealityUpdate{Significance: "ordinary"}, narrativeUpdated: true, want: "self_defining"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := effectiveExperienceSignificance(test.update, test.narrativeUpdated); got != test.want {
+			if got := effectiveMemorySignificance(test.update, test.narrativeUpdated); got != test.want {
 				t.Fatalf("effective significance = %q, want %q", got, test.want)
 			}
 		})
@@ -3634,7 +4232,7 @@ func TestOwnedPerceptualConcernTemporarilyBindsExplorationDrive(t *testing.T) {
 	}
 }
 
-func TestLowOwnershipReleasesAnExistingConcernButKeepsItsExperiencePossible(t *testing.T) {
+func TestLowOwnershipReleasesAnExistingConcernButKeepsItsMemoryPossible(t *testing.T) {
 	runtime, err := New(t.TempDir(), "instance", testConfig(8), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
 	if err != nil {
 		t.Fatal(err)
@@ -3683,7 +4281,7 @@ func TestStageEightRealityReappraisesOriginalConcern(t *testing.T) {
 		}},
 		FocusID: reality.ID, ThoughtThread: "结果已经足够，我愿意放下。", Action: CognitiveAction{Kind: "none"},
 		ResourceChoice: CognitiveResourceChoice{Apply: "keep", Model: "current", ReasoningEffort: "current"},
-		ExperienceUpdates: []ExperienceUpdate{{
+		RealityUpdates: []RealityUpdate{{
 			CommitmentID: commitment.ID, Meaning: "现实完整回答了行动前的差异。", Values: LifeValues{}, Significance: "ordinary",
 		}},
 	}
@@ -3701,16 +4299,16 @@ func TestStageEightAccumulatedSelfModelTensionReturnsEvidenceToAttention(t *test
 		t.Fatal(err)
 	}
 	runtime.state.Self.Narrative = "我依据现实校准自己。"
-	first := Experience{ID: "experience-one", PredictionDifference: 1, Values: LifeValues{SelfEndorsed: 1}, Meaning: "第一项强自我相关现实"}
-	runtime.state.Experiences = append(runtime.state.Experiences, first)
+	first := Memory{ID: "memory-one", PredictionDifference: 1, Values: LifeValues{SelfEndorsed: 1}, Meaning: "第一项强自我相关现实"}
+	runtime.state.Memories = append(runtime.state.Memories, first)
 	if err := runtime.accrueSelfModelTension(first, false); err != nil {
 		t.Fatal(err)
 	}
 	if len(runtime.state.Background) != 0 {
 		t.Fatal("one sub-threshold contribution opened a self-model event")
 	}
-	second := Experience{ID: "experience-two", PredictionDifference: 1, Values: LifeValues{SelfEndorsed: 1}, Meaning: "第二项强自我相关现实"}
-	runtime.state.Experiences = append(runtime.state.Experiences, second)
+	second := Memory{ID: "memory-two", PredictionDifference: 1, Values: LifeValues{SelfEndorsed: 1}, Meaning: "第二项强自我相关现实"}
+	runtime.state.Memories = append(runtime.state.Memories, second)
 	if err := runtime.accrueSelfModelTension(second, false); err != nil {
 		t.Fatal(err)
 	}
@@ -3729,7 +4327,7 @@ func TestStageEightSelfModelDifferenceCanRewriteNarrativeAndReleaseTension(t *te
 	}
 	runtime.state.Self.Narrative = "旧的当前自我理解"
 	runtime.state.SelfModelTension = 0.7
-	payload, _ := json.Marshal(map[string]any{"evidence_experience_ids": []string{"experience-a", "experience-b"}})
+	payload, _ := json.Marshal(map[string]any{"evidence_memory_ids": []string{"memory-a", "memory-b"}})
 	candidate := Event{ID: "self-difference", Kind: "self_model_difference", Summary: "真实经历与当前自我理解之间的差异", Payload: payload, Status: "in_focus"}
 	runtime.state.Background = []Event{candidate}
 	runtime.activeCandidates = map[string]Event{candidate.ID: candidate}
@@ -3761,10 +4359,10 @@ func TestStageTenOperationalSelfSignalCannotRewriteNarrativeBeforeLivedReality(t
 	runtime.state.Self.Narrative = "我依据现实后果理解并调节自己。"
 	runtime.state.SelfModelTension = 0.61
 	payload, _ := json.Marshal(map[string]any{
-		"difference_kind":         "attention_without_consequence",
-		"cognition_calls":         3,
-		"new_experience_count":    0,
-		"evidence_experience_ids": []string{},
+		"difference_kind":     "attention_without_consequence",
+		"cognition_calls":     3,
+		"new_memory_count":    0,
+		"evidence_memory_ids": []string{},
 	})
 	candidate := Event{
 		ID: "dry-attention", Kind: "self_model_difference",
@@ -3796,6 +4394,39 @@ func TestStageTenOperationalSelfSignalCannotRewriteNarrativeBeforeLivedReality(t
 	}
 }
 
+func TestFocusedHeldSelfModelDifferenceLeavesResidualTensionWithoutAProofConcern(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(10), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.state.Self.Narrative = "我依据现实后果理解并调节自己。"
+	runtime.state.SelfModelTension = 1
+	payload, _ := json.Marshal(map[string]any{"evidence_memory_ids": []string{"memory-a"}})
+	candidate := Event{ID: "self-difference", Kind: "self_model_difference", Summary: "一组经历已经进入自我回看。", Payload: payload, Status: "in_focus"}
+	runtime.state.Background = []Event{candidate}
+	runtime.activeCandidates = map[string]Event{candidate.ID: candidate}
+	commit := CognitiveCommit{
+		Appraisals: []CandidateAppraisal{{
+			CandidateID: candidate.ID, Meaning: "我已理解主要差异，保留一小部分等待未来现实检验。",
+			Difference: 0.08, Ownership: 0.8, Value: 0.5, Urgency: 0.08,
+			Answerability: 0.1, Certainty: 0.95, Resolution: "hold",
+		}},
+		FocusID: candidate.ID, ThoughtThread: "当前已完成回看，长期问题留在背景。",
+		Action:                     CognitiveAction{Kind: "none"},
+		ResourceChoice:             CognitiveResourceChoice{Apply: "keep", Model: "current", ReasoningEffort: "current"},
+		NewConcernClosureCondition: "未来现实已经自然检验这项仍被我承接的理解。",
+	}
+	if err := runtime.applyCognitiveCommit(commit); err != nil {
+		t.Fatal(err)
+	}
+	if got := runtime.state.SelfModelTension; got != 0.08 {
+		t.Fatalf("focused self-model appraisal left stale accumulated pressure: %.3f", got)
+	}
+	if len(runtime.state.Concerns) != 0 {
+		t.Fatalf("a non-enacted self observation became a durable proof concern: %#v", runtime.state.Concerns)
+	}
+}
+
 func TestStageTenFragmentedOrdinaryActivityReturnsOperationalDifferenceToSelfAttention(t *testing.T) {
 	runtime, err := New(t.TempDir(), "instance", testConfig(10), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
 	if err != nil {
@@ -3820,13 +4451,13 @@ func TestStageTenFragmentedOrdinaryActivityReturnsOperationalDifferenceToSelfAtt
 		runtime.state.Commitments = append(runtime.state.Commitments, ActionCommitment{
 			ID: commitmentID, ConcernID: concernID, ActionKind: "organ_action", Status: "assimilated",
 		})
-		runtime.state.Experiences = append(runtime.state.Experiences, Experience{
-			ID: fmt.Sprintf("experience-%d", index), CommitmentID: commitmentID, ActionKind: "organ_action",
+		runtime.state.Memories = append(runtime.state.Memories, Memory{
+			ID: fmt.Sprintf("memory-%d", index), CommitmentID: commitmentID, ActionKind: "organ_action",
 			EnactedRequest: command, ObservedAt: observed, Significance: "ordinary",
 		})
 		runtime.state.Usage = append(runtime.state.Usage, UsageRecord{
 			Time: observed, Status: "completed", CostConfirmed: true,
-			ActualMicrousd: runtime.config.CognitiveResource.RollingHourLimitMicrousd / 20,
+			ActualMicrousd: 1,
 		})
 	}
 	if err := runtime.maybeOpenOperationalSelfDifference(); err != nil {
@@ -3868,13 +4499,13 @@ func TestStageTenOneDominantActionFormReturnsOperationalDifference(t *testing.T)
 		runtime.state.Commitments = append(runtime.state.Commitments, ActionCommitment{
 			ID: commitmentID, ConcernID: fmt.Sprintf("small-concern-%d", index), ActionKind: "organ_action", Status: "assimilated",
 		})
-		runtime.state.Experiences = append(runtime.state.Experiences, Experience{
-			ID: fmt.Sprintf("dominant-experience-%d", index), CommitmentID: commitmentID, ActionKind: "organ_action",
+		runtime.state.Memories = append(runtime.state.Memories, Memory{
+			ID: fmt.Sprintf("dominant-memory-%d", index), CommitmentID: commitmentID, ActionKind: "organ_action",
 			EnactedRequest: command, ObservedAt: observed, Significance: "ordinary",
 		})
 		runtime.state.Usage = append(runtime.state.Usage, UsageRecord{
 			Time: observed, Status: "completed", CostConfirmed: true,
-			ActualMicrousd: runtime.config.CognitiveResource.RollingHourLimitMicrousd / 20,
+			ActualMicrousd: 1,
 		})
 	}
 	if err := runtime.maybeOpenOperationalSelfDifference(); err != nil {
@@ -3882,6 +4513,93 @@ func TestStageTenOneDominantActionFormReturnsOperationalDifference(t *testing.T)
 	}
 	if len(runtime.state.Background) != 1 || runtime.state.Background[0].Kind != "self_model_difference" {
 		t.Fatalf("one dominant repeated action form stayed invisible: %#v", runtime.state.Background)
+	}
+}
+
+func TestStageTenNarrowReadOnlyLoopReturnsOperationalDifferenceEarly(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(10), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseline := time.Now().UTC().Add(-10 * time.Minute)
+	runtime.state.T0 = baseline.Add(-time.Minute).Format(time.RFC3339Nano)
+	runtime.state.Self.UpdatedAt = baseline.Format(time.RFC3339Nano)
+	operations := []struct {
+		name   string
+		effect string
+	}{
+		{name: "browser_navigate", effect: "oriented"},
+		{name: "browser_snapshot", effect: "observed"},
+		{name: "browser_navigate", effect: "oriented"},
+		{name: "browser_snapshot", effect: "observed"},
+	}
+	for index, operation := range operations {
+		commitmentID := fmt.Sprintf("observed-%d", index)
+		observed := baseline.Add(time.Duration(index+1) * time.Minute).Format(time.RFC3339Nano)
+		runtime.state.Commitments = append(runtime.state.Commitments, ActionCommitment{
+			ID: commitmentID, ConcernID: "one-object", ActionKind: "organ_action", Status: "assimilated",
+		})
+		runtime.state.Memories = append(runtime.state.Memories, Memory{
+			ID: fmt.Sprintf("observed-memory-%d", index), CommitmentID: commitmentID,
+			ActionKind: "organ_action", EnactedRequest: fmt.Sprintf(`{"organ_id":"browser","operation":%q,"input":"{}"}`, operation.name),
+			ObservedAt: observed, Significance: "reusable", RemainingDifference: 0.4,
+		})
+		result, _ := json.Marshal(ActionState{
+			ID: fmt.Sprintf("observed-action-%d", index), CommitmentID: commitmentID, Kind: "organ_action",
+			OrganID: "browser", Operation: operation.name, Effect: operation.effect, Request: `{}`, Status: "completed",
+		})
+		runtime.state.Background = append(runtime.state.Background, Event{
+			ID: fmt.Sprintf("observed-reality-%d", index), Seq: uint64(index + 1), Kind: "action_result", Payload: result,
+		})
+		runtime.state.Usage = append(runtime.state.Usage, UsageRecord{
+			Time: observed, Status: "completed", CostConfirmed: true,
+			ActualMicrousd: 1,
+		})
+	}
+	if err := runtime.maybeOpenOperationalSelfDifference(); err != nil {
+		t.Fatal(err)
+	}
+	if len(runtime.state.Background) != 5 || runtime.state.Background[4].Kind != "self_model_difference" {
+		t.Fatalf("a narrow read-only loop stayed invisible: %#v", runtime.state.Background)
+	}
+}
+
+func TestStageTenMethodAndNarrativeUpdatesDoNotEraseOperationalEvidence(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(10), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseline := time.Now().UTC().Add(-10 * time.Minute)
+	runtime.state.T0 = baseline.Add(-time.Minute).Format(time.RFC3339Nano)
+	for index := 0; index < 4; index++ {
+		commitmentID := fmt.Sprintf("contact-%d", index)
+		observed := baseline.Add(time.Duration(index+1) * time.Minute).Format(time.RFC3339Nano)
+		runtime.state.Commitments = append(runtime.state.Commitments, ActionCommitment{
+			ID: commitmentID, ConcernID: "one-contact", ActionKind: "organ_action", Status: "assimilated",
+		})
+		runtime.state.Memories = append(runtime.state.Memories, Memory{
+			ID: fmt.Sprintf("contact-memory-%d", index), CommitmentID: commitmentID,
+			ActionKind: "organ_action", EnactedRequest: fmt.Sprintf(`{"organ_id":"browser","operation":"browser_navigate","input":"%d"}`, index),
+			ObservedAt: observed, Significance: "reusable", MethodUpdate: fmt.Sprintf("method revision %d", index),
+		})
+		result, _ := json.Marshal(ActionState{
+			ID: fmt.Sprintf("contact-action-%d", index), CommitmentID: commitmentID, Kind: "organ_action",
+			OrganID: "browser", Operation: "browser_navigate", Effect: "oriented", Status: "completed",
+		})
+		runtime.state.Background = append(runtime.state.Background, Event{Seq: uint64(index + 1), Kind: "action_result", Payload: result})
+		runtime.state.Usage = append(runtime.state.Usage, UsageRecord{
+			Time: observed, Status: "completed", CostConfirmed: true,
+			ActualMicrousd: runtime.config.CognitiveResource.RollingHourLimitMicrousd / 20,
+		})
+	}
+	// Ordinary learning may have just changed Self. It is not evidence that the
+	// repeated operating pattern itself has changed.
+	runtime.state.Self.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	if err := runtime.maybeOpenOperationalSelfDifference(); err != nil {
+		t.Fatal(err)
+	}
+	if len(runtime.state.Background) != 5 || runtime.state.Background[4].Kind != "self_model_difference" {
+		t.Fatalf("a self update hid continuing contact-only behavior: %#v", runtime.state.Background)
 	}
 }
 
@@ -3899,9 +4617,16 @@ func TestStageTenOneContinuousConcernDoesNotManufactureOperationalDifference(t *
 		runtime.state.Commitments = append(runtime.state.Commitments, ActionCommitment{
 			ID: commitmentID, ConcernID: "one-project", ActionKind: "organ_action", Status: "assimilated",
 		})
-		runtime.state.Experiences = append(runtime.state.Experiences, Experience{
-			ID: fmt.Sprintf("continuous-experience-%d", index), CommitmentID: commitmentID, ActionKind: "organ_action",
+		runtime.state.Memories = append(runtime.state.Memories, Memory{
+			ID: fmt.Sprintf("continuous-memory-%d", index), CommitmentID: commitmentID, ActionKind: "organ_action",
 			EnactedRequest: "go test ./...", ObservedAt: observed, Significance: "ordinary",
+		})
+		result, _ := json.Marshal(ActionState{
+			ID: fmt.Sprintf("continuous-action-%d", index), CommitmentID: commitmentID, Kind: "organ_action",
+			OrganID: "system", Operation: "exec", Effect: "changed", Status: "completed",
+		})
+		runtime.state.Background = append(runtime.state.Background, Event{
+			ID: fmt.Sprintf("continuous-reality-%d", index), Seq: uint64(index + 1), Kind: "action_result", Payload: result,
 		})
 		runtime.state.Usage = append(runtime.state.Usage, UsageRecord{
 			Time: observed, Status: "completed", CostConfirmed: true,
@@ -3911,8 +4636,10 @@ func TestStageTenOneContinuousConcernDoesNotManufactureOperationalDifference(t *
 	if err := runtime.maybeOpenOperationalSelfDifference(); err != nil {
 		t.Fatal(err)
 	}
-	if len(runtime.state.Background) != 0 {
-		t.Fatalf("one continuous causal project was mistaken for fragmented churn: %#v", runtime.state.Background)
+	for _, event := range runtime.state.Background {
+		if event.Kind == "self_model_difference" {
+			t.Fatalf("one continuous causal project was mistaken for fragmented churn: %#v", runtime.state.Background)
+		}
 	}
 }
 
@@ -4002,7 +4729,7 @@ func TestStageTenSustainedHighActivationAndLowControlEnterSelfAttention(t *testi
 func TestConcernClosureUsesBaseDifferenceInsteadOfSubdecimalSalienceProduct(t *testing.T) {
 	concern := Concern{ID: "nearly-closed", Resolution: "hold"}
 	appraisal := CandidateAppraisal{CandidateID: concern.ID, Difference: 0.08, Resolution: "resolved"}
-	if err := validateExistingConcernDisposition(appraisal, concern, Event{ID: concern.ID, Kind: "concern"}, false, 10); err != nil {
+	if err := validateExistingConcernDisposition(appraisal, concern, false); err != nil {
 		t.Fatalf("a semantically closed small difference was rejected by numerical ceremony: %v", err)
 	}
 }
@@ -4163,21 +4890,21 @@ func TestRealityAssimilationClosesConcernReferenceAndCannotRepeat(t *testing.T) 
 		Appraisals: []CandidateAppraisal{{
 			CandidateID: reality.ID, Meaning: "现实已经到达", Difference: 0.1, Resolution: "resolved",
 		}},
-		ExperienceUpdates: []ExperienceUpdate{{
+		RealityUpdates: []RealityUpdate{{
 			CommitmentID: commitment.ID, Meaning: "我吸收了这次现实。", Significance: "ordinary",
 		}},
 	}
-	if err := runtime.applyExperienceUpdates(commit); err != nil {
+	if err := runtime.applyRealityUpdates(commit); err != nil {
 		t.Fatal(err)
 	}
-	if runtime.state.TotalExperiences != 1 || runtime.state.Commitments[0].Status != "assimilated" || runtime.state.Commitments[0].ExperienceID == "" {
+	if runtime.state.TotalMemories != 1 || runtime.state.Commitments[0].Status != "assimilated" || runtime.state.Commitments[0].MemoryID == "" {
 		t.Fatalf("reality did not close exactly once: %#v", runtime.state.Commitments[0])
 	}
 	if runtime.state.Concerns[0].CommitmentID != "" {
 		t.Fatalf("concern retained an assimilated commitment: %#v", runtime.state.Concerns[0])
 	}
-	if err := runtime.validateExperienceUpdates(commit); err == nil {
-		t.Fatal("the same commitment reality was accepted for a second experience")
+	if err := runtime.validateRealityUpdates(commit); err == nil {
+		t.Fatal("the same commitment reality was accepted for a second memory")
 	}
 }
 
@@ -4224,7 +4951,7 @@ func TestSettledRealityPreventsUnchangedEquivalentAction(t *testing.T) {
 		OrganID: "system", Operation: "exec", Request: "hominal-browser call browser_snapshot '{}'", Status: "completed",
 	})
 	runtime.state.Background = []Event{{ID: "reality-old", Seq: 10, Kind: "action_result", Payload: result, Status: "processed"}}
-	runtime.state.Experiences = []Experience{{CommitmentID: "commitment-old", RemainingDifference: 0.08}}
+	runtime.state.Memories = []Memory{{CommitmentID: "commitment-old", RemainingDifference: 0.08}}
 	action := CognitiveAction{Kind: "organ_action", OrganID: "system", Operation: "exec", Input: "hominal-browser call browser_snapshot '{}'"}
 	if err := runtime.validateActionProgress(current.ID, action); err == nil {
 		t.Fatal("unchanged equivalent action was accepted after settled reality")
@@ -4242,6 +4969,10 @@ func TestSettledRealityPreventsUnchangedEquivalentAction(t *testing.T) {
 	if err := runtime.validateActionProgress(current.ID, action); err == nil {
 		t.Fatal("an equivalent action result incorrectly counted as changed reality")
 	}
+	runtime.state.Background = append(runtime.state.Background, Event{ID: "fresh-drive", Seq: 12, Kind: "value_signal", Source: "endogenous"})
+	if err := runtime.validateActionProgress(current.ID, action); err == nil {
+		t.Fatal("an internal value signal incorrectly reset settled embodied reality")
+	}
 
 	other := Event{ID: "exploration-later", Kind: "concern", ConcernID: "concern-later"}
 	runtime.activeCandidates = map[string]Event{other.ID: other}
@@ -4253,7 +4984,7 @@ func TestSettledRealityPreventsUnchangedEquivalentAction(t *testing.T) {
 		t.Fatal("a static observation label disguised a settled request under a new concern")
 	}
 
-	runtime.state.Background = append(runtime.state.Background, Event{ID: "mentor-new", Seq: 12, Kind: "mentor_received"})
+	runtime.state.Background = append(runtime.state.Background, Event{ID: "mentor-new", Seq: 13, Kind: "mentor_received"})
 	runtime.activeCandidates = map[string]Event{current.ID: current}
 	if err := runtime.validateActionProgress(current.ID, action); err != nil {
 		t.Fatalf("new world fact did not reopen the action: %v", err)
@@ -4266,6 +4997,117 @@ func TestSettledRealityPreventsUnchangedEquivalentAction(t *testing.T) {
 	changed := CognitiveAction{Kind: "organ_action", OrganID: "system", Operation: "exec", Input: "date -u; hominal-browser call browser_snapshot '{}'"}
 	if err := runtime.validateActionProgress(other.ID, changed); err != nil {
 		t.Fatalf("a genuinely changed request was blocked: %v", err)
+	}
+}
+
+func TestSettledActionBoundaryReturnsAsFactWithoutValidationLoop(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(10), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.config.GenerationKind = "rehearsal" // Acceptance only; do not start the next main turn.
+	old := ActionCommitment{
+		ID: "commitment-old", ActionKind: "mentor_send", Status: "assimilated",
+	}
+	oldReality, _ := json.Marshal(ActionState{
+		ID: "action-old", CommitmentID: old.ID, Kind: "mentor_send", Request: "相同表达", Status: "completed", Effect: "changed",
+	})
+	valuePayload, _ := json.Marshal(lifeValueSignalPayload{
+		Direction: "relatedness", AffordanceKey: "mentor_channel", Surface: "导师通道",
+	})
+	focus := Event{
+		ID: "value-now", Seq: 12, Kind: "value_signal", Source: "endogenous", Payload: valuePayload, Status: "in_focus",
+	}
+	runtime.state.Commitments = []ActionCommitment{old}
+	runtime.state.Memories = []Memory{{CommitmentID: old.ID, RemainingDifference: 0}}
+	runtime.state.Background = []Event{
+		{ID: "reality-old", Seq: 10, Kind: "action_result", Payload: oldReality, Status: "processed"},
+		focus,
+	}
+	runtime.state.ValueAffordances["mentor_channel"] = ValueAffordanceTrace{LastPresentedAt: nowUTC()}
+	runtime.state.Lease = &Lease{ID: "lease-now", FocusID: focus.ID, Profile: CognitiveProfile{Model: "terra", ReasoningEffort: "none"}}
+	runtime.activeCandidates = map[string]Event{focus.ID: focus}
+	commit := CognitiveCommit{
+		FocusID: focus.ID,
+		Appraisals: []CandidateAppraisal{{
+			CandidateID: focus.ID, Meaning: "我愿意表达", Difference: 0.6, Ownership: 0.8, Value: 0.8,
+			Values: LifeValueVector{Relatedness: 0.8}, Urgency: 0.5, Answerability: 0.9, Certainty: 0.9, Resolution: "hold",
+		}},
+		NewConcernClosureCondition: "表达产生了不同的现实结果",
+		ThoughtThread:              "我准备再次发送相同表达。",
+		Action: CognitiveAction{
+			Kind: "mentor_send", Text: "相同表达", Intent: "进入导师关系",
+			Prediction: "消息送达", RealityCheck: "导师通道返回送达事实", StopCondition: "送达后停止",
+		},
+		ResourceChoice: CognitiveResourceChoice{Apply: "keep", Model: "current", ReasoningEffort: "current"},
+	}
+	if err := runtime.handleCognitiveResult(context.Background(), CognitiveResult{
+		LeaseID: "lease-now", FocusID: focus.ID, Stage4: &commit,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.state.Lease != nil || len(runtime.state.Commitments) != 1 {
+		t.Fatalf("settled request formed another commitment: lease=%#v commitments=%#v", runtime.state.Lease, runtime.state.Commitments)
+	}
+	if runtime.state.Background[1].Status != "processed" || runtime.state.Background[1].CognitionAttempts != 0 {
+		t.Fatalf("originating focus entered validation retry: %#v", runtime.state.Background[1])
+	}
+	boundary := runtime.state.Background[len(runtime.state.Background)-1]
+	if boundary.Kind != "action_boundary" || boundary.Status != "pending" {
+		t.Fatalf("action boundary did not return as an attention fact: %#v", boundary)
+	}
+	trace := runtime.state.ValueAffordances["mentor_channel"]
+	if trace.LastSettledAt == "" || trace.DismissedStreak != 1 {
+		t.Fatalf("yieldless affordance was immediately left eligible: %#v", trace)
+	}
+}
+
+func TestOnlyVerifiedChangeBreaksContactOnlySequence(t *testing.T) {
+	for _, effect := range []string{"", "unknown", "observed", "oriented"} {
+		if !actionEffectIsContactOnly(effect) {
+			t.Fatalf("unverified effect %q was treated as a persistent causal change", effect)
+		}
+	}
+	if actionEffectIsContactOnly("changed") {
+		t.Fatal("organ-verified changed effect was treated as contact-only")
+	}
+}
+
+func TestReadOnlyOrganResultDoesNotReopenSettledObservation(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(10), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := Event{ID: "current", Kind: "concern", ConcernID: "current-concern"}
+	runtime.activeCandidates = map[string]Event{current.ID: current}
+	runtime.state.Commitments = []ActionCommitment{
+		{ID: "snapshot-old", ConcernID: "old-concern", ActionKind: "organ_action", Status: "assimilated"},
+		{ID: "find-new", ConcernID: "other-concern", ActionKind: "organ_action", Status: "assimilated"},
+	}
+	snapshot, _ := json.Marshal(ActionState{
+		ID: "snapshot-action", CommitmentID: "snapshot-old", Kind: "organ_action",
+		OrganID: "browser", Operation: "browser_snapshot", Effect: "observed", Request: `{}`, Status: "completed",
+	})
+	find, _ := json.Marshal(ActionState{
+		ID: "find-action", CommitmentID: "find-new", Kind: "organ_action",
+		OrganID: "browser", Operation: "browser_find", Effect: "observed", Request: `{"query":"CALY"}`, Status: "completed",
+	})
+	runtime.state.Background = []Event{
+		{ID: "snapshot-reality", Seq: 10, Kind: "action_result", Payload: snapshot},
+		{ID: "find-reality", Seq: 20, Kind: "action_result", Payload: find},
+	}
+	runtime.state.Memories = []Memory{{CommitmentID: "snapshot-old", RemainingDifference: 0.05}}
+	action := CognitiveAction{Kind: "organ_action", OrganID: "browser", Operation: "browser_snapshot", Input: `{}`}
+	if err := runtime.validateActionProgress(current.ID, action); err == nil {
+		t.Fatal("a different read-only observation incorrectly made the settled snapshot new")
+	}
+
+	runtime.state.Background[1].Payload, _ = json.Marshal(ActionState{
+		ID: "navigate-action", CommitmentID: "find-new", Kind: "organ_action",
+		OrganID: "browser", Operation: "browser_navigate", Effect: "changed", Request: `{"url":"https://example.com"}`, Status: "completed",
+	})
+	if err := runtime.validateActionProgress(current.ID, action); err != nil {
+		t.Fatalf("a page-changing organ result did not reopen the observation: %v", err)
 	}
 }
 
@@ -4282,17 +5124,17 @@ func TestDifferentEmbodiedRealityReopensObservationAcrossConcerns(t *testing.T) 
 	}}
 	oldResult, _ := json.Marshal(ActionState{
 		ID: "snapshot-action", CommitmentID: "snapshot-old", Kind: "organ_action",
-		OrganID: "system", Operation: "exec", Request: "hominal-browser call browser_snapshot '{}'", Status: "completed",
+		OrganID: "system", Operation: "exec", Request: "hominal-browser call browser_snapshot '{}'", Effect: "observed", Status: "completed",
 	})
 	clickResult, _ := json.Marshal(ActionState{
 		ID: "click-action", CommitmentID: "click-later", Kind: "organ_action",
-		OrganID: "system", Operation: "exec", Request: `hominal-browser call browser_click '{"target":"e75"}'`, Status: "completed",
+		OrganID: "system", Operation: "exec", Request: `hominal-browser call browser_click '{"target":"e75"}'`, Effect: "changed", Status: "completed",
 	})
 	runtime.state.Background = []Event{
 		{ID: "snapshot-reality", Seq: 10, Kind: "action_result", Payload: oldResult, Status: "processed"},
 		{ID: "click-reality", Seq: 20, Kind: "action_result", Payload: clickResult, Status: "processed"},
 	}
-	runtime.state.Experiences = []Experience{{CommitmentID: "snapshot-old", RemainingDifference: 0.1}}
+	runtime.state.Memories = []Memory{{CommitmentID: "snapshot-old", RemainingDifference: 0.1}}
 	action := CognitiveAction{Kind: "organ_action", OrganID: "system", Operation: "exec", Input: "hominal-browser call browser_snapshot '{}'"}
 	if err := runtime.validateActionProgress(current.ID, action); err != nil {
 		t.Fatalf("a later different body action did not reopen observation under the current concern: %v", err)
@@ -4341,11 +5183,11 @@ func TestUnsettledRealityAndDifferentActionRemainAvailable(t *testing.T) {
 		ID: "action-old", CommitmentID: "commitment-old", Kind: "organ_action", OrganID: "system", Operation: "exec", Request: "read-object", Status: "completed",
 	})
 	runtime.state.Background = []Event{{ID: "reality-old", Seq: 10, Kind: "action_result", Payload: result}}
-	runtime.state.Experiences = []Experience{{CommitmentID: "commitment-old", RemainingDifference: 0.55}}
+	runtime.state.Memories = []Memory{{CommitmentID: "commitment-old", RemainingDifference: 0.55}}
 	if err := runtime.validateActionProgress(current.ID, CognitiveAction{Kind: "organ_action", OrganID: "system", Operation: "exec", Input: "read-object"}); err != nil {
 		t.Fatalf("unsettled reality could not be revisited: %v", err)
 	}
-	runtime.state.Experiences[0].RemainingDifference = 0.05
+	runtime.state.Memories[0].RemainingDifference = 0.05
 	if err := runtime.validateActionProgress(current.ID, CognitiveAction{Kind: "organ_action", OrganID: "system", Operation: "exec", Input: "inspect-object-differently"}); err != nil {
 		t.Fatalf("different action was rejected: %v", err)
 	}
@@ -4367,7 +5209,7 @@ func TestExactFailedRequestCannotRepeatAcrossConcerns(t *testing.T) {
 		Result: `{"exit_code":1,"timed_out":false}`,
 	})
 	runtime.state.Background = []Event{{ID: "reality-failed", Seq: 10, Kind: "action_result", Payload: result, Status: "processed"}}
-	runtime.state.Experiences = []Experience{{CommitmentID: "commitment-failed", RemainingDifference: 0.7}}
+	runtime.state.Memories = []Memory{{CommitmentID: "commitment-failed", RemainingDifference: 0.7}}
 	action := CognitiveAction{Kind: "organ_action", OrganID: "system", Operation: "exec", Input: "hominal-browser call browser_tabs '{}'"}
 	if err := runtime.validateActionProgress(current.ID, action); err == nil {
 		t.Fatal("an exact deterministic failure was accepted under a newly named concern")
@@ -4375,6 +5217,47 @@ func TestExactFailedRequestCannotRepeatAcrossConcerns(t *testing.T) {
 	changed := CognitiveAction{Kind: "organ_action", OrganID: "system", Operation: "exec", Input: `hominal-browser call browser_tabs '{"action":"list"}'`}
 	if err := runtime.validateActionProgress(current.ID, changed); err != nil {
 		t.Fatalf("a genuinely corrected request was rejected: %v", err)
+	}
+}
+
+func TestRecentMentorDeduplicationUsesExactFactNotLexicalJudgment(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(10), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	runtime.state.Mentor.Outbox = []MentorMessage{{
+		MessageID: "alice-earlier", Status: "delivered", QueuedAt: now.Add(-5 * time.Minute).Format(time.RFC3339Nano),
+		Body: "我在 /life 留下文字痕迹并独立读取确认，也看到 X 页面可达，但还没有对我的回应。",
+	}}
+	paraphrase := CognitiveAction{
+		Kind: "mentor_send", ReplyTo: "",
+		Text: "第一份 /life 文字痕迹已经通过独立读取核验；X 入口虽然可达，目前仍没有给我的回应。",
+	}
+	if err := runtime.validateMentorCausalNovelty(paraphrase, now); err != nil {
+		t.Fatal("lexical resemblance was incorrectly treated as an identical action")
+	}
+	paraphrase.Text = runtime.state.Mentor.Outbox[0].Body
+	if err := runtime.validateMentorCausalNovelty(paraphrase, now); err == nil {
+		t.Fatal("exact retransmission was not detected")
+	}
+	paraphrase.Text += "\n请和我讨论下一步的问题。"
+	if err := runtime.validateMentorCausalNovelty(paraphrase, now); err != nil {
+		t.Fatal("a new question was swallowed by duplicate protection")
+	}
+	paraphrase.ReplyTo = "codex-new-reality"
+	if err := runtime.validateMentorCausalNovelty(paraphrase, now); err != nil {
+		t.Fatalf("a direct reply to new relationship reality was blocked: %v", err)
+	}
+	paraphrase.ReplyTo = ""
+	paraphrase.Text = "我刚发现浏览器返回了一个此前不存在的新错误，需要和你核对这个身体事实。"
+	if err := runtime.validateMentorCausalNovelty(paraphrase, now); err != nil {
+		t.Fatalf("a materially different unsolicited message was blocked: %v", err)
+	}
+	runtime.state.Mentor.Outbox[0].QueuedAt = now.Add(-31 * time.Minute).Format(time.RFC3339Nano)
+	paraphrase.Text = "第一份 /life 文字痕迹已经通过独立读取核验；X 入口虽然可达，目前仍没有给我的回应。"
+	if err := runtime.validateMentorCausalNovelty(paraphrase, now); err != nil {
+		t.Fatalf("bounded causal memory became a permanent topic prohibition: %v", err)
 	}
 }
 
@@ -4528,7 +5411,7 @@ func TestRealityContactRelievesExplorationWhileNewConcernCanRemain(t *testing.T)
 		ThoughtThread:  "我完成了联结尝试，也愿意等待。",
 		Action:         CognitiveAction{Kind: "none"},
 		ResourceChoice: CognitiveResourceChoice{Apply: "keep", Model: "current", ReasoningEffort: "current"},
-		ExperienceUpdates: []ExperienceUpdate{{
+		RealityUpdates: []RealityUpdate{{
 			CommitmentID: commitment.ID, PredictionDifference: 0.16,
 			Meaning:         "消息送达形成了真实联结事实，回应仍需要等待。",
 			Values:          LifeValues{Relatedness: 0.8, SelfEndorsed: 0.8},
@@ -4557,7 +5440,7 @@ func TestSituatedConcernMayShareAfterEarlierMentorContact(t *testing.T) {
 		t.Fatal(err)
 	}
 	runtime.state.ValueField.Activation.Exploration = 0.9
-	concern := Concern{ID: "concrete-experience", OriginKind: "action_result", Resolution: "hold", Answerability: 0.8}
+	concern := Concern{ID: "concrete-memory", OriginKind: "action_result", Resolution: "hold", Answerability: 0.8}
 	runtime.state.Concerns = []Concern{concern}
 	event := Event{ID: concern.ID, Kind: "concern", ConcernID: concern.ID, Status: "in_focus"}
 	runtime.activeCandidates = map[string]Event{event.ID: event}
@@ -4771,7 +5654,7 @@ func TestSemanticCommitFailureDoesNotPretendGatewayIsUnavailable(t *testing.T) {
 	}
 }
 
-func TestStageTenActionAssistancePreservesMainConcernAndBodyBoundary(t *testing.T) {
+func TestStageTenAssistanceCannotSubmitCognitiveCommit(t *testing.T) {
 	runtime, err := New(t.TempDir(), "instance", testConfig(10), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
 	if err != nil {
 		t.Fatal(err)
@@ -4799,23 +5682,41 @@ func TestStageTenActionAssistancePreservesMainConcernAndBodyBoundary(t *testing.
 			Prediction: "返回工具列表", RealityCheck: "检查退出码",
 		},
 		NarrativeUpdate:        "改写自我",
+		MemoryUpdates:          []MemoryUpdate{{Content: "协助器改写了个人经历"}},
+		ExperienceUpdates:      []ExperienceUpdate{{Judgment: "协助器决定了新的生活判断"}},
+		RecallQuery:            "开始另一个个人主题",
 		ValueOrientationUpdate: LifeValueVector{Relatedness: 1},
 		ResourceChoice:         CognitiveResourceChoice{Apply: "next", Model: "sol", ReasoningEffort: "low", Purpose: "继续协助"},
 	}
-	got := runtime.constrainStageTenActionAssistance(commit)
-	if len(got.Appraisals) != 1 || got.Appraisals[0].Meaning != "我已经决定公开表达一条写定内容" || got.Appraisals[0].Resolution != "hold" {
-		t.Fatalf("action assistance changed the main concern: %#v", got.Appraisals)
+	if err := runtime.handleCognitiveResult(context.Background(), CognitiveResult{LeaseID: "lease-assist", FocusID: focus.ID, Stage4: &commit}); err != nil {
+		t.Fatal(err)
 	}
-	if got.Action.Intent != runtime.state.Lease.ProfilePurpose || got.Action.Kind != "organ_action" {
-		t.Fatalf("action assistance lost the fixed main intent: %#v", got.Action)
+	if runtime.state.Self.Narrative != "" || len(runtime.state.Memories) != 0 || runtime.state.PendingAction != nil || runtime.state.Concerns[0].Meaning != "我已经决定公开表达一条写定内容" {
+		t.Fatal("local assistance mutated personal cognition or started an action")
 	}
-	if got.NarrativeUpdate != "" || !lifeValueVectorEmpty(got.ValueOrientationUpdate) || got.ResourceChoice.Apply != "keep" {
-		t.Fatalf("action assistance retained a second-consciousness projection: %#v", got)
-	}
+}
 
-	commit.Action = CognitiveAction{Kind: "mentor_send", Text: "redirected", Intent: "redirect", Prediction: "queued", RealityCheck: "message id"}
-	redirected := runtime.constrainStageTenActionAssistance(commit)
-	if err := runtime.applyPreparedCognitiveCommit(redirected, ""); err == nil || !strings.Contains(err.Error(), "organ_action") {
-		t.Fatalf("action assistance redirected into mentor channel: %v", err)
+func TestStageTenActionAssistanceCannotLeakPastAnAlreadyFormedAction(t *testing.T) {
+	runtime, err := New(t.TempDir(), "instance", testConfig(10), &blockingCognizer{started: make(chan CognitiveRequest, 1), release: make(chan struct{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.state.Stage = 10
+	runtime.state.Lease = &Lease{
+		ID: "lease-main", FocusID: "failed-reality",
+		Profile: CognitiveProfile{Model: "luna", ReasoningEffort: "none"},
+	}
+	runtime.state.Concerns = []Concern{{ID: "owned", Resolution: "hold"}}
+	focus := Event{ID: "failed-reality", Kind: "action_result", ConcernID: "owned", Status: "in_focus"}
+	runtime.activeCandidates = map[string]Event{focus.ID: focus}
+	choice := CognitiveResourceChoice{
+		Apply: "next", Model: "sol", ReasoningEffort: "low",
+		Purpose: "用已经固定的命令完成一次身体实现",
+	}
+	if _, err := runtime.validateResourceChoice(choice, focus.ID, "mentor_send", "owned"); err == nil || !strings.Contains(err.Error(), "action none") {
+		t.Fatalf("action assistance leaked into the Reality after an already formed action: %v", err)
+	}
+	if _, err := runtime.validateResourceChoice(choice, focus.ID, "none", "owned"); err != nil {
+		t.Fatalf("a proper serial action-assistance request was rejected: %v", err)
 	}
 }

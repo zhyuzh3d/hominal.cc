@@ -56,7 +56,7 @@ func TestDifferenceFieldAdmitsNovelFactThenCompressesExpectedNoise(t *testing.T)
 		t.Fatal("an expected, learned-low-value surface woke the main cognition again")
 	}
 	trace = runtime.state.DifferenceField[first.DifferenceKey]
-	if trace.Observations != 2 || trace.LastPredictionGap != 0 {
+	if trace.Observations != 2 || trace.LastPredictionGap >= 0.25 || trace.LastContent != "fact second" {
 		t.Fatalf("the expected change was not absorbed by the predictor: %#v", trace)
 	}
 }
@@ -109,6 +109,38 @@ func TestLearnedLowChangingSignalIsSampledAgainWithoutWakingEveryTime(t *testing
 	}
 }
 
+func TestQuietContinuityRaisesOnlyARealCurrentReferentIntoAttention(t *testing.T) {
+	runtime := newDifferenceTestRuntime(t)
+	now := time.Now().UTC()
+	runtime.config.Dynamics.AttentionMaximumIdleSeconds = 10
+	runtime.state.LastAttentionAt = now.Add(-31 * time.Second).Format(time.RFC3339Nano)
+	key := "observed/perceptual_change/browser/chrome.current_page"
+	runtime.state.DifferenceField[key] = DifferenceTrace{
+		Key: key, Observations: 30, LastDigest: "old", ExpectedChangeRate: 1,
+		AttentionValue: 0,
+	}
+
+	real := Event{
+		Kind: "perceptual_change", Source: "observed", ObservedAt: now.Format(time.RFC3339Nano),
+		Summary: "a current object", Payload: perceptualSignalPayload(t, "new-object"),
+	}
+	if admitted, ok := runtime.admitDifference(real); !ok || admitted.AttentionPressure < runtime.config.Dynamics.AttentionThreshold {
+		t.Fatalf("real no-attention time did not become bounded net access for a current object: ok=%v event=%#v", ok, admitted)
+	}
+
+	emptyPayload, _ := json.Marshal(map[string]any{
+		"organ_id": "browser", "surface_id": "chrome.current_page",
+	})
+	empty := Event{
+		Kind: "perceptual_change", Source: "observed", ObservedAt: now.Format(time.RFC3339Nano),
+		Summary: "no object", Payload: emptyPayload,
+	}
+	admitted, ok := runtime.admitDifference(empty)
+	if ok || admitted.AttentionPressure >= runtime.config.Dynamics.AttentionThreshold {
+		t.Fatalf("quiet time manufactured attention without a real referent: ok=%v event=%#v", ok, admitted)
+	}
+}
+
 func TestCausalRealityCannotBeLearnedOutOfAttention(t *testing.T) {
 	runtime := newDifferenceTestRuntime(t)
 	key := "observed/action_result/browser/click"
@@ -126,7 +158,7 @@ func TestCausalRealityCannotBeLearnedOutOfAttention(t *testing.T) {
 	}
 }
 
-func TestAliceAppraisalAndExperienceRetuneSignalValue(t *testing.T) {
+func TestAliceAppraisalAndMemoryRetuneSignalValue(t *testing.T) {
 	runtime := newDifferenceTestRuntime(t)
 	key := "observed/perceptual_change/browser/chrome.current_page"
 	runtime.state.DifferenceField[key] = DifferenceTrace{Key: key, AttentionValue: 0.50}
@@ -140,13 +172,13 @@ func TestAliceAppraisalAndExperienceRetuneSignalValue(t *testing.T) {
 		t.Fatalf("Alice's release did not lower future attention access: %f", low)
 	}
 	commitment := ActionCommitment{FocusID: "fact"}
-	experience := Experience{
+	memory := Memory{
 		PredictionDifference: 0.9, ExperiencedCost: 0.1, Significance: "self_defining",
 		Values: LifeValues{Agency: 0.8, SelfEndorsed: 0.9},
 	}
-	runtime.learnDifferenceFromExperience(commitment, experience)
+	runtime.learnDifferenceFromMemory(commitment, memory)
 	if got := runtime.state.DifferenceField[key].AttentionValue; got <= low {
-		t.Fatalf("a consequential experience did not restore signal value: before=%f after=%f", low, got)
+		t.Fatalf("a consequential memory did not restore signal value: before=%f after=%f", low, got)
 	}
 }
 

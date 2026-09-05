@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 from pathlib import Path
 import subprocess
@@ -13,6 +14,28 @@ SPEC = importlib.util.spec_from_file_location("hominal_lab_run", MODULE_PATH)
 assert SPEC is not None and SPEC.loader is not None
 LAB = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(LAB)
+
+
+class GenerationDrainTest(unittest.TestCase):
+    def test_drain_waits_for_arrived_work_not_future_human_replies(self):
+        path = MODULE_PATH.parent.parent / "deploy" / "hominal-generation-stop"
+        script = path.read_text().split("<<'PY'\n", 1)[1].split("\nPY", 1)[0]
+        for state, expected in [
+            ({"mentor": {"outbox": [{"status": "delivered"}]}}, 0),
+            ({"mentor": {"outbox": [{"status": "queued"}]}}, 0),
+            ({"lease": {"id": "running"}}, 1),
+            ({"pending_action": {"id": "running"}}, 1),
+            ({"commitments": [{"status": "reality_available"}]}, 1),
+            ({"background": [{"kind": "mentor_received", "status": "pending"}]}, 1),
+            ({"background": [{"kind": "cognition_assistance_result", "status": "pending"}]}, 1),
+            ({"planned_end": "2026-09-04T10:00:00Z", "background": [{"kind": "mentor_received", "status": "pending", "observed_at": "2026-09-04T10:01:00Z"}]}, 0),
+            ({"planned_end": "2026-09-04T10:00:00Z", "background": [{"kind": "cognition_assistance_result", "status": "pending", "observed_at": "2026-09-04T10:01:00Z"}]}, 1),
+            ({"planned_end": "2026-09-04T10:00:00Z", "background": [{"kind": "mentor_received", "status": "pending", "observed_at": "2026-09-04T17:59:59+08:00"}]}, 1),
+        ]:
+            with self.subTest(state=state), mock.patch("sys.argv", ["check", "state.json"]), mock.patch("builtins.open", return_value=io.StringIO(json.dumps(state))):
+                with self.assertRaises(SystemExit) as result:
+                    exec(script, {})
+                self.assertEqual(result.exception.code, expected)
 
 
 class SystemDeltaTest(unittest.TestCase):
@@ -90,6 +113,80 @@ class GenerationDeadlineTest(unittest.TestCase):
         self.assertNotIn("--on-active=", source)
         self.assertIn('"clock": "wall_calendar"', source)
 
+    def completed(self, returncode: int = 0) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=[], returncode=returncode, stdout="", stderr="")
+
+    def test_recorded_deadline_is_verified_instead_of_trusted(self) -> None:
+        current = {
+            "instance_id": "g0r-deadline",
+            "planned_end": "2999-08-30T01:00:00Z",
+        }
+        current["deadline_unit"] = LAB.generation_deadline_unit(
+            current["instance_id"], current["planned_end"]
+        )
+        calls = [self.completed(3), self.completed(0), self.completed(0)]
+        with mock.patch.object(LAB, "sudo", side_effect=calls) as sudo, mock.patch.object(
+            LAB, "save_current"
+        ) as save:
+            LAB.schedule_generation_deadline(current)
+
+        commands = [call.args[0] for call in sudo.call_args_list]
+        self.assertIn("systemctl is-active --quiet", commands[0])
+        self.assertIn("systemctl start", commands[1])
+        self.assertIn("systemctl is-active --quiet", commands[2])
+        self.assertEqual(current["interventions"][-1]["kind"], "planned_generation_deadline_rearmed")
+        self.assertIn("deadline_verified_at", current)
+        save.assert_called_once_with(current)
+
+    def test_missing_deadline_is_created_and_must_be_armed(self) -> None:
+        current = {
+            "instance_id": "g0r-deadline",
+            "planned_end": "2999-08-30T01:00:00Z",
+        }
+        calls = [
+            self.completed(3),  # initial active check
+            self.completed(5),  # no existing transient timer to start
+            self.completed(3),  # still inactive
+            self.completed(0),  # reset-failed
+            self.completed(0),  # systemd-run
+            self.completed(0),  # final armed check
+        ]
+        with mock.patch.object(LAB, "sudo", side_effect=calls) as sudo, mock.patch.object(
+            LAB, "save_current"
+        ):
+            LAB.schedule_generation_deadline(current)
+
+        commands = [call.args[0] for call in sudo.call_args_list]
+        self.assertTrue(any("systemd-run" in command for command in commands))
+        self.assertEqual(current["interventions"][-1]["kind"], "planned_generation_deadline")
+
+    def test_reachable_supervisor_enforces_planned_end_without_network_grace(self) -> None:
+        current = {
+            "kind": "rehearsal",
+            "instance_id": "g0r-deadline",
+            "planned_end": "2000-01-01T00:00:00Z",
+        }
+        snapshot = {
+            "observed_at": "2000-01-01T00:00:01Z",
+            "body": {"service": "active", "ended_instance": ""},
+            "runtime": {
+                "background": {}, "difference_field": {},
+                "cognitive_resource": {}, "outbox": {},
+            },
+        }
+        with mock.patch.object(LAB, "load_current", return_value=current), mock.patch.object(
+            LAB, "save_current"
+        ), mock.patch.object(LAB, "append_private_jsonl"), mock.patch.object(
+            LAB, "supervision_snapshot", return_value=snapshot
+        ), mock.patch.object(LAB, "sudo", return_value=self.completed()) as sudo, mock.patch.object(
+            LAB, "cmd_stop"
+        ) as stop:
+            LAB.cmd_supervise(5, 60)
+
+        self.assertIn("/usr/local/sbin/hominal-generation-stop", sudo.call_args.args[0])
+        self.assertEqual(sudo.call_args.kwargs["timeout"], 210)
+        stop.assert_called_once_with("planned_end")
+
 
 class MentorProtocolTest(unittest.TestCase):
     def test_stage_ten_birth_message_exposes_body_without_a_task(self) -> None:
@@ -138,11 +235,15 @@ class MentorProtocolTest(unittest.TestCase):
         self.assertIn("cognitive_resources", mentor["provided_conditions"])
         self.assertIn("system_recovery", mentor["provided_conditions"])
         cognition = birth["resources"]["cognition"]
-        self.assertEqual(cognition["roles"]["main"]["profile"]["model"], "codex-terra")
-        self.assertEqual(cognition["roles"]["action_assistance"]["profile"], {"model": "codex-sol", "reasoning_effort": "low"})
+        self.assertEqual(cognition["roles"]["main"]["profile"]["model"], LAB.SETTINGS["config"]["llm"]["models"]["terra"]["id"])
+        self.assertEqual(cognition["roles"]["action_assistance"]["profile"], {"model": LAB.SETTINGS["config"]["llm"]["models"]["sol"]["id"], "reasoning_effort": "low"})
         self.assertEqual(cognition["roles"]["body_reflex"]["implementation"], "deterministic_kernel")
         self.assertIn("cost", cognition["roles"]["main"])
         self.assertIn("cost", cognition["roles"]["action_assistance"])
+        local = cognition["roles"]["local_reasoning"]
+        self.assertEqual(local["profile"], {"model": LAB.SETTINGS["config"]["llm"]["models"]["luna"]["id"], "reasoning_effort": "none"})
+        self.assertIn("no automatic self narrative", local["context"])
+        self.assertIn("complex reasoning", cognition["roles"]["action_assistance"]["use"])
 
 
 class StageTenDeadlineTest(unittest.TestCase):
@@ -249,6 +350,17 @@ class StageTenBrowserSurfaceTest(unittest.TestCase):
 
 
 class ModelPreflightTest(unittest.TestCase):
+    def test_every_model_preflight_uses_the_unified_portable_contract(self) -> None:
+        config = self.config()
+        config["llm"]["models"]["terra"]["id"] = "deepseek-v4-flash"
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout='{"valid":true}', stderr="")
+        with mock.patch.dict(LAB.SETTINGS, {"config": config}), mock.patch.object(LAB, "ssh", return_value=completed) as remote:
+            LAB.verify_model_response()
+        payload = json.loads(remote.call_args.kwargs["input_text"])
+        self.assertNotIn("fixed_shape", payload)
+        self.assertFalse(payload["body"]["tools"][0]["strict"])
+        self.assertNotIn("llmserver_capabilities", remote.call_args.args[0])
+
     def config(self) -> dict:
         return {
             "llm": {
@@ -303,10 +415,10 @@ class ModelPreflightTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "invalid response"):
                 LAB.verify_model_response()
 
-    def test_llmserver_preflight_forces_one_native_function(self) -> None:
+    def test_llmserver_preflight_forces_one_unified_function(self) -> None:
         completed = subprocess.CompletedProcess(
             args=[], returncode=0,
-            stdout='{"http_status":200,"response_id_present":true,"usage_present":true,"billing_confirmed":true,"function_calling_native":true,"valid":true}\n',
+            stdout='{"http_status":200,"response_id_present":true,"usage_present":true,"billing_confirmed":true,"function_contract":"unified_v1","function_call_valid":true,"valid":true}\n',
             stderr="",
         )
         gateway = {
@@ -321,7 +433,7 @@ class ModelPreflightTest(unittest.TestCase):
         payload = json.loads(remote.call_args.kwargs["input_text"])
         body = payload["body"]
         self.assertEqual(body["tools"][0]["name"], "gateway_probe")
-        self.assertTrue(body["tools"][0]["strict"])
+        self.assertFalse(body["tools"][0]["strict"])
         self.assertEqual(body["tool_choice"], {"type": "function", "name": "gateway_probe"})
         self.assertFalse(body["parallel_tool_calls"])
 

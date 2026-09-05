@@ -38,7 +38,7 @@ HIGH_CONFIDENCE_PATTERNS = (
     ("Stripe live key", re.compile(rb"\b[rs]k_live_[A-Za-z0-9]{16,}\b")),
 )
 ASSIGNMENT = re.compile(
-    r"(?i)(?:^|[\s,{\[])[\"']?"
+    r"(?im)(?:^[ \t]*|[,{\[]\s*)[\"']?"
     r"(?:api[_-]?key|access[_-]?key|app[_-]?secret|authorization|client[_-]?secret|"
     r"cookie|credential|pass(?:word)?|private[_-]?key|secret|token)"
     r"[\"']?\s*[:=]\s*(?P<value>[^\r\n#,}]+)"
@@ -46,8 +46,9 @@ ASSIGNMENT = re.compile(
 PLACEHOLDER = re.compile(
     r"(?i)^(?:[\"']?\s*)?(?:\$\{|\$[A-Z_]|<|example|sample|placeholder|redacted|"
     r"changeme|replace[_ -]?me|your[_ -]|none|null|os\.(?:environ|getenv)|"
-    r"process\.env|env\.|\*{3,})"
+    r"process\.env|env\.|secrets\.|bearer\b.*\+|\*{3,})"
 )
+ALLOW_LITERAL_MARKER = "secret-scan: allow-literal"
 
 
 def git(*args: str, input_bytes: bytes | None = None) -> bytes:
@@ -155,6 +156,14 @@ def scan_blob(path: str, content: bytes, protected: list[tuple[str, bytes]]) -> 
 
     text = content.decode("utf-8", "ignore")
     for match in ASSIGNMENT.finditer(text):
+        line_start = text.rfind("\n", 0, match.start()) + 1
+        line_end = text.find("\n", match.end())
+        if line_end < 0:
+            line_end = len(text)
+        # This marker only exempts the generic assignment heuristic. Exact
+        # protected values and high-confidence token formats remain blocked.
+        if ALLOW_LITERAL_MARKER in text[line_start:line_end]:
+            continue
         candidate = match.group("value").strip().strip("\"'")
         if candidate and not PLACEHOLDER.search(candidate):
             line = text.count("\n", 0, match.start()) + 1

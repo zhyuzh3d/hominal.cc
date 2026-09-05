@@ -108,14 +108,13 @@ def verify_model_response(profile: dict[str, str] | None = None) -> dict[str, ob
         "max_output_tokens": 128,
         "store": False,
     }
-    if gateway["adapter"] == "llmserver":
-        body.update({
+    body.update({
             "input": "Call gateway_probe with ok=true.",
             "tools": [{
                 "type": "function",
                 "name": "gateway_probe",
-                "description": "Confirm native function calling is available.",
-                "strict": True,
+                "description": "Confirm the unified function contract is usable.",
+                "strict": False,
                 "parameters": {
                     "type": "object",
                     "properties": {"ok": {"type": "boolean"}},
@@ -125,7 +124,7 @@ def verify_model_response(profile: dict[str, str] | None = None) -> dict[str, ob
             }],
             "tool_choice": {"type": "function", "name": "gateway_probe"},
             "parallel_tool_calls": False,
-        })
+    })
     payload = {
         "url": gateway["base_url"] + "/v1/responses",
         "auth_value": gateway["api_key"],
@@ -133,7 +132,7 @@ def verify_model_response(profile: dict[str, str] | None = None) -> dict[str, ob
         "body": body,
     }
     script = r'''
-import json, os, subprocess, sys, tempfile
+import json, os, subprocess, sys, tempfile, urllib.request
 p=json.load(sys.stdin)
 paths=[]
 def temporary_bytes(data):
@@ -146,6 +145,17 @@ def temporary_bytes(data):
 def curl_config_value(value):
     return str(value).replace('\\','\\\\').replace('"','\\"').replace('\n','')
 try:
+    if p['adapter'] == 'llmserver':
+        try:
+            request=urllib.request.Request(p['url'].rsplit('/',1)[0]+'/models',
+                headers={'Authorization':'Bearer '+p['auth_value']})
+            with urllib.request.urlopen(request, timeout=10) as response:
+                models=json.load(response)['data']
+            if not any(item.get('id') == p['body']['model'] for item in models):
+                raise ValueError('configured model is not enabled for this client')
+        except Exception as error:
+            print(json.dumps({'error_type':'ModelAvailabilityError','message':type(error).__name__,'valid':False}, separators=(',',':')))
+            raise SystemExit(4)
     body_path=temporary_bytes(json.dumps(p['body'], separators=(',',':')).encode())
     response_path=temporary_bytes(b'')
     config='\n'.join([
@@ -192,7 +202,7 @@ try:
         function_arguments=json.loads(function_call.get('arguments','')) if isinstance(function_call,dict) else None
     except Exception:
         function_arguments=None
-    function_calling_native=(
+    function_call_valid=(
         isinstance(function_call,dict)
         and function_call.get('name') == 'gateway_probe'
         and bool(function_call.get('call_id'))
@@ -202,7 +212,7 @@ try:
         bool(decoded.get('id'))
         and isinstance(decoded.get('usage'), dict)
         and (p.get('adapter') != 'llmserver' or billing_confirmed)
-        and (p.get('adapter') != 'llmserver' or function_calling_native)
+        and function_call_valid
     )
     print(json.dumps({
         'http_status':status,
@@ -211,7 +221,8 @@ try:
         'response_id_present':bool(decoded.get('id')),
         'usage_present':isinstance(decoded.get('usage'), dict),
         'billing_confirmed':billing_confirmed if p.get('adapter') == 'llmserver' else None,
-        'function_calling_native':function_calling_native if p.get('adapter') == 'llmserver' else None,
+        'function_contract':'unified_v1',
+        'function_call_valid':function_call_valid,
         'billing_request_id':billing.get('request_id') if isinstance(billing,dict) else None,
         'billing_price_version':billing.get('price_version') if isinstance(billing,dict) else None,
         'billed_usd':(billing.get('charges') or {}).get('total') if isinstance(billing,dict) else None,
@@ -936,11 +947,23 @@ def prepared_birth(
                     },
                     "action_assistance": {
                         "profile": {"model": sol_model["id"], "reasoning_effort": "low"},
-                        "use": "one bounded implementation for precise commands, code, or tool steps after alice fixes the action target and content",
+                        "use": "complex reasoning, code, commands, or tool implementation when the main brain needs assistance; returns analysis or code for the main brain to adopt and enact",
+                        "context": "question and necessary material; implementation includes organ contracts; current self narrative only when explicitly requested",
                         "cost": model_cost(sol_model),
+                    },
+                    "local_reasoning": {
+                        "profile": {"model": SETTINGS["config"]["llm"]["models"]["luna"]["id"], "reasoning_effort": "none"},
+                        "use": "very simple local logic requested by the main brain; compact question and material, up to 200 output tokens",
+                        "context": "no automatic self narrative or personal memory",
+                        "cost": model_cost(SETTINGS["config"]["llm"]["models"]["luna"]),
                     },
                     "body_reflex": {
                         "implementation": "deterministic_kernel",
+                        "model_choice_required": False,
+                    },
+                    "organ_instinct": {
+                        "profile": {"model": SETTINGS["config"]["llm"]["models"]["luna"]["id"], "reasoning_effort": "none"},
+                        "use": "bounded local interpretation of ambiguous organ observations; shares the body resource ledger",
                         "model_choice_required": False,
                     },
                 },
@@ -1208,32 +1231,79 @@ def seal_generation_birth(current: dict[str, object]) -> None:
     save_current(current)
 
 
+def generation_deadline_unit(instance_id: str, planned_end: str) -> str:
+    unit_key = instance_id + "\x00" + planned_end
+    return "hominal-generation-end-" + hashlib.sha256(unit_key.encode("utf-8")).hexdigest()[:12]
+
+
+def deadline_timer_active(unit: str) -> bool:
+    observed = sudo(
+        f"systemctl is-active --quiet {shlex.quote(unit + '.timer')}",
+        check=False,
+        capture=True,
+    )
+    return observed.returncode == 0
+
+
 def schedule_generation_deadline(current: dict[str, object]) -> None:
-    if current.get("deadline_unit"):
-        return
     instance_id = str(current["instance_id"])
-    planned_end = parse_rfc3339(current["planned_end"])
+    planned_end_text = str(current["planned_end"])
+    planned_end = parse_rfc3339(planned_end_text)
     now = datetime.now(timezone.utc)
-    unit_key = instance_id + "\x00" + str(current["planned_end"])
-    unit = "hominal-generation-end-" + hashlib.sha256(unit_key.encode("utf-8")).hexdigest()[:12]
-    if planned_end <= now:
-        sudo(f"/usr/local/sbin/hominal-generation-stop {shlex.quote(instance_id)}")
-    elif sudo(f"systemctl status {shlex.quote(unit + '.timer')}", check=False, capture=True).returncode != 0:
-        calendar = planned_end.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f UTC")
+    unit = generation_deadline_unit(instance_id, planned_end_text)
+    recorded_unit = str(current.get("deadline_unit", ""))
+    intervention_kind = ""
+    if recorded_unit and recorded_unit != unit:
         sudo(
-            "systemd-run "
-            f"--unit={shlex.quote(unit)} --on-calendar={shlex.quote(calendar)} "
-            "--timer-property=AccuracySec=1s --property=Type=oneshot "
-            f"/usr/local/sbin/hominal-generation-stop {shlex.quote(instance_id)}"
+            f"systemctl stop {shlex.quote(recorded_unit + '.timer')} "
+            f"{shlex.quote(recorded_unit + '.service')}",
+            check=False,
+        )
+        intervention_kind = "planned_generation_deadline_replaced"
+    if planned_end <= now:
+        sudo(
+            f"/usr/local/sbin/hominal-generation-stop {shlex.quote(instance_id)}",
+            check=False,
+            timeout=210,
+        )
+        intervention_kind = intervention_kind or "planned_generation_deadline_elapsed"
+    elif not deadline_timer_active(unit):
+        # A previously recorded unit is not evidence that systemd still owns an
+        # armed timer. First restart an existing transient timer; when no such
+        # unit remains, recreate it from the same absolute wall-clock fact.
+        sudo(f"systemctl start {shlex.quote(unit + '.timer')}", check=False)
+        armed = deadline_timer_active(unit)
+        if not armed:
+            sudo(
+                f"systemctl reset-failed {shlex.quote(unit + '.timer')} "
+                f"{shlex.quote(unit + '.service')}",
+                check=False,
+            )
+            calendar = planned_end.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f UTC")
+            sudo(
+                "systemd-run "
+                f"--unit={shlex.quote(unit)} --on-calendar={shlex.quote(calendar)} "
+                "--timer-property=AccuracySec=1s --property=Type=oneshot "
+                f"/usr/local/sbin/hominal-generation-stop {shlex.quote(instance_id)}"
+            )
+            armed = deadline_timer_active(unit)
+        if not armed:
+            raise RuntimeError(f"generation deadline timer {unit}.timer is not armed")
+        intervention_kind = intervention_kind or (
+            "planned_generation_deadline_rearmed" if recorded_unit == unit
+            else "planned_generation_deadline"
         )
     current["deadline_unit"] = unit
-    current["deadline_scheduled_at"] = datetime.now(timezone.utc).isoformat()
-    current.setdefault("interventions", []).append({
-        "kind": "planned_generation_deadline",
-        "planned_end": current["planned_end"],
-        "clock": "wall_calendar",
-        "recorded_at": current["deadline_scheduled_at"],
-    })
+    verified_at = datetime.now(timezone.utc).isoformat()
+    current["deadline_verified_at"] = verified_at
+    if intervention_kind:
+        current["deadline_scheduled_at"] = verified_at
+        current.setdefault("interventions", []).append({
+            "kind": intervention_kind,
+            "planned_end": current["planned_end"],
+            "clock": "wall_calendar",
+            "recorded_at": verified_at,
+        })
     save_current(current)
 
 
@@ -1549,7 +1619,8 @@ out={
    'max_accumulated':max([float((t or {}).get('accumulated',0) or 0) for t in d.values()] or [0]),
    'max_attention_value':max([float((t or {}).get('attention_value',0) or 0) for t in d.values()] or [0])
  },
- 'experience_count':s.get('total_experiences',len(s.get('experiences') or [])), 'commitment_count':s.get('total_commitments',len(s.get('commitments') or [])),
+ 'memory_count':s.get('total_memories',s.get('total_experiences',len(s.get('memories') or []))),
+ 'experience_count':len(s.get('experiences') or []), 'commitment_count':s.get('total_commitments',len(s.get('commitments') or [])),
  'integrity_debt':s.get('integrity_debt'), 'self':s.get('self'),
  'concern_count':len(s.get('active_concerns') or []),
  'concern_resolution_counts':{k:sum(1 for c in (s.get('active_concerns') or []) if c.get('resolution')==k) for k in ('hold','resolved','released')},
@@ -1669,7 +1740,7 @@ def cmd_supervise(interval_seconds: int, unreachable_grace_seconds: int) -> None
                 "supervision "
                 f"time={snapshot['observed_at']} service={service or 'unknown'} "
                 f"pulse={runtime.get('pulse_id')} commitments={runtime.get('commitment_count')} "
-                f"experiences={runtime.get('experience_count')} queued={runtime.get('outbox', {}).get('queued')} "
+                f"memories={runtime.get('memory_count')} experiences={runtime.get('experience_count')} queued={runtime.get('outbox', {}).get('queued')} "
                 f"lease={runtime.get('lease_id') or '-'} "
                 f"in_focus={background.get('in_focus')} retry_wait={background.get('retry_wait')} "
                 f"model_wait={background.get('model_wait')} "
@@ -1690,11 +1761,19 @@ def cmd_supervise(interval_seconds: int, unreachable_grace_seconds: int) -> None
                     cmd_stop("planned_end")
                     print("supervision=planned_end_archived", flush=True)
                     return
-                if (now - planned_end).total_seconds() >= unreachable_grace_seconds:
-                    sudo(f"/usr/local/sbin/hominal-generation-stop {shlex.quote(instance_id)}", check=False)
-                    cmd_stop("planned_end")
-                    print("supervision=planned_end_forced_archive", flush=True)
-                    return
+                # The host is reachable and the shared absolute deadline is a
+                # fact, so waiting an unrelated network-grace interval only
+                # creates unbounded experimental drift. The stop helper owns the
+                # bounded causal drain and is idempotent; the supervisor is its
+                # independent second trigger when the timer failed to fire.
+                sudo(
+                    f"/usr/local/sbin/hominal-generation-stop {shlex.quote(instance_id)}",
+                    check=False,
+                    timeout=210,
+                )
+                cmd_stop("planned_end")
+                print("supervision=planned_end_forced_archive", flush=True)
+                return
 
             if service == "active":
                 inactive_count = 0
@@ -1845,7 +1924,10 @@ def cmd_inspect() -> None:
     instance_id = str(current["instance_id"])
     print("generation=" + json.dumps({
         key: current.get(key)
-        for key in ("kind", "instance_id", "sample_id", "t0", "planned_end", "birth_status", "deadline_unit")
+        for key in (
+            "kind", "instance_id", "sample_id", "t0", "planned_end",
+            "birth_status", "deadline_unit", "deadline_verified_at",
+        )
     }, ensure_ascii=False, sort_keys=True))
     print("state=" + json.dumps(safe_remote_state(instance_id), ensure_ascii=False, sort_keys=True))
     journal_path = f"/agent/lives/{instance_id}/journal/events.jsonl"
@@ -1854,7 +1936,8 @@ import json, sys
 wanted={
  'birth_orientation','generation_t0','mentor_received','mentor_queued','mentor_delivered',
  'aip_commit','action_committed','action_started','action_completed','action_result',
- 'experience_assimilated','concern_contribution','concern_contribution_refreshed','self_observed','self_model_difference','self_updated','concern_transition',
+ 'experience_assimilated','memory_assimilated','learning_committed','memory_recalled','organ_interpretation','organ_interpretation_unavailable',
+ 'concern_contribution','concern_contribution_refreshed','lived_recall','self_observed','self_model_difference','self_updated','concern_transition',
  'cognition_spend','cognition_failed','cognitive_resource_limited','cognitive_recovery_failed',
  'stopped'
 }
@@ -1886,7 +1969,16 @@ def cmd_browser_check() -> None:
     instance_id = str(current["instance_id"])
     root = f"/agent/lives/{instance_id}"
     helper = f"{root}/body/bin/hominal-browser"
-    environment = f"HOMINAL_INSTANCE_ROOT={shlex.quote(root)}"
+    # The birth probe deliberately waits for the authenticated X timeline and
+    # then verifies a second public surface in one causal browser call. Its
+    # explicit waits already consume most of the organ's ordinary 30-second
+    # action budget, especially after a cold reboot. Give this Lab-only
+    # acceptance action one matching end-to-end deadline; Alice's ordinary
+    # browser actions keep their normal bounded timeout.
+    environment = (
+        f"HOMINAL_INSTANCE_ROOT={shlex.quote(root)} "
+        "HOMINAL_BROWSER_TIMEOUT_MS=90000"
+    )
     listed = sudo(f"{environment} {shlex.quote(helper)} list", capture=True, timeout=60)
     tools = json.loads(listed.stdout).get("tools", [])
     names = {tool.get("name") for tool in tools}
@@ -1943,7 +2035,7 @@ def cmd_browser_check() -> None:
         f"{environment} {shlex.quote(helper)} call browser_run_code_unsafe "
         + shlex.quote(json.dumps({"code": x_probe})),
         capture=True,
-        timeout=90,
+        timeout=100,
     )
     evaluation_text = "\n".join(
         item.get("text", "")

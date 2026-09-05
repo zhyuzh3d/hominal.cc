@@ -126,9 +126,11 @@ def main() -> int:
         if runtime.get("initial_profile") != {"model": "terra", "reasoning_effort": "none"}:
             errors.append("xconfig initial cognitive profile must be terra/none")
         models = llm.get("models", {})
-        expected_models = {"luna": "codex-luna", "terra": "codex-terra", "sol": "codex-sol"}
-        if {name: value.get("id") for name, value in models.items()} != expected_models:
-            errors.append("xconfig cognitive model catalog must contain only luna, terra and sol")
+        if set(models) != {"luna", "terra", "sol"} or any(not value.get("id") for value in models.values()):
+            errors.append("xconfig requires luna, terra and sol roles with actual model IDs")
+        for role, effort in (("luna", "none"), ("terra", "none"), ("sol", "low")):
+            if effort not in models.get(role, {}).get("supported_reasoning_efforts", []):
+                errors.append(f"xconfig {role} role must support {effort}")
         provider_name = llm.get("provider")
         provider = llm.get("providers", {}).get(provider_name, {})
         if provider_name != "llmserver" or provider.get("adapter") != "llmserver":

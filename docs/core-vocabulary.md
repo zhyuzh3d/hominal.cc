@@ -956,6 +956,16 @@ EP 不是强制状态机。它可以跨多个 Cognitive Pulse 和 Attention Puls
 
 ## 八、记忆、能力、身份与进化
 
+### Stage 10.3 的记忆与经验用语
+
+Record 是收到的观察、提交、操作和结果的过程记录；其中的来源陈述与主体解释仍各有归属。Output 是 Alice 创作或保存的产物。Memory 是她对具体经历、感受、思考或回忆的片段化理解；Experience 是从这些记忆形成、带适用情境且可修订的判断。Experience 通过 evidence 引用 Memory；纠正 Memory 时新增解释并关联旧条目。Narrative Self 组织跨时间的自我认识。
+
+10.3 将旧代码中带 lesson 的 Experience 经历条目迁移为 Memory，原 lesson 保留为以该记忆为依据的初始 Experience。当前代码的 `reality_updates` 结算行动结果，`memory_updates` 保存可选片段，`experience_updates` 修订条件化经验；名称相同的旧版 `experience_updates` 属于历史协议。三者由同一个主脑提交，形成同一认知循环的快状态与慢积累。
+
+近期工作集有界，长期记忆通过既有 Journal 重建的索引取回。保存、检索命中和数量增长分别只是工程事实；个人历史改变了后续理解或行动，才是生长证据。
+
+10.3 首轮发现重复投影后，当前 Stage 10 模型协议的 Reality 更新退出旧 lesson/method 字段：新判断与新方法统一写入 Experience。旧归档及其迁移读取保留；继续把两套同义字段都交给主脑不属于兼容需求。
+
 ### Memory Structure（MS）
 
 中文名称：记忆结构。

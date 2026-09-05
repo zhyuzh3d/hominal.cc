@@ -101,53 +101,59 @@ type Seed struct {
 }
 
 type State struct {
-	Schema              string                     `json:"schema"`
-	InstanceID          string                     `json:"instance_id"`
-	Stage               int                        `json:"stage"`
-	GenerationKind      string                     `json:"generation_kind"`
-	BirthBriefEnteredAt string                     `json:"birth_brief_entered_at,omitempty"`
-	T0                  string                     `json:"t0,omitempty"`
-	SampleID            string                     `json:"sample_id,omitempty"`
-	PlannedEnd          string                     `json:"planned_end,omitempty"`
-	Revision            uint64                     `json:"revision"`
-	PulseID             uint64                     `json:"pulse_id"`
-	EventSeq            uint64                     `json:"event_seq"`
-	ReadyAt             string                     `json:"ready_at"`
-	LastPulseAt         string                     `json:"last_pulse_at"`
-	LastAttentionAt     string                     `json:"last_attention_at,omitempty"`
-	Body                BodySnapshot               `json:"body"`
-	Perception          map[string]PerceptualTrace `json:"perception,omitempty"`
-	DifferenceField     map[string]DifferenceTrace `json:"difference_field,omitempty"`
-	Background          []Event                    `json:"background,omitempty"`
-	Lease               *Lease                     `json:"lease,omitempty"`
-	PendingAction       *ActionState               `json:"pending_action,omitempty"`
-	Mentor              MentorState                `json:"mentor"`
-	Usage               []UsageRecord              `json:"usage,omitempty"`
-	CognitiveResource   CognitiveResourceState     `json:"cognitive_resource"`
-	AffectiveState      AffectiveState             `json:"affective_state"`
-	ValueField          LifeValueField             `json:"life_value_field"`
-	SelfModelTension    float64                    `json:"self_model_tension"`
-	Concerns            []Concern                  `json:"active_concerns,omitempty"`
-	CurrentFocus        string                     `json:"current_focus,omitempty"`
-	Commitments         []ActionCommitment         `json:"commitments,omitempty"`
-	Experiences         []Experience               `json:"experiences,omitempty"`
-	TotalCommitments    uint64                     `json:"total_commitments"`
-	TotalExperiences    uint64                     `json:"total_experiences"`
-	IntegrityDebt       float64                    `json:"integrity_debt"`
-	IntegrityMirrorOpen bool                       `json:"integrity_mirror_open,omitempty"`
-	Self                SelfState                  `json:"self"`
+	Schema              string                          `json:"schema"`
+	InstanceID          string                          `json:"instance_id"`
+	Stage               int                             `json:"stage"`
+	GenerationKind      string                          `json:"generation_kind"`
+	BirthBriefEnteredAt string                          `json:"birth_brief_entered_at,omitempty"`
+	T0                  string                          `json:"t0,omitempty"`
+	SampleID            string                          `json:"sample_id,omitempty"`
+	PlannedEnd          string                          `json:"planned_end,omitempty"`
+	Revision            uint64                          `json:"revision"`
+	PulseID             uint64                          `json:"pulse_id"`
+	EventSeq            uint64                          `json:"event_seq"`
+	ReadyAt             string                          `json:"ready_at"`
+	LastPulseAt         string                          `json:"last_pulse_at"`
+	LastAttentionAt     string                          `json:"last_attention_at,omitempty"`
+	Body                BodySnapshot                    `json:"body"`
+	Perception          map[string]PerceptualTrace      `json:"perception,omitempty"`
+	DifferenceField     map[string]DifferenceTrace      `json:"difference_field,omitempty"`
+	Background          []Event                         `json:"background,omitempty"`
+	Lease               *Lease                          `json:"lease,omitempty"`
+	PendingAction       *ActionState                    `json:"pending_action,omitempty"`
+	Mentor              MentorState                     `json:"mentor"`
+	Usage               []UsageRecord                   `json:"usage,omitempty"`
+	ModelReservations   map[string]PendingModelCall     `json:"model_reservations,omitempty"`
+	CognitiveResource   CognitiveResourceState          `json:"cognitive_resource"`
+	AffectiveState      AffectiveState                  `json:"affective_state"`
+	ValueField          LifeValueField                  `json:"life_value_field"`
+	ValueAffordances    map[string]ValueAffordanceTrace `json:"value_affordances,omitempty"`
+	SelfModelTension    float64                         `json:"self_model_tension"`
+	Concerns            []Concern                       `json:"active_concerns,omitempty"`
+	CurrentFocus        string                          `json:"current_focus,omitempty"`
+	Commitments         []ActionCommitment              `json:"commitments,omitempty"`
+	Memories            []Memory                        `json:"memories,omitempty"`
+	LearningVersion     int                             `json:"learning_version,omitempty"`
+	Experiences         []Experience                    `json:"experiences,omitempty"`
+	LearningFeedback    string                          `json:"learning_feedback,omitempty"`
+	TotalCommitments    uint64                          `json:"total_commitments"`
+	TotalMemories       uint64                          `json:"total_memories"`
+	IntegrityDebt       float64                         `json:"integrity_debt"`
+	IntegrityMirrorOpen bool                            `json:"integrity_mirror_open,omitempty"`
+	Self                SelfState                       `json:"self"`
 }
 
 type PerceptualTrace struct {
-	OrganID          string             `json:"organ_id"`
-	SurfaceID        string             `json:"surface_id"`
-	Digest           string             `json:"digest"`
-	ObservedAt       string             `json:"observed_at"`
-	Context          []string           `json:"context,omitempty"`
-	Pending          []PerceptualObject `json:"pending,omitempty"`
-	Seen             []string           `json:"seen,omitempty"`
-	ExhaustedContext string             `json:"exhausted_context,omitempty"`
-	ExhaustedAt      string             `json:"exhausted_at,omitempty"`
+	OrganID            string             `json:"organ_id"`
+	SurfaceID          string             `json:"surface_id"`
+	Digest             string             `json:"digest"`
+	ObservedAt         string             `json:"observed_at"`
+	Context            []string           `json:"context,omitempty"`
+	Pending            []PerceptualObject `json:"pending,omitempty"`
+	Seen               []string           `json:"seen,omitempty"`
+	ExhaustedContext   string             `json:"exhausted_context,omitempty"`
+	ExhaustedAt        string             `json:"exhausted_at,omitempty"`
+	SettledByAttention bool               `json:"settled_by_attention,omitempty"`
 }
 
 // DifferenceTrace is the compact pre-conscious memory of one stable signal
@@ -155,15 +161,29 @@ type PerceptualTrace struct {
 // worth Alice's scarce global attention. It never stores meaning, goals or a
 // second narrative.
 type DifferenceTrace struct {
-	Key                string  `json:"key"`
-	Observations       uint64  `json:"observations"`
-	LastDigest         string  `json:"last_digest,omitempty"`
-	LastObservedAt     string  `json:"last_observed_at,omitempty"`
-	ExpectedChangeRate float64 `json:"expected_change_rate"`
-	Accumulated        float64 `json:"accumulated"`
-	AttentionValue     float64 `json:"attention_value"`
-	LastPredictionGap  float64 `json:"last_prediction_gap"`
-	LastIgnitedAt      string  `json:"last_ignited_at,omitempty"`
+	Operation          *OperationCondition `json:"operation_condition,omitempty"`
+	Key                string              `json:"key"`
+	Observations       uint64              `json:"observations"`
+	LastDigest         string              `json:"last_digest,omitempty"`
+	LastContent        string              `json:"last_content,omitempty"`
+	LastObservedAt     string              `json:"last_observed_at,omitempty"`
+	ExpectedChangeRate float64             `json:"expected_change_rate"`
+	Accumulated        float64             `json:"accumulated"`
+	AttentionValue     float64             `json:"attention_value"`
+	LastPredictionGap  float64             `json:"last_prediction_gap"`
+	LastIgnitedAt      string              `json:"last_ignited_at,omitempty"`
+}
+
+// Mechanical state, not a personal judgment. It shares the bounded difference
+// field and is updated only by an actual outcome of this exact organ operation.
+type OperationCondition struct {
+	OrganID             string `json:"organ_id"`
+	Operation           string `json:"operation"`
+	Status              string `json:"status"`
+	ConsecutiveFailures int    `json:"consecutive_failures"` // Failed or unknown outcomes; Status retains the distinction.
+	FailureSince        string `json:"failure_since,omitempty"`
+	LastError           string `json:"last_error,omitempty"`
+	ObservedAt          string `json:"observed_at"`
 }
 
 type PerceptualObject struct {
@@ -183,6 +203,7 @@ type BodySnapshot struct {
 	CognitiveResourceBand          string                   `json:"cognitive_resource_band"`
 	CognitivePriceTableVersion     string                   `json:"cognitive_price_table_version"`
 	NetworkAvailable               bool                     `json:"network_available"`
+	NetworkProbe                   json.RawMessage          `json:"network_probe,omitempty"`
 	DesktopAvailable               bool                     `json:"desktop_available"`
 	Organs                         map[string]OrganSnapshot `json:"organs,omitempty"`
 	WechatRunning                  bool                     `json:"wechat_running"`
@@ -190,13 +211,14 @@ type BodySnapshot struct {
 }
 
 type OrganSnapshot struct {
-	Name         string   `json:"name"`
-	Command      string   `json:"command"`
-	Capabilities []string `json:"capabilities,omitempty"`
-	Operations   []string `json:"operations,omitempty"`
-	Guidance     string   `json:"guidance,omitempty"`
-	Status       string   `json:"status"`
-	Accepting    bool     `json:"accepting"`
+	Name            string            `json:"name"`
+	Command         string            `json:"command"`
+	Capabilities    []string          `json:"capabilities,omitempty"`
+	Operations      []string          `json:"operations,omitempty"`
+	OperationInputs map[string]string `json:"operation_inputs,omitempty"`
+	Guidance        string            `json:"guidance,omitempty"`
+	Status          string            `json:"status"`
+	Accepting       bool              `json:"accepting"`
 }
 
 type Event struct {
@@ -235,17 +257,22 @@ type Lease struct {
 }
 
 type ActionState struct {
-	ID           string `json:"id"`
-	LeaseID      string `json:"lease_id"`
-	CommitmentID string `json:"commitment_id,omitempty"`
-	Kind         string `json:"kind"`
-	OrganID      string `json:"organ_id,omitempty"`
-	Operation    string `json:"operation,omitempty"`
-	Request      string `json:"request"`
-	Status       string `json:"status"`
-	StartedAt    string `json:"started_at"`
-	EndedAt      string `json:"ended_at,omitempty"`
-	Result       string `json:"result,omitempty"`
+	ID                          string `json:"id"`
+	LeaseID                     string `json:"lease_id"`
+	CommitmentID                string `json:"commitment_id,omitempty"`
+	Kind                        string `json:"kind"`
+	OrganID                     string `json:"organ_id,omitempty"`
+	Operation                   string `json:"operation,omitempty"`
+	Effect                      string `json:"effect,omitempty"`
+	Request                     string `json:"request"`
+	Status                      string `json:"status"`
+	StartedAt                   string `json:"started_at"`
+	EndedAt                     string `json:"ended_at,omitempty"`
+	Result                      string `json:"result,omitempty"`
+	ObservedSurfaceID           string `json:"observed_surface_id,omitempty"`
+	ObservedDigest              string `json:"observed_digest,omitempty"`
+	ImplementationFailureStreak int    `json:"implementation_failure_streak,omitempty"`
+	ActionAssistanceAvailable   bool   `json:"action_assistance_available,omitempty"`
 }
 
 type MentorState struct {
@@ -265,6 +292,7 @@ type MentorMessage struct {
 }
 
 type UsageRecord struct {
+	CallID            string `json:"call_id,omitempty"`
 	Time              string `json:"time"`
 	LeaseID           string `json:"lease_id"`
 	AttentionPulseID  uint64 `json:"attention_pulse_id"`
@@ -313,7 +341,7 @@ type NextCognitiveProfile struct {
 type ProtectedModel struct {
 	Until           string `json:"until"`
 	Reason          string `json:"reason"`
-	RecoveryOffered bool   `json:"recovery_offered,omitempty"`
+	RecoveryBlocked bool   `json:"recovery_blocked,omitempty"`
 }
 
 type ModelFailureFact struct {
@@ -408,6 +436,7 @@ type CommandReply struct {
 }
 
 type CognitiveRequest struct {
+	CallID        string
 	Lease         Lease
 	Stage         int
 	Focus         Event
@@ -417,14 +446,22 @@ type CognitiveRequest struct {
 	Profile       CognitiveProfile
 	VariationBias string
 	VariationSeed string
+	Recall        RecallBundle
 }
 
 type CognitiveResult struct {
-	LeaseID string
-	FocusID string
-	Text    string
-	Stage4  *CognitiveCommit
-	Error   error
+	LeaseID    string
+	FocusID    string
+	Text       string
+	Stage4     *CognitiveCommit
+	Assistance *CognitiveAssistanceResult
+	Error      error
+}
+
+// Assistance supplies analysis to the one main consciousness, never a second
+// cognitive commit or an independently executable action.
+type CognitiveAssistanceResult struct {
+	Answer string `json:"answer"`
 }
 
 type CandidateAppraisal struct {
@@ -465,7 +502,10 @@ type CognitiveCommit struct {
 	ThoughtThread              string                  `json:"thought_thread"`
 	Action                     CognitiveAction         `json:"action"`
 	ResourceChoice             CognitiveResourceChoice `json:"resource_choice"`
-	ExperienceUpdates          []ExperienceUpdate      `json:"experience_updates"`
+	RealityUpdates             []RealityUpdate         `json:"reality_updates"`
+	MemoryUpdates              []MemoryUpdate          `json:"memory_updates,omitempty"`
+	ExperienceUpdates          []ExperienceUpdate      `json:"experience_updates,omitempty"`
+	RecallQuery                string                  `json:"recall_query,omitempty"`
 	NarrativeUpdate            string                  `json:"narrative_update"`
 	ValueOrientationUpdate     LifeValueVector         `json:"value_orientation_update"`
 }
@@ -486,7 +526,7 @@ type ActionCommitment struct {
 	FormedAt          string           `json:"formed_at"`
 	Status            string           `json:"status"`
 	RealityEventID    string           `json:"reality_event_id,omitempty"`
-	ExperienceID      string           `json:"experience_id,omitempty"`
+	MemoryID          string           `json:"memory_id,omitempty"`
 }
 
 type LifeValueVector struct {
@@ -515,7 +555,19 @@ type LifeValueField struct {
 	UpdatedAt   string          `json:"updated_at,omitempty"`
 }
 
-type ExperienceUpdate struct {
+// ValueAffordanceTrace is the small refractory memory of one real doorway.
+// Meaning stays with Alice; this trace only remembers when encounters occurred
+// and how repeatedly the same doorway has recently recruited her attention.
+type ValueAffordanceTrace struct {
+	LastPresentedAt       string `json:"last_presented_at,omitempty"`
+	LastSettledAt         string `json:"last_settled_at,omitempty"`
+	ActiveConcernID       string `json:"active_concern_id,omitempty"`
+	DismissedStreak       int    `json:"dismissed_streak,omitempty"`
+	EncounterStreak       int    `json:"encounter_streak,omitempty"`
+	LastEngagementSeconds int    `json:"last_engagement_seconds,omitempty"`
+}
+
+type RealityUpdate struct {
 	CommitmentID         string     `json:"commitment_id"`
 	PredictionDifference float64    `json:"prediction_difference"`
 	Meaning              string     `json:"meaning"`
@@ -527,7 +579,7 @@ type ExperienceUpdate struct {
 	MethodSlot           int        `json:"method_slot"`
 }
 
-type Experience struct {
+type Memory struct {
 	ID                   string     `json:"id"`
 	CommitmentID         string     `json:"commitment_id"`
 	FocusID              string     `json:"focus_id"`
@@ -544,6 +596,41 @@ type Experience struct {
 	Significance         string     `json:"significance"`
 	MethodUpdate         string     `json:"method_update,omitempty"`
 	MethodSlot           int        `json:"method_slot,omitempty"`
+	Origin               string     `json:"origin,omitempty"`
+	SourceRefs           []string   `json:"source_refs,omitempty"`
+	Keywords             []string   `json:"keywords,omitempty"`
+	Corrects             string     `json:"corrects,omitempty"`
+}
+
+type MemoryUpdate struct {
+	Content    string   `json:"content"`
+	Origin     string   `json:"origin"`
+	Keywords   []string `json:"keywords"`
+	SourceRefs []string `json:"source_refs"`
+	Corrects   string   `json:"corrects"`
+}
+
+type ExperienceUpdate struct {
+	ID       string   `json:"id"`
+	Judgment string   `json:"judgment"`
+	Context  string   `json:"context"`
+	Evidence []string `json:"evidence"`
+}
+
+type Experience struct {
+	ID        string   `json:"id"`
+	Judgment  string   `json:"judgment"`
+	Context   string   `json:"context"`
+	Evidence  []string `json:"evidence"`
+	UpdatedAt string   `json:"updated_at"`
+}
+
+type RecallBundle struct {
+	Memories           []Memory     `json:"memories,omitempty"`
+	Experiences        []Experience `json:"experiences,omitempty"`
+	Query              string       `json:"query,omitempty"`
+	Seed               string       `json:"seed,omitempty"`
+	DeferredReferences []string     `json:"deferred_references,omitempty"`
 }
 
 type SelfState struct {
@@ -557,9 +644,12 @@ type CognitiveResourceChoice struct {
 	Model           string `json:"model"`
 	ReasoningEffort string `json:"reasoning_effort"`
 	Purpose         string `json:"purpose"`
+	Task            string `json:"task,omitempty"`
+	IncludeSelf     bool   `json:"include_self,omitempty"`
 }
 
 type WorkerNotice struct {
+	CallID  string
 	LeaseID string
 	Kind    string
 	Payload any
@@ -572,6 +662,11 @@ type ModelReservation struct {
 	ReservedMicrousd     int64            `json:"reserved_microusd"`
 }
 
+type PendingModelCall struct {
+	Owner       Lease            `json:"owner"`
+	Reservation ModelReservation `json:"reservation"`
+}
+
 type OrganActionRequest struct {
 	ActionID       string
 	OrganID        string
@@ -581,9 +676,11 @@ type OrganActionRequest struct {
 }
 
 type ActionResultNotice struct {
-	ActionID string
-	Status   string
-	Result   string
+	ActionID    string
+	Status      string
+	Effect      string
+	Result      string
+	Observation *perceptualObservation
 }
 
 type MentorActionRequest struct {
@@ -595,6 +692,7 @@ type MentorActionRequest struct {
 type NoticeAck struct {
 	Accepted bool
 	Output   string
+	Failure  *ModelFailureFact
 }
 
 func nowUTC() string {

@@ -18,6 +18,19 @@ const (
 	defaultAttentionRevisitSeconds = 300
 	defaultConcernContextLimit     = 5
 	lifeValueCompetitionBand       = 0.06
+	recentLivedContextWindow       = 4
+	livedContextPoolLimit          = 16
+	// Ordinary refractory time prevents one recently settled doorway from
+	// monopolising attention.  It must not make every real doorway disappear
+	// while life pressure remains high, so after three truly quiet body windows
+	// the least refractory doorway in a value direction may compete again.
+	lifeContinuityFallbackWindows = 3
+	// A value remains embodied before it becomes conscious.  Requiring half of
+	// the ordinary attention threshold keeps weak post-satiation attraction in
+	// the fast dynamics layer instead of buying a main-model thought every idle
+	// interval, while still letting a clearly unmet direction meet reality well
+	// before it becomes an emergency.
+	lifeValueConsciousThresholdFraction = 0.5
 )
 
 func (r *Runtime) advanceDynamics(elapsed time.Duration) error {
@@ -113,18 +126,29 @@ func explorationDominatesValuePressure(field LifeValueField) bool {
 }
 
 type lifeValueSignalPayload struct {
-	Direction     string  `json:"value_direction"`
-	AffordanceKey string  `json:"affordance_key"`
-	Surface       string  `json:"surface"`
-	SelectionSeed string  `json:"selection_seed,omitempty"`
-	Orientation   float64 `json:"orientation"`
-	Activation    float64 `json:"activation"`
-	Satiation     float64 `json:"satiation"`
-	Pressure      float64 `json:"pressure"`
+	Direction         string  `json:"value_direction"`
+	AffordanceKey     string  `json:"affordance_key"`
+	Surface           string  `json:"surface"`
+	SelectionSeed     string  `json:"selection_seed,omitempty"`
+	ContextMemoryID   string  `json:"context_memory_id,omitempty"`
+	ContextMeaning    string  `json:"context_meaning,omitempty"`
+	ContextObservedAt string  `json:"context_observed_at,omitempty"`
+	ContextOrigin     string  `json:"context_origin,omitempty"`
+	Orientation       float64 `json:"orientation"`
+	Activation        float64 `json:"activation"`
+	Satiation         float64 `json:"satiation"`
+	Pressure          float64 `json:"pressure"`
+}
+
+type livedRecallPayload struct {
+	MemoryID   string `json:"memory_id"`
+	Meaning    string `json:"meaning"`
+	Lesson     string `json:"lesson,omitempty"`
+	ObservedAt string `json:"memoryd_at,omitempty"`
 }
 
 func (r *Runtime) maybeEmitLifeValueSignal() (bool, error) {
-	if r.attentionCandidateActive() || r.hasUnassimilatedCommitment() {
+	if r.attentionCandidateActive() || r.hasCommitmentAwaitingAssimilation() {
 		return false, nil
 	}
 	cooldown := r.config.Dynamics.AttentionMaximumIdleSeconds
@@ -145,12 +169,28 @@ func (r *Runtime) maybeEmitLifeValueSignal() (bool, error) {
 		available = append(available, value)
 		freshByDirection[value.Name] = fresh
 	}
-	// A digital life has no bodily sleep requirement. Value pressure still
-	// determines what is likely to matter, but it no longer decides whether life
-	// exists at all: after one bounded quiet interval the body presents a real
-	// available surface and Alice may adopt or release it. This keeps continuous
-	// attention without manufacturing an action obligation.
-	eligible := competitiveLifeValues(available, 0)
+	// Habituation is negative feedback, not a terminal state.  If every real
+	// doorway is cooling while the main stream has remained quiet for several
+	// body windows, let each value direction offer only its least refractory
+	// doorway.  The value field still chooses the direction, Difference still
+	// gates attention, and Alice still decides meaning and action.
+	if len(available) == 0 && r.lifeContinuityFallbackDue(now) {
+		for _, value := range namedLifeValuePressures(r.state.ValueField) {
+			revisitable := r.leastRefractoryLifeValueAffordances(value.Name, now)
+			if len(revisitable) == 0 {
+				continue
+			}
+			available = append(available, value)
+			freshByDirection[value.Name] = revisitable
+		}
+	}
+	// Pulses, body sensing and value accumulation continue below consciousness.
+	// The expensive main stream is recruited only when at least one available
+	// direction has developed material unmet pressure.  Otherwise a recently
+	// satisfied life repeatedly receives the same doorway merely to decline it.
+	// This boundary is independent of any particular tool or semantic topic.
+	consciousThreshold := r.config.Dynamics.AttentionThreshold * lifeValueConsciousThresholdFraction
+	eligible := competitiveLifeValues(available, consciousThreshold)
 	if len(eligible) == 0 {
 		return false, nil
 	}
@@ -175,6 +215,7 @@ func (r *Runtime) maybeEmitLifeValueSignal() (bool, error) {
 		}
 	}
 	selectedAffordance := affordances[int(digest[1])%len(affordances)]
+	livedContext := r.selectLivedContext(seed, selectedAffordance.Key)
 	payload := lifeValueSignalPayload{
 		Direction:     selected.Name,
 		AffordanceKey: selectedAffordance.Key,
@@ -185,26 +226,172 @@ func (r *Runtime) maybeEmitLifeValueSignal() (bool, error) {
 		Satiation:     lifeValueByName(r.state.ValueField.Satiation, selected.Name),
 		Pressure:      selected.Pressure,
 	}
+	if livedContext != nil {
+		payload.ContextMemoryID = livedContext.ID
+		payload.ContextMeaning = truncate(livedContext.Meaning, 480)
+		payload.ContextObservedAt = livedContext.ObservedAt
+		payload.ContextOrigin = livedContext.Origin
+	}
+	quotedContext := ""
+	if livedContext != nil {
+		quotedContext = datedMemoryCue(*livedContext)
+	}
 	encoded, _ := json.Marshal(payload)
-	return true, r.addEvent(
+	admitted, err := r.addEventWithAdmission(
 		"value_signal",
 		"endogenous",
-		lifeValueSignalSummary(selected.Name, selectedAffordance.Surface),
+		lifeValueSignalSummary(selected.Name, selectedAffordance.Surface, quotedContext),
 		"value:"+selected.Name,
 		encoded,
 		true,
 	)
+	if err != nil {
+		return false, err
+	}
+	// Refractory time starts only after this doorway actually entered Alice's
+	// attention.  Previously, a sub-threshold pulse silently cooled its surface;
+	// after several such invisible pulses every affordance could become
+	// unavailable and the main stream went dark despite strong living pressure.
+	if admitted {
+		r.recordValueAffordancePresentation(selectedAffordance.Key, now)
+	}
+	return admitted, nil
+}
+
+func (r *Runtime) selectLivedContext(seed, affordanceKey string) *Memory {
+	avoid := r.recentLivedContextIDs(recentLivedContextWindow)
+	candidates := make([]*Memory, 0, livedContextPoolLimit)
+	for index := len(r.state.Memories) - 1; index >= 0 && len(candidates) < livedContextPoolLimit; index-- {
+		memory := &r.state.Memories[index]
+		if strings.TrimSpace(memory.Meaning) == "" || avoid[memory.ID] {
+			continue
+		}
+		candidates = append(candidates, memory)
+	}
+	if len(candidates) == 0 {
+		for index := len(r.state.Memories) - 1; index >= 0 && len(candidates) < livedContextPoolLimit; index-- {
+			memory := &r.state.Memories[index]
+			if strings.TrimSpace(memory.Meaning) != "" {
+				candidates = append(candidates, memory)
+			}
+		}
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+	// Prefer a lived object from outside the doorway's own modality. This is a
+	// general cross-modal association rule: a channel should carry life content,
+	// not recursively make itself the only subject merely because it is open.
+	targetDomain := affordanceDomain(affordanceKey)
+	if targetDomain != "" {
+		crossModal := make([]*Memory, 0, len(candidates))
+		for _, memory := range candidates {
+			if memoryDomain(*memory) != targetDomain {
+				crossModal = append(crossModal, memory)
+			}
+		}
+		if len(crossModal) > 0 {
+			candidates = crossModal
+		}
+	}
+	digest := sha256.Sum256([]byte(seed))
+	return candidates[int(digest[2])%len(candidates)]
+}
+
+func (r *Runtime) recentLivedContextIDs(limit int) map[string]bool {
+	result := make(map[string]bool, limit)
+	for index := len(r.state.Background) - 1; index >= 0 && len(result) < limit; index-- {
+		event := r.state.Background[index]
+		switch event.Kind {
+		case "lived_recall":
+			var payload livedRecallPayload
+			if json.Unmarshal(event.Payload, &payload) == nil && payload.MemoryID != "" {
+				result[payload.MemoryID] = true
+			}
+		case "value_signal":
+			var payload lifeValueSignalPayload
+			if json.Unmarshal(event.Payload, &payload) == nil && payload.ContextMemoryID != "" {
+				result[payload.ContextMemoryID] = true
+			}
+		}
+	}
+	return result
+}
+
+func affordanceDomain(key string) string {
+	switch key {
+	case "mentor_channel":
+		return "mentor"
+	case "x_social", "public_web":
+		return "browser"
+	case "wechat":
+		return "desktop_ui"
+	default:
+		return ""
+	}
+}
+
+func memoryDomain(memory Memory) string {
+	if memory.ActionKind == "mentor_send" {
+		return "mentor"
+	}
+	if memory.ActionKind != "organ_action" {
+		return memory.ActionKind
+	}
+	var request struct {
+		OrganID string `json:"organ_id"`
+	}
+	if json.Unmarshal([]byte(memory.EnactedRequest), &request) == nil {
+		return request.OrganID
+	}
+	return "organ"
 }
 
 func (r *Runtime) freshLifeValueAffordances(direction string, now time.Time) []lifeValueAffordance {
-	base := time.Duration(r.perceptualReorientationSeconds()) * time.Second
 	fresh := make([]lifeValueAffordance, 0)
 	for _, affordance := range r.lifeValueAffordances(direction) {
-		if !r.lifeValueAffordanceHabituated(affordance.Key, now, base) {
+		if !r.lifeValueAffordanceHabituated(affordance.Key, now) {
 			fresh = append(fresh, affordance)
 		}
 	}
 	return fresh
+}
+
+func (r *Runtime) lifeContinuityFallbackDue(now time.Time) bool {
+	idle := r.config.Dynamics.AttentionMaximumIdleSeconds
+	if idle <= 0 {
+		idle = 10
+	}
+	quiet, ok := r.attentionQuietDuration(now)
+	return ok && quiet >= time.Duration(lifeContinuityFallbackWindows*idle)*time.Second
+}
+
+// leastRefractoryLifeValueAffordances preserves adaptive satiation while
+// preventing a collection of independent cooldowns from becoming a global
+// off-switch. Resources are reusable possibilities, not the concrete objects
+// held by Concerns. Action exclusivity and causal settlement are enforced at
+// the Commitment boundary; presenting a resource does not create either one.
+func (r *Runtime) leastRefractoryLifeValueAffordances(direction string, now time.Time) []lifeValueAffordance {
+	selected := make([]lifeValueAffordance, 0, 1)
+	var shortest time.Duration
+	for _, affordance := range r.lifeValueAffordances(direction) {
+		remaining := r.lifeValueAffordanceRefractoryRemaining(affordance.Key, now)
+		if len(selected) == 0 || remaining < shortest {
+			selected = []lifeValueAffordance{affordance}
+			shortest = remaining
+		} else if remaining == shortest {
+			selected = append(selected, affordance)
+		}
+	}
+	return selected
+}
+
+func (r *Runtime) attentionQuietDuration(now time.Time) (time.Duration, bool) {
+	last, err := time.Parse(time.RFC3339Nano, r.state.LastAttentionAt)
+	if err != nil || now.Before(last) {
+		return 0, false
+	}
+	return now.Sub(last), true
 }
 
 // competitiveLifeValues opens attention only after at least one direction has
@@ -246,21 +433,39 @@ func supportsLifeValue(affordance lifeValueAffordance, direction string) bool {
 }
 
 func (r *Runtime) lifeValueAffordances(direction string) []lifeValueAffordance {
-	available := []lifeValueAffordance{
-		{
-			Key: "mentor_channel", Surface: "可以交流、讨论、分享或倾诉的导师通道",
-			Supports: []string{"vitality", "relatedness"},
-		},
+	available := make([]lifeValueAffordance, 0, 5)
+	// An unread message preserves its own relationship tension; it does not
+	// remove the reusable channel after the send has already completed.
+	available = append(available, lifeValueAffordance{
+		Key: "mentor_channel", Surface: "可以交流、讨论、分享或倾诉的导师通道",
+		// A reciprocal person is the direct doorway for relatedness.  Conversation
+		// may later become vivid or enjoyable and the resulting Memory can
+		// satiate vitality too, but generic vitality pressure must not manufacture
+		// another request for contact.  Giving one stable surface two independent
+		// recruitment drives made the same relational state return every few
+		// minutes even after both Alice and the mentor had already understood it.
+		Supports: []string{"relatedness"},
+	})
+	if r.hasGenerativeLivedMaterial() {
+		// A real Memory is material, not an empty tool or an experimenter
+		// task. It gives agency, vitality and contribution a doorway through which
+		// Alice may understand, express, create or leave the material alone.
+		available = append(available, lifeValueAffordance{
+			Key: "lived_material", Surface: "你近期亲历并保存的 Memory、方法与当前自我理解",
+			Supports: []string{"agency", "vitality", "contribution"},
+		})
 	}
 	if bodyHasOrganCapability(r.state.Body, "public_web") {
+		// Concrete public content can meet exploration, vitality or relatedness.
+		// The account's empty composer is an effector, not a life object: Alice
+		// always knows it is available through body capabilities and may use it
+		// once some memory, relationship or thought has produced meaning to
+		// express. Presenting the blank tool as contribution pressure makes the
+		// tool manufacture its own purpose and converges on repetitive meta-posts.
 		available = append(available,
 			lifeValueAffordance{
-				Key: "x_social", Surface: "Chrome 会话中已登录 @hominal_cc、可通过导航接触他人公开账号与互动的 X 社交网络",
+				Key: "x_social", Surface: "Chrome 中已登录、可通过 https://x.com/home 接触公开人物、帖子及互动的 X 社交网络",
 				Supports: []string{"exploration", "vitality", "relatedness"},
-			},
-			lifeValueAffordance{
-				Key: "x_account", Surface: "属于你的、在 Chrome 会话中保持登录、公开内容跨实验保存为谱系环境、可通过导航管理与发布的 X 账号 @hominal_cc；本代新发布由本代行动结果和新状态 URL 确认",
-				Supports: []string{"contribution"},
 			},
 			lifeValueAffordance{
 				Key: "public_web", Surface: "可通过 Chrome 导航进入的公开网络与 Wikipedia",
@@ -268,9 +473,14 @@ func (r *Runtime) lifeValueAffordances(direction string) []lifeValueAffordance {
 			},
 		)
 	}
-	if r.state.Body.DesktopAvailable && r.state.Body.WechatRunning {
+	// A running application is a body resource, while a life-value doorway is
+	// a resource Alice can presently sense or affect. Keep those facts distinct:
+	// the System Organ can still reveal the process and support building a future
+	// desktop organ, but it must not make the Browser Organ appear able to see a
+	// native window.
+	if r.state.Body.DesktopAvailable && r.state.Body.WechatRunning && bodyHasOrganCapability(r.state.Body, "desktop_ui") {
 		available = append(available, lifeValueAffordance{
-			Key: "wechat", Surface: "当前运行并保持会话状态的微信客户端",
+			Key: "wechat", Surface: "当前由 desktop_ui 器官开放感知与行动的微信客户端",
 			Supports: []string{"exploration", "vitality", "relatedness"},
 		})
 	}
@@ -283,7 +493,29 @@ func (r *Runtime) lifeValueAffordances(direction string) []lifeValueAffordance {
 	return affordances
 }
 
-func lifeValueSignalSummary(direction, surface string) string {
+func (r *Runtime) hasGenerativeLivedMaterial() bool {
+	for index := len(r.state.Memories) - 1; index >= 0; index-- {
+		memory := r.state.Memories[index]
+		if strings.TrimSpace(memory.Meaning) == "" {
+			continue
+		}
+		// The first system calibration is a body baseline, not yet personal
+		// material. Any later relationship, world contact or self-chosen bodily
+		// consequence is already part of Alice's lived history.
+		if memory.ActionKind != "organ_action" {
+			return true
+		}
+		var request struct {
+			OrganID string `json:"organ_id"`
+		}
+		if json.Unmarshal([]byte(memory.EnactedRequest), &request) == nil && request.OrganID != "system" {
+			return true
+		}
+	}
+	return false
+}
+
+func lifeValueSignalSummary(direction, surface, livedContext string) string {
 	summaries := map[string]string{
 		"continuance":  "存续与节律的内部牵引进入注意。",
 		"exploration":  "探索与理解的内部牵引进入注意。",
@@ -292,75 +524,151 @@ func lifeValueSignalSummary(direction, surface string) string {
 		"relatedness":  "联结与表达的内部牵引进入注意。",
 		"contribution": "创造与贡献的内部牵引进入注意。",
 	}
-	return summaries[direction] + " 同一时刻，一个真实可用的环境入口也进入感知：" + surface + "。你可以结合自身状态、已有经历和这个现实入口判断它此刻是否产生值得承接的具体意义。若要承接，让这次接触指向超出动作痕迹本身的新现实、体验、理解、能力、联结、贡献或未来行动空间。"
-}
-
-func (r *Runtime) lifeValueSignalHabituated(direction string, now time.Time) bool {
-	base := time.Duration(r.perceptualReorientationSeconds()) * time.Second
-	for index := len(r.state.Background) - 1; index >= 0; index-- {
-		event := r.state.Background[index]
-		if event.Kind != "value_signal" || len(event.Payload) == 0 {
-			continue
-		}
-		var payload lifeValueSignalPayload
-		if json.Unmarshal(event.Payload, &payload) != nil || payload.Direction != direction {
-			continue
-		}
-		observed, err := time.Parse(time.RFC3339Nano, event.ObservedAt)
-		return err == nil && now.Sub(observed) < base
+	summary := summaries[direction] + " 同一时刻，一个真实可用的环境入口也进入感知：" + surface + "。"
+	if strings.TrimSpace(livedContext) != "" {
+		summary += "一段过去的个人记录被唤起：" + livedContext + "。"
 	}
-	return false
+	return summary + "你可以结合自身状态、这段亲历和现实入口判断它此刻产生的具体意义。若要承接，让这次接触指向超出动作痕迹本身的新现实、体验、理解、能力、联结、贡献或未来行动空间。"
 }
 
-func (r *Runtime) lifeValueAffordanceHabituated(key string, now time.Time, base time.Duration) bool {
-	if key == "" || base <= 0 {
+func datedMemoryCue(memory Memory) string {
+	at, origin := memory.ObservedAt, memory.Origin
+	if at == "" {
+		at = "时间未记录"
+	}
+	if origin == "" {
+		origin = "来源性质未记录"
+	}
+	return fmt.Sprintf("记忆 %s（形成于 %s；来源性质 %s），当时的记录：%q", memory.ID, at, origin, truncate(memory.Meaning, 480))
+}
+
+func (r *Runtime) lifeValueAffordanceHabituated(key string, now time.Time) bool {
+	if key == "" {
 		return false
 	}
-	dismissedStreak := 0
-	var lastPresented time.Time
-	for index := len(r.state.Background) - 1; index >= 0; index-- {
-		event := r.state.Background[index]
-		if event.Kind != "value_signal" || len(event.Payload) == 0 {
-			continue
-		}
-		var payload lifeValueSignalPayload
-		if json.Unmarshal(event.Payload, &payload) != nil || payload.AffordanceKey != key {
-			continue
-		}
-		observed, err := time.Parse(time.RFC3339Nano, event.ObservedAt)
-		if err != nil {
-			continue
-		}
-		if lastPresented.IsZero() {
-			lastPresented = observed
-		}
-		if r.lifeValueSignalEventActed(event) {
-			break
-		}
-		dismissedStreak++
-	}
-	if lastPresented.IsZero() {
-		return false
-	}
-	// A surface Alice used returns at the ordinary interval. Each consecutive
-	// presentation she leaves without action adds one interval, capped at thirty
-	// minutes. Her own action therefore restores availability, while a stable
-	// door she has already declined stops demanding the same paid judgement.
-	factor := 1 + dismissedStreak
-	if factor > 6 {
-		factor = 6
-	}
-	return now.Sub(lastPresented) < time.Duration(factor)*base
+	// A held Concern retains an unfinished relationship, not exclusive access
+	// to the whole medium through which it arose. Encounter satiation still
+	// regulates reuse; ActiveConcernID remains a causal feedback reference.
+	return r.lifeValueAffordanceRefractoryRemaining(key, now) > 0
 }
 
-func (r *Runtime) lifeValueSignalEventActed(event Event) bool {
-	for _, commitment := range r.state.Commitments {
-		if commitment.FocusID == event.ID ||
-			(event.ConcernID != "" && commitment.ConcernID == event.ConcernID) {
-			return true
+func (r *Runtime) lifeValueAffordanceRefractoryRemaining(key string, now time.Time) time.Duration {
+	if key == "" {
+		return 0
+	}
+	trace, exists := r.state.ValueAffordances[key]
+	if !exists {
+		return 0
+	}
+	reference := trace.LastSettledAt
+	if reference == "" {
+		reference = trace.LastPresentedAt
+	}
+	observed, err := time.Parse(time.RFC3339Nano, reference)
+	if err != nil {
+		return 0
+	}
+	// The refractory interval begins when the encounter actually settles.  The
+	// former rule cooled an enacted doorway for only a few seconds while cooling
+	// one declined doorway for many minutes.  It collapsed the available world
+	// into whichever one or two surfaces happened to be used first.  One shared
+	// encounter rhythm now gives every organ and relationship the same negative
+	// feedback: repeated recruitment lengthens satiation gradually, while neither
+	// success nor a decline removes a domain for the rest of a short life.
+	idle := r.config.Dynamics.AttentionMaximumIdleSeconds
+	if idle <= 0 {
+		idle = 10
+	}
+	baseSeconds := maxInt(3*idle, trace.LastEngagementSeconds)
+	if baseSeconds < 30 {
+		baseSeconds = 30
+	}
+	factor := 1 + trace.EncounterStreak + trace.DismissedStreak
+	if factor > 8 {
+		factor = 8
+	}
+	cooldown := time.Duration(factor*baseSeconds) * time.Second
+	if cooldown > 30*time.Minute {
+		cooldown = 30 * time.Minute
+	}
+	remaining := observed.Add(cooldown).Sub(now)
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
+}
+
+func (r *Runtime) recordValueAffordancePresentation(key string, now time.Time) {
+	if key == "" {
+		return
+	}
+	if r.state.ValueAffordances == nil {
+		r.state.ValueAffordances = make(map[string]ValueAffordanceTrace)
+	}
+	trace := r.state.ValueAffordances[key]
+	trace.LastPresentedAt = now.Format(time.RFC3339Nano)
+	trace.LastSettledAt = ""
+	trace.ActiveConcernID = ""
+	trace.LastEngagementSeconds = 0
+	r.state.ValueAffordances[key] = trace
+}
+
+func valueAffordanceKey(candidate Event) string {
+	if candidate.Kind != "value_signal" || len(candidate.Payload) == 0 {
+		return ""
+	}
+	var payload lifeValueSignalPayload
+	if json.Unmarshal(candidate.Payload, &payload) != nil {
+		return ""
+	}
+	return strings.TrimSpace(payload.AffordanceKey)
+}
+
+func (r *Runtime) updateValueAffordanceDisposition(candidate Event, concern *Concern, acted bool, now string) {
+	key := valueAffordanceKey(candidate)
+	if key != "" {
+		trace := r.state.ValueAffordances[key]
+		if concern != nil && concern.Resolution == "hold" {
+			trace.ActiveConcernID = concern.ID
+			r.state.ValueAffordances[key] = trace
+			return
+		}
+		r.settleValueAffordance(key, acted, now)
+		return
+	}
+	if concern == nil || concern.Resolution == "hold" {
+		return
+	}
+	for affordanceKey, trace := range r.state.ValueAffordances {
+		if trace.ActiveConcernID != concern.ID {
+			continue
+		}
+		r.settleValueAffordance(affordanceKey, concernHasCommitment(concern.ID, r.state.Commitments), now)
+		return
+	}
+}
+
+func (r *Runtime) settleValueAffordance(key string, acted bool, now string) {
+	trace, exists := r.state.ValueAffordances[key]
+	if !exists || trace.LastPresentedAt == "" {
+		return
+	}
+	if started, err := time.Parse(time.RFC3339Nano, trace.LastPresentedAt); err == nil {
+		if ended, parseErr := time.Parse(time.RFC3339Nano, now); parseErr == nil && ended.After(started) {
+			trace.LastEngagementSeconds = int(ended.Sub(started).Seconds())
 		}
 	}
-	return false
+	trace.LastSettledAt = now
+	trace.ActiveConcernID = ""
+	if trace.EncounterStreak < 6 {
+		trace.EncounterStreak++
+	}
+	if acted {
+		trace.DismissedStreak = 0
+	} else if trace.DismissedStreak < 6 {
+		trace.DismissedStreak++
+	}
+	r.state.ValueAffordances[key] = trace
 }
 
 func (r *Runtime) lastLifeValueSignalAffordance() string {
@@ -432,11 +740,44 @@ func (r *Runtime) hasUnassimilatedCommitment() bool {
 	return false
 }
 
+// hasCommitmentAwaitingAssimilation distinguishes an action that is still
+// being enacted by an organ from Reality that has already arrived and now owns
+// the single conscious foreground, except while repeated interpretation failure
+// locally defers that result. Acting or deferred commitments remain causally
+// open without requiring the whole main stream to freeze beside them.
+func (r *Runtime) hasCommitmentAwaitingAssimilation() bool {
+	for _, commitment := range r.state.Commitments {
+		switch commitment.Status {
+		case "formed", "reality_available", "reality_unknown":
+			if r.commitmentLocallyDeferred(commitment) {
+				continue
+			}
+			return true
+		}
+	}
+	return false
+}
+
+func (r *Runtime) concernHasActingCommitment(concernID string) bool {
+	if concernID == "" {
+		return false
+	}
+	for _, commitment := range r.state.Commitments {
+		if commitment.ConcernID == concernID && commitment.Status == "acting" {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *Runtime) attentionCandidateActive() bool {
-	if r.state.PendingAction != nil || r.hasUnassimilatedCommitment() {
+	if r.hasCommitmentAwaitingAssimilation() {
 		return true
 	}
 	for _, event := range r.state.Background {
+		if r.locallyDeferredReality(event) {
+			continue
+		}
 		if eventChainActive(event.Status) {
 			return true
 		}
@@ -446,19 +787,14 @@ func (r *Runtime) attentionCandidateActive() bool {
 
 func (r *Runtime) nextStage4Request() (CognitiveRequest, bool) {
 	r.retireSettledConcernContributions()
-	if r.state.PendingAction != nil {
-		return CognitiveRequest{}, false
-	}
 	for _, event := range r.state.Background {
 		if event.Status == "pending" && event.Kind == "action_result" {
 			return CognitiveRequest{Stage: 4, Focus: event, Candidates: []Event{event}}, true
 		}
 	}
-	// A chosen action remains the single causal foreground until its reality has
-	// been assimilated. If that reality is waiting for a validation retry, other
-	// concerns and external events stay in the background instead of stealing
-	// the attention thread.
-	if r.hasUnassimilatedCommitment() {
+	// Fresh Reality gets priority. Repeated local interpretation failures retain
+	// the result but yield during backoff; they do not own the whole life thread.
+	if r.hasCommitmentAwaitingAssimilation() {
 		return CognitiveRequest{}, false
 	}
 	// "next" is a serial cognitive continuation chosen by Alice, not another
@@ -467,7 +803,7 @@ func (r *Runtime) nextStage4Request() (CognitiveRequest, bool) {
 	// next and only focus. This also prevents several unconsumed model choices
 	// from accumulating while unrelated Concerns keep winning attention.
 	for _, event := range r.state.Background {
-		if event.Status == "pending" && event.Kind == "cognition_continuation" {
+		if event.Status == "pending" && (event.Kind == "cognition_continuation" || event.Kind == "cognition_assistance_result") {
 			return CognitiveRequest{Stage: 4, Focus: event, Candidates: []Event{event}}, true
 		}
 	}
@@ -491,6 +827,12 @@ func (r *Runtime) nextStage4Request() (CognitiveRequest, bool) {
 			continue
 		}
 		if cognitionValidationExhausted(concern, r.config.CognitiveResource) {
+			continue
+		}
+		// The organ already owns this Concern's current causal change. Keep its
+		// tension alive in the background, while letting unrelated reality or life
+		// values compete for the one conscious focus.
+		if r.openCommitmentForConcern(concern.ID) != nil {
 			continue
 		}
 		// Once an unacted exploration drive has one Concern identity, repeating
@@ -600,8 +942,8 @@ func (r *Runtime) nextStage4Request() (CognitiveRequest, bool) {
 // Alice may approach the concrete surface already carried by the exploration
 // event. It never manufactures another object, goal or reward.
 func associativeRecall(state State, dynamics Dynamics, seed string) string {
-	const recentExperienceLimit = 8
-	cues := make([]string, 0, recentExperienceLimit+len(state.Concerns)+1)
+	const recentMemoryLimit = 8
+	cues := make([]string, 0, recentMemoryLimit+len(state.Concerns)+1)
 	minimumConcernSalience := dynamics.AttentionThreshold * dynamics.ConcernBaseDrive
 	for _, concern := range state.Concerns {
 		if concern.Resolution == "resolved" {
@@ -618,13 +960,13 @@ func associativeRecall(state State, dynamics Dynamics, seed string) string {
 			cues = append(cues, "仍在生活中的关切："+truncate(meaning, 600))
 		}
 	}
-	start := len(state.Experiences) - recentExperienceLimit
+	start := len(state.Memories) - recentMemoryLimit
 	if start < 0 {
 		start = 0
 	}
-	for _, experience := range state.Experiences[start:] {
-		if meaning := strings.TrimSpace(experience.Meaning); meaning != "" {
-			cues = append(cues, "自己形成的近期经验："+truncate(meaning, 600))
+	for _, memory := range state.Memories[start:] {
+		if meaning := strings.TrimSpace(memory.Meaning); meaning != "" {
+			cues = append(cues, datedMemoryCue(memory))
 		}
 	}
 	if narrative := strings.TrimSpace(state.Self.Narrative); narrative != "" {
@@ -659,7 +1001,7 @@ func attentionVariationSeed(instanceID string, pulseID uint64, candidates []Even
 }
 
 func (r *Runtime) shouldOfferVariation(focus Event) bool {
-	if r.hasUnassimilatedCommitment() {
+	if r.hasCommitmentAwaitingAssimilation() {
 		return false
 	}
 	if focus.Kind == "value_signal" {
@@ -846,48 +1188,43 @@ func (r *Runtime) applyCognitiveCommit(commit CognitiveCommit) error {
 	return r.applyPreparedCognitiveCommit(commit, withheldActionKind)
 }
 
-// constrainStageTenActionAssistance preserves one consciousness while still
-// allowing Alice to use Sol/low as a precise action organ. The main cognition
-// has already formed the Concern and fixed the purpose. Assistance contributes
-// only an executable body step; it cannot reappraise the life meaning, redirect
-// the action into a relationship message, or rewrite Self.
-func (r *Runtime) constrainStageTenActionAssistance(commit CognitiveCommit) CognitiveCommit {
-	if r.state.Stage < 10 || r.state.Lease == nil || r.state.Lease.ProfileSource != "next" {
-		return commit
+// annotateActionAssistanceOpportunity makes a bodily implementation limit
+// visible without bypassing the main consciousness. The main profile first
+// absorbs failed Reality and remains free to retry, change route, stop, or ask
+// for one serial Sol/low implementation through the existing resource choice.
+func (r *Runtime) annotateActionAssistanceOpportunity(action *ActionState, concernID string) {
+	if r.state.Stage < 10 || action == nil || action.Kind != "organ_action" ||
+		(action.Status != "failed" && action.Status != "unknown") || strings.TrimSpace(concernID) == "" {
+		return
 	}
-	concern := r.concernByID(r.focusConcernID(commit.FocusID))
-	if concern == nil {
-		return commit
+	failures := 1
+	for index := len(r.state.Background) - 1; index >= 0; index-- {
+		event := r.state.Background[index]
+		if event.Kind != "action_result" {
+			continue
+		}
+		var action ActionState
+		if json.Unmarshal(event.Payload, &action) != nil || action.Kind != "organ_action" {
+			continue
+		}
+		commitment := r.commitmentByID(action.CommitmentID)
+		if commitment == nil || commitment.ConcernID != concernID {
+			continue
+		}
+		if action.Status == "failed" || action.Status == "unknown" {
+			failures++
+			continue
+		}
+		if action.Status == "completed" && action.Effect != "observed" {
+			break
+		}
 	}
-	commit.Appraisals = []CandidateAppraisal{{
-		CandidateID:   commit.FocusID,
-		Meaning:       concern.Meaning,
-		Difference:    concern.Difference,
-		Ownership:     concern.Ownership,
-		Value:         concern.Value,
-		Values:        concern.Values,
-		Urgency:       concern.Urgency,
-		Answerability: concern.Answerability,
-		Certainty:     concern.Certainty,
-		Resolution:    "hold",
-	}}
-	commit.ContinuesConcernID = ""
-	commit.WithinConcernID = ""
-	commit.ContributesToConcernID = ""
-	commit.NewConcernClosureCondition = ""
-	commit.EmergingConsequence = ""
-	commit.ExperienceUpdates = nil
-	commit.NarrativeUpdate = ""
-	commit.ValueOrientationUpdate = LifeValueVector{}
-	commit.ThoughtThread = "我正在把主力认知已经认领的行动交给身体精确实现：" + strings.TrimSpace(r.state.Lease.ProfilePurpose)
-	if commit.Action.Kind == "organ_action" {
-		commit.Action.Intent = strings.TrimSpace(r.state.Lease.ProfilePurpose)
+	action.ImplementationFailureStreak = failures
+	profile := CognitiveProfile{Model: "sol", ReasoningEffort: "low"}
+	protected, _ := modelProtected(r.state, profile.Model, time.Now().UTC())
+	if failures >= 2 && validateProfile(r.config.CognitiveResource, profile) == nil && !protected {
+		action.ActionAssistanceAvailable = true
 	}
-	commit.ResourceChoice = CognitiveResourceChoice{
-		Apply: "keep", Model: "current", ReasoningEffort: "current",
-		Purpose: "一次性行动协助完成后回到主力认知",
-	}
-	return commit
 }
 
 func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldActionKind string) error {
@@ -931,11 +1268,16 @@ func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldA
 	if err := r.validateOrganOperation(commit.Action); err != nil {
 		return err
 	}
-	if r.state.Stage >= 10 && r.state.Lease != nil && r.state.Lease.ProfileSource == "next" &&
-		commit.Action.Kind != "none" && commit.Action.Kind != "organ_action" {
-		return errors.New("stage-ten action assistance can only form one organ_action or return control to the main cognition")
+	if commit.Action.Kind == "organ_action" && r.state.PendingAction != nil {
+		return newActionProgressBoundary("one body action is already being enacted; keep this meaning available until that organ returns Reality")
+	}
+	if r.state.Stage >= 10 && r.state.Lease != nil && r.state.Lease.ProfileSource == "next" {
+		return errors.New("local assistance returns an answer for the main cognition; only the main cognition submits a cognitive commit")
 	}
 	if err := r.validateActionObjectFocus(commit, effectiveConcernID); err != nil {
+		return err
+	}
+	if err := r.validateUnabsorbedActionScope(commit, effectiveConcernID); err != nil {
 		return err
 	}
 	if commit.Action.Kind != "none" {
@@ -948,14 +1290,18 @@ func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldA
 			return err
 		}
 	}
-	if err := r.validateExperienceUpdates(commit); err != nil {
+	if err := r.validateRealityUpdates(commit); err != nil {
 		return err
+	}
+	r.state.LearningFeedback = r.retainValidLearningUpdates(&commit)
+	if r.state.LearningFeedback != "" {
+		withheldProjections["learning_updates"] = r.state.LearningFeedback
 	}
 	if err := r.validateNarrativeUpdate(commit); err != nil {
 		// Narrative is a sparse projection of already usable cognition, not a
 		// prerequisite for absorbing Reality or executing an independently valid
 		// action. If the proposed projection has not earned that status, preserve
-		// the appraisal, Experience and action while leaving Narrative unchanged.
+		// the appraisal, Memory and action while leaving Narrative unchanged.
 		withheldProjections["narrative_update"] = err.Error()
 		commit.NarrativeUpdate = ""
 	}
@@ -966,7 +1312,7 @@ func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldA
 		withheldProjections["value_orientation_update"] = "long-term value orientation changes with an accepted narrative update"
 		commit.ValueOrientationUpdate = LifeValueVector{}
 	}
-	profile, err := r.validateResourceChoice(commit.ResourceChoice, commit.FocusID, commit.Action.Kind)
+	profile, err := r.validateResourceChoice(commit.ResourceChoice, commit.FocusID, commit.Action.Kind, effectiveConcernID)
 	if err != nil {
 		return err
 	}
@@ -1010,8 +1356,14 @@ func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldA
 			focusOriginKind = concern.OriginKind
 		}
 	}
-	if err := validateFocusedEnactment(commit, focusCandidate, focusOriginKind, r.config.Dynamics.AttentionThreshold); err != nil {
-		return err
+	// The one body slot or a result awaiting assimilation is a real waiting
+	// condition, even while another Concern can still be thought about. A slow
+	// organ may finish during inference; its unassimilated Reality preserves
+	// that condition until the main stream has actually processed the result.
+	if r.state.PendingAction == nil && !r.hasCommitmentAwaitingAssimilation() {
+		if err := validateFocusedEnactment(commit, focusCandidate, focusOriginKind, r.config.Dynamics.AttentionThreshold); err != nil {
+			return err
+		}
 	}
 	normalizedCompositeDisposition := r.normalizeCompositeProgressDisposition(&commit, effectiveConcernID)
 	for _, appraisal := range commit.Appraisals {
@@ -1025,7 +1377,7 @@ func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldA
 		if !isFocus && r.state.Stage >= 8 {
 			continue
 		}
-		if err := validateExistingConcernDisposition(appraisal, *concern, candidate, enactsFocusedConcern, r.state.Stage); err != nil {
+		if err := validateExistingConcernDisposition(appraisal, *concern, enactsFocusedConcern); err != nil {
 			return err
 		}
 	}
@@ -1049,6 +1401,11 @@ func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldA
 			r.learnDifferenceFromAppraisal(candidate, appraisal, commit.Action.Kind != "none")
 		} else {
 			r.learnDifferenceFromAppraisal(candidate, appraisal, false)
+		}
+		if appraisal.CandidateID == commit.FocusID {
+			if err := r.habituateSettledPerception(candidate, appraisal, commit.Action.Kind, now); err != nil {
+				return err
+			}
 		}
 
 		activation := appraisalActivation(r.config.Dynamics, appraisal)
@@ -1098,6 +1455,14 @@ func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldA
 			}
 			if commitmentID := commitmentIDFromEvent(candidate); commitmentID != "" {
 				concern.CommitmentID = commitmentID
+				// A momentary action may legitimately begin before its meaning has
+				// become a durable Concern. When the returned Reality is what earns
+				// that persistence, bind the already-existing commitment back to the
+				// new Concern. Delayed consequences can then return to the same causal
+				// line instead of reviving a stale wait or creating a parallel one.
+				if commitment := r.commitmentByID(commitmentID); commitment != nil && commitment.ConcernID == "" {
+					commitment.ConcernID = concern.ID
+				}
 			}
 			concern.Meaning = strings.TrimSpace(appraisal.Meaning)
 			concern.Difference = appraisal.Difference
@@ -1152,8 +1517,18 @@ func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldA
 				}
 			}
 		}
+		if appraisal.CandidateID == commit.FocusID {
+			r.updateValueAffordanceDisposition(candidate, concern, commit.Action.Kind != "none", now)
+		}
 		if candidate.Kind != "concern" && appraisal.CandidateID != commit.FocusID {
-			if r.state.Stage >= 9 && candidate.Kind == "concern_contribution" {
+			if r.state.Stage >= 9 && commitmentFeedbackKind(candidate.Kind) && commitmentIDFromEvent(candidate) != "" {
+				// A causally linked Reality may be understood in the periphery, but
+				// only its own single-focus pass can assimilate the commitment and
+				// settle the Concern. Keep it pending even when the peripheral
+				// appraisal already predicts resolution; backgrounding it here leaves
+				// Alice waiting forever for a reply or result that actually arrived.
+				markEvent(&r.state, appraisal.CandidateID, "pending")
+			} else if r.state.Stage >= 9 && candidate.Kind == "concern_contribution" {
 				// A contribution that lost this attention competition is still a new
 				// factual wake-up for an already-owned parent. Keep the single merged
 				// signal pending until it receives its own focus; the background
@@ -1169,10 +1544,21 @@ func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldA
 				markEvent(&r.state, appraisal.CandidateID, "background")
 			}
 		}
-		if candidate.Kind == "self_model_difference" {
-			r.state.SelfModelTension = clamp01(
-				r.state.SelfModelTension * (1 - resolutionRelief(appraisal.Resolution)),
-			)
+		if candidate.Kind == "self_model_difference" && appraisal.CandidateID == commit.FocusID {
+			// Owning an introspective question is not a verdict that its source
+			// activity was worthless. The same AIP, value and personal-learning
+			// paths carry its meaning forward; no separate channel-wide penalty.
+			// SelfModelTension is the accumulated interoceptive discrepancy that
+			// brought this evidence into consciousness. Once Alice has actually
+			// focused it, her remaining D is the current unresolved discrepancy.
+			// A held Concern may therefore remain alive at low tension without the
+			// already-noticed pressure staying saturated and reopening after every
+			// later Memory. Background appraisal alone does not metabolize it.
+			if appraisal.Resolution == "resolved" || appraisal.Resolution == "released" {
+				r.state.SelfModelTension = 0
+			} else {
+				r.state.SelfModelTension = clamp01(appraisal.Difference)
+			}
 		}
 		if commitmentFeedbackKind(candidate.Kind) && (r.state.Stage < 5 || r.commitmentFeedbackAnswersExploration(candidate)) {
 			// Contact with Reality relieves the general urge to seek a fact even
@@ -1215,11 +1601,11 @@ func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldA
 		targetValence := clampSigned(weightedValence / weightTotal)
 		targetControl := clamp01(weightedControl / weightTotal)
 		targetCertainty := clamp01(weightedCertainty / weightTotal)
-		const newExperienceWeight = 0.60
-		r.state.AffectiveState.Valence = clampSigned((1-newExperienceWeight)*r.state.AffectiveState.Valence + newExperienceWeight*targetValence)
+		const newMemoryWeight = 0.60
+		r.state.AffectiveState.Valence = clampSigned((1-newMemoryWeight)*r.state.AffectiveState.Valence + newMemoryWeight*targetValence)
 		r.state.AffectiveState.Activation = clamp01(maxFloat(r.state.AffectiveState.Activation*0.50, maxActivation))
-		r.state.AffectiveState.Control = clamp01((1-newExperienceWeight)*r.state.AffectiveState.Control + newExperienceWeight*targetControl)
-		r.state.AffectiveState.Certainty = clamp01((1-newExperienceWeight)*r.state.AffectiveState.Certainty + newExperienceWeight*targetCertainty)
+		r.state.AffectiveState.Control = clamp01((1-newMemoryWeight)*r.state.AffectiveState.Control + newMemoryWeight*targetControl)
+		r.state.AffectiveState.Certainty = clamp01((1-newMemoryWeight)*r.state.AffectiveState.Certainty + newMemoryWeight*targetCertainty)
 	}
 	r.state.ValueField.Activation.Exploration = clamp01(
 		r.state.ValueField.Activation.Exploration + r.config.Dynamics.ExplorationUnknownGrowth*(uncertaintyTotal/float64(len(commit.Appraisals))),
@@ -1230,13 +1616,16 @@ func (r *Runtime) applyPreparedCognitiveCommit(commit CognitiveCommit, withheldA
 	// pending would turn completed progress into a new, content-free thought loop.
 	r.retireSettledConcernContributions()
 	r.pruneInactiveConcerns()
-	if err := r.applyResourceChoice(commit.ResourceChoice, profile, commit.FocusID); err != nil {
+	if err := r.applyResourceChoice(commit.ResourceChoice, profile, commit.FocusID, effectiveConcernID); err != nil {
 		return err
 	}
-	if err := r.applyExperienceUpdates(commit); err != nil {
+	if err := r.applyRealityUpdates(commit); err != nil {
 		return err
 	}
-	if len(commit.ExperienceUpdates) == 0 && independentFactKind(focusCandidate.Kind) {
+	if err := r.applyLearningUpdates(commit); err != nil {
+		return err
+	}
+	if len(commit.RealityUpdates) == 0 && independentFactKind(focusCandidate.Kind) {
 		if err := r.enqueueObservedConcernContribution(contributesToConcernID, focusCandidate); err != nil {
 			return err
 		}
@@ -1307,15 +1696,12 @@ func (r *Runtime) retireSettledConcernContributions() {
 }
 
 func commitAssimilates(commit CognitiveCommit, commitmentID string) bool {
-	return len(commit.ExperienceUpdates) == 1 && commit.ExperienceUpdates[0].CommitmentID == commitmentID
+	return len(commit.RealityUpdates) == 1 && commit.RealityUpdates[0].CommitmentID == commitmentID
 }
 
-func validateExistingConcernDisposition(appraisal CandidateAppraisal, concern Concern, candidate Event, enacts bool, stage int) error {
+func validateExistingConcernDisposition(appraisal CandidateAppraisal, concern Concern, enacts bool) error {
 	if concern.Resolution != "hold" {
 		return nil
-	}
-	if stage >= 9 && candidate.Kind == "concern_contribution" && appraisal.Resolution != "hold" {
-		return fmt.Errorf("concern %q received one child contribution; contribution records progress, while ending the whole concern requires a later direct focus on its stable closure condition", concern.ID)
 	}
 	if enacts && appraisal.Resolution != "hold" {
 		return fmt.Errorf("concern %q is being enacted and must remain held until Reality returns", concern.ID)
@@ -1325,7 +1711,7 @@ func validateExistingConcernDisposition(appraisal CandidateAppraisal, concern Co
 
 // validateConcernHierarchyDisposition keeps the lifecycle of a self-endorsed
 // whole consistent with the lifecycles of the concrete consequences Alice put
-// inside it. A parent may integrate a child's Experience, but it cannot declare
+// inside it. A parent may integrate a child's Memory, but it cannot declare
 // the whole settled while that child still says its own closure condition is
 // unfinished. This does not decide either lifecycle; it only makes Alice bring
 // the remaining child to its own focus before settling the parent.
@@ -1399,7 +1785,7 @@ func validateFocusedEnactment(commit CognitiveCommit, candidate Event, originKin
 		// Reality absorption is itself the single foreground operation in this
 		// attention moment. A held Concern retains one bounded, immediate revisit
 		// through concernAwaitsRealityRevisit, where Alice can choose the next
-		// action after the result has actually become Experience. Requiring her to
+		// action after the result has actually become Memory. Requiring her to
 		// interpret an unexpected result and enact its sequel in one commit breaks
 		// the serial loop and turns ordinary reflection into validation waste.
 		return nil
@@ -1509,6 +1895,26 @@ func (r *Runtime) shouldPersistNewConcern(commit CognitiveCommit, appraisal Cand
 		return false
 	}
 	if r.state.Stage >= 8 {
+		if candidate, exists := r.activeCandidates[appraisal.CandidateID]; exists &&
+			candidate.Kind == "self_model_difference" && commit.Action.Kind == "none" {
+			// A self-model difference is an interoceptive observation, not a duty to
+			// prove that Alice has improved.  It may update Narrative, methods,
+			// affect and value orientation immediately; durable ownership begins only
+			// when it grounds a real action or later reality independently reopens it.
+			// Persisting a held, non-enacted audit manufactured meta-Concerns such as
+			// "complete three more activities", which then consumed attention while
+			// simultaneously telling Alice not to act merely to satisfy the audit.
+			return false
+		}
+		if candidate, exists := r.activeCandidates[appraisal.CandidateID]; exists &&
+			candidate.Kind == "value_signal" && commit.Action.Kind == "none" {
+			// A value signal is a drive meeting an available affordance, not yet a
+			// concrete object Alice has taken responsibility for.  If no reality
+			// contact follows, the value field already preserves the attraction;
+			// turning "an entrance exists" into a durable Concern manufactures the
+			// empty waiting loops that the signal was meant to avoid.
+			return false
+		}
 		if candidate, exists := r.activeCandidates[appraisal.CandidateID]; exists &&
 			candidate.Kind == "endogenous_change" && commit.Action.Kind == "none" {
 			// Exploration pressure is a drive, not a thing Alice must keep thinking
@@ -1628,7 +2034,7 @@ func (r *Runtime) validateEmergingConsequence(commit CognitiveCommit) (string, e
 // the next candidate presents the same utterance as new incoming content. That
 // second pass may form or release a new Concern through ordinary AIP rules.
 func (r *Runtime) addMentorContentCandidate(commit CognitiveCommit) error {
-	if r.state.Stage < 9 {
+	if r.state.Stage != 9 {
 		return nil
 	}
 	source, exists := r.activeCandidates[commit.FocusID]
@@ -1645,6 +2051,7 @@ func (r *Runtime) addMentorContentCandidate(commit CognitiveCommit) error {
 	}
 	payload, err := json.Marshal(map[string]any{
 		"source_event_id": source.ID,
+		"message_id":      source.CorrelationID,
 		"message_body":    truncate(body, 16*1024),
 	})
 	if err != nil {
@@ -1673,7 +2080,7 @@ func (r *Runtime) addEmergingConsequence(commit CognitiveCommit) error {
 		"emerging_consequence": consequence,
 	}
 	// Keep a bounded copy of the factual Reality beside Alice's interpretation.
-	// Larger tool results remain available through the Experience and journal;
+	// Larger tool results remain available through the Memory and journal;
 	// duplicating them here would inflate every later cognitive context.
 	if len(source.Payload) > 0 && len(source.Payload) <= 16*1024 {
 		var sourcePayload any
@@ -1760,7 +2167,7 @@ func (r *Runtime) validateConcernContinuation(commit CognitiveCommit) (string, e
 
 func independentFactKind(kind string) bool {
 	switch kind {
-	case "mentor_received", "mentor_content", "environment_change", "perceptual_change", "body_delta", "self_model_difference", "reality_consequence":
+	case "mentor_received", "mentor_content", "environment_change", "perceptual_change", "body_delta", "self_model_difference", "reality_consequence", "operation_condition":
 		return true
 	default:
 		return false
@@ -1796,7 +2203,7 @@ func (r *Runtime) validateConcernContext(commit CognitiveCommit, effectiveConcer
 
 // validateConcernContribution keeps each real episode distinct while allowing
 // Alice to decide that an independently observed fact or an actual child
-// Experience advances one Concern she already owns. Prediction, intention, or
+// Memory advances one Concern she already owns. Prediction, intention, or
 // semantic similarity alone cannot manufacture contribution.
 func (r *Runtime) validateConcernContribution(commit CognitiveCommit, effectiveConcernID string) (string, error) {
 	concernID := strings.TrimSpace(commit.ContributesToConcernID)
@@ -1819,7 +2226,7 @@ func (r *Runtime) validateConcernContribution(commit CognitiveCommit, effectiveC
 		return "", fmt.Errorf("contributed concern %q is not a currently held self-owned concern", concernID)
 	}
 	if concern.OriginKind == "birth_orientation" {
-		return "", errors.New("concrete episodes shape Narrative and Experience without repeatedly reactivating the stable birth orientation")
+		return "", errors.New("concrete episodes shape Narrative and Memory without repeatedly reactivating the stable birth orientation")
 	}
 	if independentFactKind(candidate.Kind) {
 		// An independently observed Reality keeps its own causal identity. Alice may
@@ -1828,16 +2235,16 @@ func (r *Runtime) validateConcernContribution(commit CognitiveCommit, effectiveC
 		// target; it does not edit or settle that Concern here.
 		return concernID, nil
 	}
-	if len(commit.ExperienceUpdates) != 1 {
+	if len(commit.RealityUpdates) != 1 {
 		// Before Reality there is only a prediction of relevance.  The actual
-		// relationship is chosen in the cognition that forms Experience, so an
+		// relationship is chosen in the cognition that forms Memory, so an
 		// early field value is a losslessly removable anticipation rather than a
 		// reason to reject the selected action.
 		return "", nil
 	}
 	child := r.concernByID(effectiveConcernID)
 	if child == nil || child.WithinConcernID == "" {
-		return "", fmt.Errorf("focused concern %q has no previously self-endorsed within relation; a new Experience cannot invent a parent from semantic similarity", effectiveConcernID)
+		return "", fmt.Errorf("focused concern %q has no previously self-endorsed within relation; a new Memory cannot invent a parent from semantic similarity", effectiveConcernID)
 	}
 	if concernID != child.WithinConcernID {
 		return "", fmt.Errorf("contributed concern %q is not the focused concern's self-endorsed parent %q", concernID, child.WithinConcernID)
@@ -1927,7 +2334,7 @@ func (r *Runtime) commitmentFeedbackAnswersExploration(candidate Event) bool {
 	return false
 }
 
-func (r *Runtime) validateResourceChoice(choice CognitiveResourceChoice, focusID, actionKind string) (CognitiveProfile, error) {
+func (r *Runtime) validateResourceChoice(choice CognitiveResourceChoice, focusID, actionKind string, effectiveConcernIDs ...string) (CognitiveProfile, error) {
 	current := activeProfile(r.state, r.config.CognitiveResource, focusID)
 	if r.state.Lease != nil {
 		// The lease belongs to this single attention pulse. The commit may
@@ -1957,13 +2364,26 @@ func (r *Runtime) validateResourceChoice(choice CognitiveResourceChoice, focusID
 	}
 	if r.state.Stage >= 10 {
 		if r.state.Lease != nil && r.state.Lease.ProfileSource == "next" && choice.Apply != "keep" {
-			return CognitiveProfile{}, errors.New("stage-ten action assistance is one-use and returns to the main profile after this cognition")
+			return CognitiveProfile{}, errors.New("local assistance is one-use and returns to the main profile")
 		}
 		if choice.Apply == "next" && profile != (CognitiveProfile{Model: "sol", ReasoningEffort: "low"}) {
-			return CognitiveProfile{}, errors.New("stage-ten serial assistance uses sol/low for one bounded body action")
+			if profile != (CognitiveProfile{Model: "luna", ReasoningEffort: "none"}) || assistanceTask(choice.Task) != "reasoning" {
+				return CognitiveProfile{}, errors.New("serial assistance uses luna/none for simple reasoning or sol/low for complex reasoning and implementation")
+			}
+		}
+		if choice.Apply == "next" {
+			if task := assistanceTask(choice.Task); task != "reasoning" && task != "implementation" {
+				return CognitiveProfile{}, errors.New("assistance task must be reasoning or implementation")
+			}
+			if choice.IncludeSelf && profile.Model != "sol" {
+				return CognitiveProfile{}, errors.New("self narrative reference is available only to high-level assistance")
+			}
+		}
+		if choice.Apply == "next" && actionKind != "none" {
+			return CognitiveProfile{}, errors.New("serial assistance requires action none; its result returns to the main cognition before execution")
 		}
 		if choice.Apply == "default" && profile != r.config.CognitiveResource.InitialDefaultProfile {
-			return CognitiveProfile{}, errors.New("this generation keeps its selected main profile; use next sol/low for bounded action assistance")
+			return CognitiveProfile{}, errors.New("this generation keeps its selected main profile; use next for local reasoning or implementation assistance")
 		}
 	}
 	if choice.Apply == "default" && r.state.Body.CognitiveResourceBand == "open" &&
@@ -1972,6 +2392,10 @@ func (r *Runtime) validateResourceChoice(choice CognitiveResourceChoice, focusID
 	}
 	if choice.Apply == "next" {
 		candidate := r.activeCandidates[focusID]
+		effectiveConcernID := r.focusConcernID(focusID)
+		if len(effectiveConcernIDs) > 0 && strings.TrimSpace(effectiveConcernIDs[0]) != "" {
+			effectiveConcernID = strings.TrimSpace(effectiveConcernIDs[0])
+		}
 		if strings.TrimSpace(choice.Purpose) == "" {
 			return CognitiveProfile{}, errors.New("one serial continuation requires a purpose")
 		}
@@ -1984,14 +2408,14 @@ func (r *Runtime) validateResourceChoice(choice CognitiveResourceChoice, focusID
 		if candidate.Kind == "cognition_continuation" && actionKind == "none" {
 			return CognitiveProfile{}, errors.New("a thought-only serial continuation cannot continue again without new reality")
 		}
-		if r.state.Stage >= 10 && r.focusConcernID(focusID) == "" {
+		if r.state.Stage >= 10 && assistanceTask(choice.Task) == "implementation" && effectiveConcernID == "" {
 			return CognitiveProfile{}, errors.New("stage-ten action assistance requires an already owned concern and fixed action purpose")
 		}
 	}
 	return profile, nil
 }
 
-func (r *Runtime) applyResourceChoice(choice CognitiveResourceChoice, profile CognitiveProfile, focusID string) error {
+func (r *Runtime) applyResourceChoice(choice CognitiveResourceChoice, profile CognitiveProfile, focusID string, effectiveConcernIDs ...string) error {
 	switch choice.Apply {
 	case "keep":
 		// Keep preserves the persistent default. A profile chosen with next is
@@ -2007,11 +2431,14 @@ func (r *Runtime) applyResourceChoice(choice CognitiveResourceChoice, profile Co
 		}
 		return r.journal("cognitive_profile_changed", focusID, map[string]any{"profile": profile, "purpose": strings.TrimSpace(choice.Purpose)})
 	case "next":
-		payload, _ := json.Marshal(map[string]any{"purpose": strings.TrimSpace(choice.Purpose), "profile": profile})
+		payload, _ := json.Marshal(assistanceContract{Purpose: strings.TrimSpace(choice.Purpose), Profile: profile, Task: assistanceTask(choice.Task), IncludeSelf: choice.IncludeSelf})
 		// A serial continuation is Alice continuing the present cognitive thread,
 		// not a new source of life tension. Carry the already formed Concern across
 		// the continuation so appraisal cannot manufacture a duplicate identity.
 		concernID := r.focusConcernID(focusID)
+		if len(effectiveConcernIDs) > 0 && strings.TrimSpace(effectiveConcernIDs[0]) != "" {
+			concernID = strings.TrimSpace(effectiveConcernIDs[0])
+		}
 		if err := r.addEvent("cognition_continuation", "endogenous", strings.TrimSpace(choice.Purpose), focusID, payload, true, concernID); err != nil {
 			return err
 		}
@@ -2118,7 +2545,7 @@ func (r *Runtime) pruneInactiveConcerns() {
 		// Once both accumulated strength and present activation fall below the
 		// same salience floor already used by attention and associative recall,
 		// a causally closed Concern becomes dormant. Its Reality and meaning stay
-		// in Experience and Narrative and may become relevant again through new
+		// in Memory and Narrative and may become relevant again through new
 		// facts; the inactive object no longer consumes the live attention field.
 		if r.state.Stage >= 8 && maxFloat(concern.Strength, concern.Activation) < minimumConcernSalience {
 			continue
@@ -2259,7 +2686,7 @@ func cognitiveActionContactsReality(action CognitiveAction) bool {
 // shellActionContactsReality rejects commands whose only observable effect is
 // consuming time or returning success.  Waiting is a legitimate internal and
 // causal state, but wrapping it in `sleep`, `true`, `:` or static output must
-// not manufacture a body contact and Experience.  Any substantive command in
+// not manufacture a body contact and Memory.  Any substantive command in
 // the sequence remains available; this is a mechanical effect boundary, not a
 // semantic classification of Alice's chosen object.
 func shellActionContactsReality(request string) bool {
@@ -2398,7 +2825,7 @@ func (r *Runtime) startStage4Action(ctx context.Context, leaseID string, action 
 		if err := r.journal("mentor_queued", messageID, map[string]any{"body": action.Text, "reply_to": action.ReplyTo, "action_id": actionID, "commitment_id": action.CommitmentID}); err != nil {
 			return err
 		}
-		payload, _ := json.Marshal(ActionState{ID: actionID, LeaseID: leaseID, CommitmentID: action.CommitmentID, Kind: "mentor_send", Request: action.Text, Status: "completed", StartedAt: nowUTC(), EndedAt: nowUTC(), Result: messageID})
+		payload, _ := json.Marshal(ActionState{ID: actionID, LeaseID: leaseID, CommitmentID: action.CommitmentID, Kind: "mentor_send", Effect: "changed", Request: action.Text, Status: "completed", StartedAt: nowUTC(), EndedAt: nowUTC(), Result: messageID})
 		if err := r.addEvent("action_result", "observed", "一条导师消息已经进入可信通道的发送队列。", actionID, payload, true); err != nil {
 			return err
 		}
@@ -2414,6 +2841,10 @@ func (r *Runtime) startStage4Action(ctx context.Context, leaseID string, action 
 		if r.state.PendingAction != nil {
 			return errors.New("another body action is already in progress")
 		}
+		r.actionEpoch++
+		if r.perceptionCancel != nil {
+			r.perceptionCancel()
+		}
 		if r.organs == nil {
 			return errors.New("organ host is unavailable")
 		}
@@ -2425,6 +2856,14 @@ func (r *Runtime) startStage4Action(ctx context.Context, leaseID string, action 
 			return fmt.Errorf("organ %q does not publish operation %q", action.OrganID, action.Operation)
 		}
 		actionID := "action-" + randomID()
+		if discarded := r.supersedePerceptualBatchForAction(action.OrganID); discarded > 0 {
+			if err := r.journal("perceptual_batch_superseded", actionID, map[string]any{
+				"organ_id": action.OrganID, "discarded_objects": discarded,
+				"reason": "intentional organ action started",
+			}); err != nil {
+				return err
+			}
+		}
 		r.state.PendingAction = &ActionState{
 			ID:           actionID,
 			LeaseID:      leaseID,
@@ -2452,7 +2891,7 @@ func (r *Runtime) startStage4Action(ctx context.Context, leaseID string, action 
 			performed, err := r.organs.Perform(callCtx, action.OrganID, organ.ActionRequest{
 				ActionID: actionID, Operation: action.Operation, Input: action.Input, TimeoutMilliseconds: 120_000,
 			})
-			result := ActionResultNotice{ActionID: actionID, Status: "failed"}
+			result := ActionResultNotice{ActionID: actionID, Status: "failed", Effect: "unknown"}
 			if err != nil {
 				if errors.Is(callCtx.Err(), context.DeadlineExceeded) || errors.Is(callCtx.Err(), context.Canceled) {
 					result.Status = "unknown"
@@ -2460,7 +2899,12 @@ func (r *Runtime) startStage4Action(ctx context.Context, leaseID string, action 
 				result.Result = fmt.Sprintf(`{"error":%q}`, truncate(err.Error(), 2048))
 			} else {
 				result.Status = performed.Status
+				result.Effect = performed.Effect
 				result.Result = performed.Output
+				if performed.Observation != nil {
+					observation := observationFromOrgan(*performed.Observation)
+					result.Observation = &observation
+				}
 			}
 			result.Result = redactRuntimeSecret(result.Result, r.config.ModelGateway.APIKey)
 			select {
@@ -2480,11 +2924,33 @@ func (r *Runtime) handleStage4ActionResult(ctx context.Context, result ActionRes
 	}
 	completed := *r.state.PendingAction
 	completed.Status = result.Status
+	completed.Effect = result.Effect
 	if completed.Status != "completed" && completed.Status != "failed" && completed.Status != "unknown" {
 		completed.Status = "unknown"
 	}
 	completed.EndedAt = nowUTC()
 	completed.Result = truncate(result.Result, 64*1024)
+	if completed.Kind == "organ_action" {
+		if err := r.recordOperationOutcome(completed.OrganID, completed.Operation, completed.Status, completed.Result, false); err != nil {
+			return err
+		}
+	}
+	if result.Observation != nil {
+		completed.ObservedSurfaceID = result.Observation.SurfaceID
+		completed.ObservedDigest = result.Observation.Digest
+		newlySeen := r.assimilateActionObservation(*result.Observation)
+		if err := r.journal("action_observation_assimilated", completed.ID, map[string]any{
+			"organ_id": result.Observation.OrganID, "surface_id": result.Observation.SurfaceID,
+			"digest": result.Observation.Digest, "newly_seen_objects": newlySeen,
+		}); err != nil {
+			return err
+		}
+	}
+	completedConcernID := ""
+	if commitment := r.commitmentByID(completed.CommitmentID); commitment != nil {
+		completedConcernID = commitment.ConcernID
+		r.annotateActionAssistanceOpportunity(&completed, completedConcernID)
+	}
 	if err := r.journal("action_"+completed.Status, completed.ID, map[string]any{"kind": completed.Kind, "organ_id": completed.OrganID, "operation": completed.Operation, "result": completed.Result}); err != nil {
 		return err
 	}
@@ -2494,6 +2960,9 @@ func (r *Runtime) handleStage4ActionResult(ctx context.Context, result ActionRes
 		summary = "一项身体行动已结束，现实结果表明操作失败。"
 	} else if completed.Status == "unknown" {
 		summary = "一项身体行动被中断；现实是否已经部分改变尚不确定。"
+	}
+	if completed.ActionAssistanceAvailable {
+		summary += " 同一关切的精确实现已连续遇到困难；一次进阶行动协助当前可用。"
 	}
 	if err := r.addEvent("action_result", "observed", summary, completed.ID, payload, true); err != nil {
 		return err
