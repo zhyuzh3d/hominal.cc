@@ -89,7 +89,7 @@ func TestStageFourModelUsesOneForcedCognitiveCommit(t *testing.T) {
 		if !strings.Contains(instructions, "associative_recall") || !strings.Contains(instructions, "不是方向、目标、命令或奖励") {
 			t.Fatalf("stage four did not preserve Alice's agency over programmatic variation: %q", instructions)
 		}
-		if !strings.Contains(instructions, "default_profile 是本代主力认知") || !strings.Contains(instructions, "Sol/low 是进阶行动协助") || !strings.Contains(instructions, "确定性的本能与机械状态工作由身体内核完成") || !strings.Contains(instructions, "next 只安排同一因果线程中紧接着的一次认知") {
+		if !strings.Contains(instructions, "default_profile 是本代主力认知") || !strings.Contains(instructions, "high/low 是进阶行动协助") || !strings.Contains(instructions, "确定性的本能与机械状态工作由身体内核完成") || !strings.Contains(instructions, "next 只安排同一因果线程中紧接着的一次认知") {
 			t.Fatalf("resource choice semantics remained ambiguous: %q", instructions)
 		}
 		if !strings.Contains(instructions, "机器可读的键值") || !strings.Contains(instructions, "读取到一项声明") {
@@ -145,7 +145,7 @@ func TestStageFourModelUsesOneForcedCognitiveCommit(t *testing.T) {
 
 	config := testConfig(4)
 	config.ModelGateway.BaseURL = server.URL
-	profile := CognitiveProfile{Model: "terra", ReasoningEffort: "medium"}
+	profile := CognitiveProfile{Model: "main", ReasoningEffort: "medium"}
 	request := CognitiveRequest{
 		Lease: Lease{ID: "lease-1", Profile: profile}, Stage: 4,
 		Focus:      Event{ID: "event-1", Kind: "concern_contribution", Source: "memory", Summary: "one child advanced", ConcernID: "parent-concern", LastCommitErr: "previous focus was invalid"},
@@ -438,7 +438,7 @@ func TestHTTPFailureKeepsSafeGatewayFactsWithoutChargingReservation(t *testing.T
 
 	config := testConfig(4)
 	config.ModelGateway.BaseURL = server.URL
-	profile := CognitiveProfile{Model: "terra", ReasoningEffort: "medium"}
+	profile := CognitiveProfile{Model: "main", ReasoningEffort: "medium"}
 	request := CognitiveRequest{
 		Lease: Lease{ID: "lease-http", Profile: profile}, Stage: 4,
 		Focus:      Event{ID: "event-http", Kind: "body_delta", Status: "pending"},
@@ -502,7 +502,7 @@ func TestGatewayFaultSequenceRecoversWithoutInventingSpend(t *testing.T) {
 
 	config := testConfig(4)
 	config.ModelGateway.BaseURL = server.URL
-	profile := CognitiveProfile{Model: "terra", ReasoningEffort: "medium"}
+	profile := CognitiveProfile{Model: "main", ReasoningEffort: "medium"}
 	request := CognitiveRequest{
 		Lease: Lease{ID: "lease-fault", Profile: profile}, Stage: 4,
 		Focus:      Event{ID: "event-fault", Kind: "body_delta", Status: "pending"},
@@ -605,10 +605,10 @@ func checkNativeFunctionCognitionAndBill(t *testing.T, stage int) {
 	config := testConfig(stage)
 	config.ModelGateway.BaseURL = server.URL
 	config.ModelGateway.Adapter = "llmserver"
-	terra := config.CognitiveResource.Models["terra"]
+	terra := config.CognitiveResource.Models["main"]
 	terra.ID = "codex-terra"
-	config.CognitiveResource.Models["terra"] = terra
-	profile := CognitiveProfile{Model: "terra", ReasoningEffort: "none"}
+	config.CognitiveResource.Models["main"] = terra
+	profile := CognitiveProfile{Model: "main", ReasoningEffort: "none"}
 	request := CognitiveRequest{
 		Lease: Lease{ID: "lease-local", Profile: profile, PulseID: 7}, Stage: stage,
 		Focus:      Event{ID: "llmserver-focus", Kind: "body_delta", Status: "pending"},
@@ -638,7 +638,7 @@ func checkNativeFunctionCognitionAndBill(t *testing.T, stage int) {
 func TestLLMServerUnconfirmedBillRejectsCognitionWithoutInventingSpend(t *testing.T) {
 	config := testConfig(10)
 	config.ModelGateway.Adapter = "llmserver"
-	profile := CognitiveProfile{Model: "terra", ReasoningEffort: "none"}
+	profile := CognitiveProfile{Model: "main", ReasoningEffort: "none"}
 	request := CognitiveRequest{
 		Lease: Lease{ID: "lease-unconfirmed", PulseID: 8}, Focus: Event{ID: "focus-unconfirmed"},
 		Config: config, Profile: profile,
@@ -683,7 +683,7 @@ func TestLLMServerConfirmedFailedResponseSettlesCostAndRejectsCognition(t *testi
 	config := testConfig(20)
 	config.ModelGateway.Adapter = "llmserver"
 	config.ModelGateway.BaseURL = server.URL
-	profile := CognitiveProfile{Model: "terra", ReasoningEffort: "none"}
+	profile := CognitiveProfile{Model: "main", ReasoningEffort: "none"}
 	request := CognitiveRequest{
 		Lease: Lease{ID: "lease-failed-confirmed", Profile: profile, PulseID: 9}, Stage: 20,
 		Focus:      Event{ID: "focus-failed-confirmed", Kind: "body_delta", Status: "pending"},

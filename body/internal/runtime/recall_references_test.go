@@ -94,7 +94,7 @@ func TestOperationalRecallEvidenceReachesModelInput(t *testing.T) {
 			index.apply(learningBatch{Memories: []Memory{{ID: "old-method", Meaning: "近期多次使用相同动作形式，重复核验入口"}}})
 			payload, _ := json.Marshal(map[string]any{"evidence_memory_ids": ids, "repeated_action_forms": map[string]int{"browser_snapshot": 4}})
 			focus := Event{ID: "review", Kind: "self_model_difference", Summary: "近期多次使用相同动作形式", Payload: payload}
-			request := CognitiveRequest{Stage: 10, Focus: focus, Candidates: []Event{focus}, Config: testConfig(10), Profile: CognitiveProfile{Model: "terra", ReasoningEffort: "none"}, Lease: Lease{ID: "isolated"}}
+			request := CognitiveRequest{Stage: 10, Focus: focus, Candidates: []Event{focus}, Config: testConfig(10), Profile: CognitiveProfile{Model: "main", ReasoningEffort: "none"}, Lease: Lease{ID: "isolated"}}
 			request.Recall = index.recall(memoryQuery(request.Candidates), "fixed")
 			input := isolatedModelInput(t, request)
 			var view struct {
@@ -144,7 +144,7 @@ func TestStage103ArchivedOperationalReferencesReachModel(t *testing.T) {
 			}
 		}
 	}
-	request := CognitiveRequest{Stage: 10, Focus: focus, Candidates: []Event{focus}, Config: testConfig(10), Profile: CognitiveProfile{Model: "terra", ReasoningEffort: "none"}, Lease: Lease{ID: "archive-replay"}}
+	request := CognitiveRequest{Stage: 10, Focus: focus, Candidates: []Event{focus}, Config: testConfig(10), Profile: CognitiveProfile{Model: "main", ReasoningEffort: "none"}, Lease: Lease{ID: "archive-replay"}}
 	request.Recall = index.recall(memoryQuery(request.Candidates), "frozen-replay")
 	if len(request.Recall.Memories) != 6 {
 		t.Fatalf("causal evidence still displaced: %#v", request.Recall)

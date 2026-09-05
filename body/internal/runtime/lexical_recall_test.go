@@ -42,7 +42,7 @@ func TestStage103ArchivedSubjectRecall(t *testing.T) {
 					}
 					t.Fatalf("existing subject %s missing", tc.subject)
 				}
-				request := CognitiveRequest{Stage: 10, Config: testConfig(10), Profile: CognitiveProfile{Model: "terra", ReasoningEffort: "none"}, Lease: Lease{ID: "subject-replay"}, Recall: found}
+				request := CognitiveRequest{Stage: 10, Config: testConfig(10), Profile: CognitiveProfile{Model: "main", ReasoningEffort: "none"}, Lease: Lease{ID: "subject-replay"}, Recall: found}
 				var view struct {
 					Personal struct {
 						Memories []struct {

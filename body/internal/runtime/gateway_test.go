@@ -16,9 +16,9 @@ func TestGatewayFailureCannotBeBypassedByAnotherFocusOrOrgan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.state.Usage = []UsageRecord{{Time: nowUTC(), LeaseID: "failed", RequestedModel: "terra", FailureCategory: "upstream_unavailable", HTTPStatus: 503}}
-	r.state.Lease = &Lease{ID: "other-focus", FocusID: "other", Profile: CognitiveProfile{Model: "terra", ReasoningEffort: "none"}}
-	local := Lease{ID: "local", Profile: CognitiveProfile{Model: "luna", ReasoningEffort: "none"}}
+	r.state.Usage = []UsageRecord{{Time: nowUTC(), LeaseID: "failed", RequestedModel: "main", FailureCategory: "upstream_unavailable", HTTPStatus: 503}}
+	r.state.Lease = &Lease{ID: "other-focus", FocusID: "other", Profile: CognitiveProfile{Model: "main", ReasoningEffort: "none"}}
+	local := Lease{ID: "local", Profile: CognitiveProfile{Model: "fast", ReasoningEffort: "none"}}
 	r.peripheralLeases[local.ID] = local
 	for _, owner := range []Lease{*r.state.Lease, local} {
 		ack := make(chan NoticeAck, 1)
@@ -110,7 +110,7 @@ func TestGatewayRecoveryAdmitsOneRequestAndAcceptsLateBill(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.state.Usage = []UsageRecord{{LeaseID: "failed", Time: time.Now().Add(-11 * time.Second).UTC().Format(time.RFC3339Nano), FailureCategory: "transport_error"}}
-	owner := Lease{ID: "recover", Profile: CognitiveProfile{Model: "terra", ReasoningEffort: "none"}}
+	owner := Lease{ID: "recover", Profile: CognitiveProfile{Model: "main", ReasoningEffort: "none"}}
 	r.state.Lease = &owner
 	reserve := func(key string) NoticeAck {
 		ack := make(chan NoticeAck, 1)
@@ -125,7 +125,7 @@ func TestGatewayRecoveryAdmitsOneRequestAndAcceptsLateBill(t *testing.T) {
 	r.state.Lease = nil
 	for iteration := 0; iteration < 2; iteration++ {
 		ack := make(chan NoticeAck, 1)
-		usage := UsageRecord{Time: nowUTC(), LeaseID: owner.ID, RequestedModel: "terra", ReservedMicrousd: 1000, ActualMicrousd: 100, CostConfirmed: true, Status: "completed"}
+		usage := UsageRecord{Time: nowUTC(), LeaseID: owner.ID, RequestedModel: "main", ReservedMicrousd: 1000, ActualMicrousd: 100, CostConfirmed: true, Status: "completed"}
 		if err := r.handleModelNotice(WorkerNotice{CallID: "probe", LeaseID: owner.ID, Kind: "model_usage", Payload: usage, Ack: ack}); err != nil {
 			t.Fatal(err)
 		}
@@ -141,7 +141,7 @@ func TestGatewayRecoveryAdmitsOneRequestAndAcceptsLateBill(t *testing.T) {
 
 func TestGatewayDenialRetainsInfrastructureMeaningAcrossModelBoundary(t *testing.T) {
 	config := testConfig(10)
-	profile := CognitiveProfile{Model: "terra", ReasoningEffort: "none"}
+	profile := CognitiveProfile{Model: "main", ReasoningEffort: "none"}
 	request := CognitiveRequest{Config: config, Profile: profile, Lease: Lease{ID: "main", Profile: profile}}
 	notices := make(chan WorkerNotice)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)

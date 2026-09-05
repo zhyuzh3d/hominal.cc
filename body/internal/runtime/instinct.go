@@ -51,7 +51,7 @@ func (r *Runtime) startInstinct(ctx context.Context, observation organ.Observati
 	if strings.TrimSpace(question.Question) == "" || strings.TrimSpace(question.Material) == "" {
 		return
 	}
-	profile := CognitiveProfile{Model: "luna", ReasoningEffort: "none"}
+	profile := CognitiveProfile{Model: "fast", ReasoningEffort: "none"}
 	if _, err := resolveModel(r.config.CognitiveResource, profile); err != nil {
 		return
 	}

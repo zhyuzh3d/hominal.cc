@@ -1436,7 +1436,7 @@ func (r *Runtime) cognitiveRequestAllowedAt(request CognitiveRequest, now time.T
 func (r *Runtime) recoveryProfile(failedModel string) (CognitiveProfile, bool) {
 	// Stage ten assigns consciousness and organ assistance distinct roles.
 	// A failed assistant can hand back to the main profile; a main-model failure
-	// waits for that model instead of automatically promoting Sol or an instinct.
+	// waits for that model instead of automatically promoting the high role or an instinct.
 	if r.state.Stage >= 10 {
 		main := r.state.CognitiveResource.DefaultProfile
 		if main.Model == "" {
@@ -1449,7 +1449,7 @@ func (r *Runtime) recoveryProfile(failedModel string) (CognitiveProfile, bool) {
 	// a lower-capability alternate. The recovery source and purpose remain
 	// visible to Alice; this is continuity under a failed organ, not a silent
 	// second stream of thought.
-	for _, model := range []string{"sol", "terra", "luna"} {
+	for _, model := range []string{"high", "main", "fast"} {
 		if model == failedModel {
 			continue
 		}

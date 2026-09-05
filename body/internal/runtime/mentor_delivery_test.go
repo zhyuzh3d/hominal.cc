@@ -49,7 +49,7 @@ func TestUnreadMentorDeliveryIsNotAnExecutingAction(t *testing.T) {
 				}
 				r.state.Background = []Event{focus}
 				r.activeCandidates = map[string]Event{focus.ID: focus}
-				request := CognitiveRequest{Stage: 10, Config: r.config, State: r.state, Focus: focus, Candidates: []Event{focus}, Profile: CognitiveProfile{Model: "terra", ReasoningEffort: "none"}, Lease: Lease{ID: "delivery-request"}}
+				request := CognitiveRequest{Stage: 10, Config: r.config, State: r.state, Focus: focus, Candidates: []Event{focus}, Profile: CognitiveProfile{Model: "main", ReasoningEffort: "none"}, Lease: Lease{ID: "delivery-request"}}
 				if !mentorWireHasAction(t, request, "mentor_send") {
 					t.Error("unread delivery removed an independent expression from the actual model tool")
 				}
@@ -92,7 +92,7 @@ func TestUnreadMentorDeliveryIsNotAnExecutingAction(t *testing.T) {
 func TestMentorDeliveryChangePreservesRealityAndAssistantBoundaries(t *testing.T) {
 	payload, _ := json.Marshal(map[string]string{"commitment_id": "prior-send"})
 	focus := Event{ID: "reply", Kind: "mentor_received", Payload: payload}
-	request := CognitiveRequest{Stage: 10, Config: testConfig(10), Focus: focus, Candidates: []Event{focus}, Profile: CognitiveProfile{Model: "terra", ReasoningEffort: "none"}, Lease: Lease{ID: "reply-only"}}
+	request := CognitiveRequest{Stage: 10, Config: testConfig(10), Focus: focus, Candidates: []Event{focus}, Profile: CognitiveProfile{Model: "main", ReasoningEffort: "none"}, Lease: Lease{ID: "reply-only"}}
 	if mentorWireHasAction(t, request, "mentor_send") || mentorWireHasAction(t, request, "organ_action") {
 		t.Fatal("linked delayed Reality reopened effectors before content assimilation")
 	}
@@ -122,7 +122,7 @@ func TestStage103ArchivedCrossingMentorMessage(t *testing.T) {
 	}
 	defer gz.Close()
 	tr := tar.NewReader(gz)
-	request := CognitiveRequest{Stage: 10, Config: testConfig(10), Profile: CognitiveProfile{Model: "terra", ReasoningEffort: "none"}, Lease: Lease{ID: "crossing-replay"}}
+	request := CognitiveRequest{Stage: 10, Config: testConfig(10), Profile: CognitiveProfile{Model: "main", ReasoningEffort: "none"}, Lease: Lease{ID: "crossing-replay"}}
 	for {
 		h, err := tr.Next()
 		if err == io.EOF {

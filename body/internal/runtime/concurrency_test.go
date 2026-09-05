@@ -14,8 +14,8 @@ func TestSharedReservationsIncludeMainAndLocalModelsAndSurviveLateResults(t *tes
 		t.Fatal(err)
 	}
 	r.config.CognitiveResource.RollingHourLimitMicrousd = 1000
-	main := Lease{ID: "main", Profile: CognitiveProfile{Model: "terra", ReasoningEffort: "none"}}
-	local := Lease{ID: "local", Profile: CognitiveProfile{Model: "luna", ReasoningEffort: "none"}}
+	main := Lease{ID: "main", Profile: CognitiveProfile{Model: "main", ReasoningEffort: "none"}}
+	local := Lease{ID: "local", Profile: CognitiveProfile{Model: "fast", ReasoningEffort: "none"}}
 	r.state.Lease = &main
 	r.peripheralLeases[local.ID] = local
 	reserve := func(key string, owner Lease, amount int64) bool {
@@ -131,7 +131,7 @@ func TestLocalInstinctDoesNotOwnConsciousnessOrPersonalHistory(t *testing.T) {
 		if string(encoded) == "" || request.State.Self.Narrative != "" {
 			t.Fatal("local model received personal history")
 		}
-		if request.Profile.Model != "luna" || request.Profile.ReasoningEffort != "none" {
+		if request.Profile.Model != "fast" || request.Profile.ReasoningEffort != "none" {
 			t.Fatal("local role changed")
 		}
 	case <-time.After(time.Second):

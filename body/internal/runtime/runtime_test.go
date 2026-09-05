@@ -73,11 +73,11 @@ func testConfig(stage int) Config {
 			RollingHourLimitMicrousd: 5_000_000,
 			RollingDayLimitMicrousd:  50_000_000,
 			Models: map[string]CognitiveModelConfig{
-				"luna":  {ID: "gpt-5.6-luna", InputPerMillionMicrousd: 200_000, CachedInputPerMillionMicrousd: 20_000, OutputPerMillionMicrousd: 1_200_000, SupportedReasoningEfforts: []string{"none", "low", "medium", "high", "xhigh", "max"}},
-				"terra": {ID: "gpt-5.6-terra", InputPerMillionMicrousd: 2_000_000, CachedInputPerMillionMicrousd: 200_000, OutputPerMillionMicrousd: 12_000_000, SupportedReasoningEfforts: []string{"none", "low", "medium", "high", "xhigh", "max"}},
-				"sol":   {ID: "gpt-5.6-sol", InputPerMillionMicrousd: 4_000_000, CachedInputPerMillionMicrousd: 400_000, OutputPerMillionMicrousd: 20_000_000, SupportedReasoningEfforts: []string{"none", "low", "medium", "high", "xhigh", "max"}},
+				"fast": {ID: "gpt-5.6-luna", InputPerMillionMicrousd: 200_000, CachedInputPerMillionMicrousd: 20_000, OutputPerMillionMicrousd: 1_200_000, SupportedReasoningEfforts: []string{"none", "low", "medium", "high", "xhigh", "max"}},
+				"main": {ID: "gpt-5.6-terra", InputPerMillionMicrousd: 2_000_000, CachedInputPerMillionMicrousd: 200_000, OutputPerMillionMicrousd: 12_000_000, SupportedReasoningEfforts: []string{"none", "low", "medium", "high", "xhigh", "max"}},
+				"high": {ID: "gpt-5.6-sol", InputPerMillionMicrousd: 4_000_000, CachedInputPerMillionMicrousd: 400_000, OutputPerMillionMicrousd: 20_000_000, SupportedReasoningEfforts: []string{"none", "low", "medium", "high", "xhigh", "max"}},
 			},
-			InitialDefaultProfile:   CognitiveProfile{Model: "terra", ReasoningEffort: "medium"},
+			InitialDefaultProfile:   CognitiveProfile{Model: "main", ReasoningEffort: "medium"},
 			ValidationRetryPerFocus: 1, ContinuationPerFocus: 1,
 			PaidFailureThreshold: 3, PaidFailureWindowMinutes: 10, ModelProtectionMinutes: 10,
 		},
@@ -301,7 +301,7 @@ func TestFailedFirstCognitionDoesNotEraseReadyT0(t *testing.T) {
 	}
 	t0 := runtime.state.T0
 	runtime.state.Background = []Event{{ID: "event-1", Kind: "birth_orientation", Status: "in_focus"}}
-	runtime.state.Lease = &Lease{ID: "lease-1", FocusID: "event-1", Profile: CognitiveProfile{Model: "terra", ReasoningEffort: "medium"}}
+	runtime.state.Lease = &Lease{ID: "lease-1", FocusID: "event-1", Profile: CognitiveProfile{Model: "main", ReasoningEffort: "medium"}}
 	result := CognitiveResult{LeaseID: "lease-1", FocusID: "event-1", Error: &CognitiveResourceUnavailableError{Reason: "temporarily unavailable"}}
 	if err := runtime.handleCognitiveResult(context.Background(), result); err != nil {
 		t.Fatal(err)
@@ -323,7 +323,7 @@ func TestReadyRuntimeEstablishesT0BeforeFirstCognitiveCommit(t *testing.T) {
 	event := Event{ID: "event-birth", Kind: "birth_orientation", Summary: "出生事实", Status: "in_focus"}
 	runtime.state.Background = []Event{event}
 	runtime.activeCandidates = map[string]Event{event.ID: event}
-	runtime.state.Lease = &Lease{ID: "lease-1", FocusID: event.ID, Profile: CognitiveProfile{Model: "terra", ReasoningEffort: "medium"}}
+	runtime.state.Lease = &Lease{ID: "lease-1", FocusID: event.ID, Profile: CognitiveProfile{Model: "main", ReasoningEffort: "medium"}}
 	commit := CognitiveCommit{
 		Appraisals: []CandidateAppraisal{{CandidateID: event.ID, Meaning: "这是我开始认识身体的现实起点", Difference: 0.8, Ownership: 1, Value: 0.7, Urgency: 0.4, Answerability: 0.9, Certainty: 0.8, Resolution: "reframed"}},
 		FocusID:    event.ID, ThoughtThread: "我先从现实身体开始。", Action: CognitiveAction{Kind: "none"},
@@ -423,9 +423,9 @@ func TestKeepResourceChoiceAcceptsAnExplicitCurrentProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime.state.Lease = &Lease{ID: "lease-1", FocusID: "event-1", Profile: CognitiveProfile{Model: "terra", ReasoningEffort: "medium"}}
-	profile, err := runtime.validateResourceChoice(CognitiveResourceChoice{Apply: "keep", Model: "terra", ReasoningEffort: "medium"}, "event-1", "none")
-	if err != nil || profile.Model != "terra" || profile.ReasoningEffort != "medium" {
+	runtime.state.Lease = &Lease{ID: "lease-1", FocusID: "event-1", Profile: CognitiveProfile{Model: "main", ReasoningEffort: "medium"}}
+	profile, err := runtime.validateResourceChoice(CognitiveResourceChoice{Apply: "keep", Model: "main", ReasoningEffort: "medium"}, "event-1", "none")
+	if err != nil || profile.Model != "main" || profile.ReasoningEffort != "medium" {
 		t.Fatalf("explicit current profile was rejected: %#v %v", profile, err)
 	}
 }
@@ -435,13 +435,13 @@ func TestResourceChoiceFollowsAttentionPulseWhenSelectedFocusChanges(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime.state.Lease = &Lease{ID: "lease-1", FocusID: "event-1", Profile: CognitiveProfile{Model: "terra", ReasoningEffort: "medium"}}
+	runtime.state.Lease = &Lease{ID: "lease-1", FocusID: "event-1", Profile: CognitiveProfile{Model: "main", ReasoningEffort: "medium"}}
 	runtime.activeCandidates = map[string]Event{
 		"event-1": {ID: "event-1", Kind: "body_delta"},
 		"event-2": {ID: "event-2", Kind: "mentor_message"},
 	}
 	profile, err := runtime.validateResourceChoice(CognitiveResourceChoice{Apply: "keep", Model: "current", ReasoningEffort: "current"}, "event-2", "none")
-	if err != nil || profile.Model != "terra" || profile.ReasoningEffort != "medium" {
+	if err != nil || profile.Model != "main" || profile.ReasoningEffort != "medium" {
 		t.Fatalf("selected focus within the same attention pulse was rejected: %#v %v", profile, err)
 	}
 }
@@ -612,9 +612,9 @@ func TestStageFiveInterruptedActionKeepsCommitmentAndUnknownReality(t *testing.T
 	state := State{
 		Schema: stateSchema, InstanceID: "instance", Stage: 5,
 		Mentor:            MentorState{Received: map[string]uint64{}},
-		CognitiveResource: CognitiveResourceState{DefaultProfile: CognitiveProfile{Model: "terra", ReasoningEffort: "medium"}},
+		CognitiveResource: CognitiveResourceState{DefaultProfile: CognitiveProfile{Model: "main", ReasoningEffort: "medium"}},
 		Commitments:       []ActionCommitment{{ID: "commitment-crash", ActionKind: "organ_action", Status: "acting"}},
-		Lease:             &Lease{ID: "lease-crash", FocusID: "event-origin", Profile: CognitiveProfile{Model: "terra", ReasoningEffort: "medium"}},
+		Lease:             &Lease{ID: "lease-crash", FocusID: "event-origin", Profile: CognitiveProfile{Model: "main", ReasoningEffort: "medium"}},
 		PendingAction:     &ActionState{ID: "action-crash", LeaseID: "lease-crash", CommitmentID: "commitment-crash", Kind: "organ_action", Status: "started"},
 	}
 	if err := store.Save(&state); err != nil {
@@ -1671,7 +1671,7 @@ func TestStageNineUsableActionSurvivesMissingDurableConcernBoundary(t *testing.T
 	}
 	runtime.state.Lease = &Lease{
 		ID: "momentary-lease", FocusID: event.ID,
-		Profile: CognitiveProfile{Model: "terra", ReasoningEffort: "medium"},
+		Profile: CognitiveProfile{Model: "main", ReasoningEffort: "medium"},
 	}
 	if err := runtime.handleCognitiveResult(context.Background(), CognitiveResult{
 		LeaseID: runtime.state.Lease.ID, FocusID: event.ID, Stage4: &commit,
@@ -2477,7 +2477,7 @@ func TestExplorationModelWaitDoesNotMultiplyCandidates(t *testing.T) {
 		t.Fatal(err)
 	}
 	runtime.state.ValueField.Activation.Exploration = 0.8
-	runtime.state.Background = []Event{{ID: "waiting", Kind: "endogenous_change", Status: "model_wait", WaitModel: "terra"}}
+	runtime.state.Background = []Event{{ID: "waiting", Kind: "endogenous_change", Status: "model_wait", WaitModel: "main"}}
 	for index := 0; index < 120; index++ {
 		if err := runtime.advanceDynamics(5 * time.Second); err != nil {
 			t.Fatal(err)
@@ -2500,18 +2500,18 @@ func TestProtectedActionRealityUsesOneAlternateBeforeWaiting(t *testing.T) {
 	runtime.state.Commitments = []ActionCommitment{{ID: "commitment", Status: "reality_available"}}
 	runtime.state.Lease = &Lease{
 		ID: "failed-lease", FocusID: "reality",
-		Profile: CognitiveProfile{Model: "terra", ReasoningEffort: "medium"},
+		Profile: CognitiveProfile{Model: "main", ReasoningEffort: "medium"},
 	}
 	for index := 0; index < runtime.config.CognitiveResource.PaidFailureThreshold; index++ {
 		runtime.state.Usage = append(runtime.state.Usage, UsageRecord{
 			Time:           time.Now().UTC().Add(-time.Duration(index) * time.Second).Format(time.RFC3339Nano),
-			RequestedModel: "terra", Status: "failure_cost_unconfirmed", FailureCategory: "function_call_not_supported",
+			RequestedModel: "main", Status: "failure_cost_unconfirmed", FailureCategory: "function_call_not_supported",
 		})
 	}
 
 	result := CognitiveResult{
 		LeaseID: "failed-lease", FocusID: "reality",
-		Error: &ModelCallError{Fact: ModelFailureFact{Model: "terra", Category: "function_call_not_supported", HTTPStatus: 422}},
+		Error: &ModelCallError{Fact: ModelFailureFact{Model: "main", Category: "function_call_not_supported", HTTPStatus: 422}},
 	}
 	if err := runtime.handleCognitiveResult(context.Background(), result); err != nil {
 		t.Fatal(err)
@@ -2519,16 +2519,16 @@ func TestProtectedActionRealityUsesOneAlternateBeforeWaiting(t *testing.T) {
 	defer close(cognizer.release)
 	select {
 	case request := <-cognizer.started:
-		if request.Focus.ID != "reality" || request.Profile.Model != "sol" || request.Profile.ReasoningEffort != "low" || request.Lease.ProfileSource != "resource_recovery" {
+		if request.Focus.ID != "reality" || request.Profile.Model != "high" || request.Profile.ReasoningEffort != "low" || request.Lease.ProfileSource != "resource_recovery" {
 			t.Fatalf("protected Reality did not continue once through an alternate model: %#v", request)
 		}
-		if request.Lease.RecoveryForModel != "terra" {
+		if request.Lease.RecoveryForModel != "main" {
 			t.Fatalf("recovery lease lost the failed primary model: %#v", request.Lease)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("protected Reality entered model_wait before the bounded alternate-model recovery")
 	}
-	protected := runtime.state.CognitiveResource.ProtectedModels["terra"]
+	protected := runtime.state.CognitiveResource.ProtectedModels["main"]
 	if !protected.RecoveryBlocked {
 		t.Fatalf("the bounded recovery was not recorded: %#v", protected)
 	}
@@ -2539,17 +2539,17 @@ func TestSuccessfulAlternateKeepsRecoveryAvailableForTheNextCausalStep(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime.state.CognitiveResource.ProtectedModels["terra"] = ProtectedModel{
+	runtime.state.CognitiveResource.ProtectedModels["main"] = ProtectedModel{
 		Until:           time.Now().UTC().Add(time.Minute).Format(time.RFC3339Nano),
 		Reason:          "repeated model failures",
 		RecoveryBlocked: true,
 	}
-	lease := &Lease{ProfileSource: "resource_recovery", RecoveryForModel: "terra"}
+	lease := &Lease{ProfileSource: "resource_recovery", RecoveryForModel: "main"}
 	runtime.releaseSuccessfulRecovery(lease)
-	if runtime.state.CognitiveResource.ProtectedModels["terra"].RecoveryBlocked {
+	if runtime.state.CognitiveResource.ProtectedModels["main"].RecoveryBlocked {
 		t.Fatal("a successful alternate left the next Reality cut off from cognition")
 	}
-	if !runtime.protectedModelRecoveryAvailable("terra") {
+	if !runtime.protectedModelRecoveryAvailable("main") {
 		t.Fatal("a successful alternate could not preserve the following causal step")
 	}
 }
@@ -2562,25 +2562,25 @@ func TestFailedAlternateModelBacksOffTheOriginalReality(t *testing.T) {
 	start := time.Now().UTC()
 	runtime.state.Background = []Event{{ID: "reality", Kind: "action_result", Status: "in_focus"}}
 	runtime.state.Commitments = []ActionCommitment{{ID: "commitment", Status: "reality_available"}}
-	runtime.state.CognitiveResource.ProtectedModels["terra"] = ProtectedModel{
+	runtime.state.CognitiveResource.ProtectedModels["main"] = ProtectedModel{
 		Until: start.Add(time.Minute).Format(time.RFC3339Nano), Reason: "repeated model failures", RecoveryBlocked: true,
 	}
 	runtime.state.Lease = &Lease{
 		ID: "recovery-lease", FocusID: "reality",
-		Profile:       CognitiveProfile{Model: "luna", ReasoningEffort: "low"},
-		ProfileSource: "resource_recovery", RecoveryForModel: "terra",
+		Profile:       CognitiveProfile{Model: "fast", ReasoningEffort: "low"},
+		ProfileSource: "resource_recovery", RecoveryForModel: "main",
 	}
 	result := CognitiveResult{
 		LeaseID: "recovery-lease", FocusID: "reality",
-		Error: &ModelCallError{Fact: ModelFailureFact{Model: "luna", Category: "function_call_not_supported", HTTPStatus: 422}},
+		Error: &ModelCallError{Fact: ModelFailureFact{Model: "fast", Category: "function_call_not_supported", HTTPStatus: 422}},
 	}
 	if err := runtime.handleCognitiveResult(context.Background(), result); err != nil {
 		t.Fatal(err)
 	}
-	if runtime.state.Background[0].Status != "model_wait" || runtime.state.Background[0].WaitModel != "terra" {
+	if runtime.state.Background[0].Status != "model_wait" || runtime.state.Background[0].WaitModel != "main" {
 		t.Fatalf("failed alternate did not preserve the original Reality in model_wait: %#v", runtime.state.Background[0])
 	}
-	protected := runtime.state.CognitiveResource.ProtectedModels["terra"]
+	protected := runtime.state.CognitiveResource.ProtectedModels["main"]
 	until, err := time.Parse(time.RFC3339Nano, protected.Until)
 	if err != nil {
 		t.Fatal(err)
@@ -4897,7 +4897,7 @@ func TestWithheldActionDoesNotScheduleAContinuationWithoutReality(t *testing.T) 
 		}},
 		Action: CognitiveAction{Kind: "organ_action", OrganID: "system", Operation: "exec", Input: "inspect-ad"},
 		ResourceChoice: CognitiveResourceChoice{
-			Apply: "next", Model: "sol", ReasoningEffort: "medium", Purpose: "absorb the action result",
+			Apply: "next", Model: "high", ReasoningEffort: "medium", Purpose: "absorb the action result",
 		},
 	}
 	normalized, withheld := normalizeUnendorsedAction(commit, 0.45)
@@ -5114,7 +5114,7 @@ func TestSettledActionBoundaryReturnsAsFactWithoutValidationLoop(t *testing.T) {
 		focus,
 	}
 	runtime.state.ValueAffordances["mentor_channel"] = ValueAffordanceTrace{LastPresentedAt: nowUTC()}
-	runtime.state.Lease = &Lease{ID: "lease-now", FocusID: focus.ID, Profile: CognitiveProfile{Model: "terra", ReasoningEffort: "none"}}
+	runtime.state.Lease = &Lease{ID: "lease-now", FocusID: focus.ID, Profile: CognitiveProfile{Model: "main", ReasoningEffort: "none"}}
 	runtime.activeCandidates = map[string]Event{focus.ID: focus}
 	commit := CognitiveCommit{
 		FocusID: focus.ID,
@@ -5705,7 +5705,7 @@ func TestCognitiveUsageLedgerSurvivesGenerationChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	record := UsageRecord{Time: nowUTC(), LeaseID: "lease-across-generations", RequestedModel: "terra", ActualMicrousd: 125_000, Status: "completed", CostConfirmed: true}
+	record := UsageRecord{Time: nowUTC(), LeaseID: "lease-across-generations", RequestedModel: "main", ActualMicrousd: 125_000, Status: "completed", CostConfirmed: true}
 	if err := first.store.AppendUsage(record); err != nil {
 		t.Fatal(err)
 	}
@@ -5727,11 +5727,11 @@ func TestSemanticCommitFailureDoesNotPretendGatewayIsUnavailable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime.state.Lease = &Lease{ID: "lease-semantic", FocusID: "event-1", Profile: CognitiveProfile{Model: "terra", ReasoningEffort: "medium"}}
+	runtime.state.Lease = &Lease{ID: "lease-semantic", FocusID: "event-1", Profile: CognitiveProfile{Model: "main", ReasoningEffort: "medium"}}
 	runtime.state.Usage = []UsageRecord{
-		{Time: nowUTC(), LeaseID: "old-1", RequestedModel: "terra", ActualMicrousd: 1, Status: "unusable", CostConfirmed: true},
-		{Time: nowUTC(), LeaseID: "old-2", RequestedModel: "terra", ActualMicrousd: 1, Status: "unusable", CostConfirmed: true},
-		{Time: nowUTC(), LeaseID: "lease-semantic", RequestedModel: "terra", ActualMicrousd: 1, Status: "completed", CostConfirmed: true},
+		{Time: nowUTC(), LeaseID: "old-1", RequestedModel: "main", ActualMicrousd: 1, Status: "unusable", CostConfirmed: true},
+		{Time: nowUTC(), LeaseID: "old-2", RequestedModel: "main", ActualMicrousd: 1, Status: "unusable", CostConfirmed: true},
+		{Time: nowUTC(), LeaseID: "lease-semantic", RequestedModel: "main", ActualMicrousd: 1, Status: "completed", CostConfirmed: true},
 	}
 	runtime.state.Background = []Event{{ID: "event-1", Kind: "endogenous_change", Status: "in_focus"}}
 	runtime.activeCandidates = map[string]Event{"event-1": runtime.state.Background[0]}
@@ -5751,7 +5751,7 @@ func TestStageTenAssistanceCannotSubmitCognitiveCommit(t *testing.T) {
 	runtime.state.Stage = 10
 	runtime.state.Lease = &Lease{
 		ID: "lease-assist", FocusID: "assist-focus", ProfileSource: "next",
-		Profile:        CognitiveProfile{Model: "sol", ReasoningEffort: "low"},
+		Profile:        CognitiveProfile{Model: "high", ReasoningEffort: "low"},
 		ProfilePurpose: "在 X 发布主力认知已经写定的短句，并取得新的状态 URL",
 	}
 	runtime.state.Concerns = []Concern{{
@@ -5775,7 +5775,7 @@ func TestStageTenAssistanceCannotSubmitCognitiveCommit(t *testing.T) {
 		ExperienceUpdates:      []ExperienceUpdate{{Judgment: "协助器决定了新的生活判断"}},
 		RecallQuery:            "开始另一个个人主题",
 		ValueOrientationUpdate: LifeValueVector{Relatedness: 1},
-		ResourceChoice:         CognitiveResourceChoice{Apply: "next", Model: "sol", ReasoningEffort: "low", Purpose: "继续协助"},
+		ResourceChoice:         CognitiveResourceChoice{Apply: "next", Model: "high", ReasoningEffort: "low", Purpose: "继续协助"},
 	}
 	if err := runtime.handleCognitiveResult(context.Background(), CognitiveResult{LeaseID: "lease-assist", FocusID: focus.ID, Stage4: &commit}); err != nil {
 		t.Fatal(err)
@@ -5793,13 +5793,13 @@ func TestStageTenActionAssistanceCannotLeakPastAnAlreadyFormedAction(t *testing.
 	runtime.state.Stage = 10
 	runtime.state.Lease = &Lease{
 		ID: "lease-main", FocusID: "failed-reality",
-		Profile: CognitiveProfile{Model: "luna", ReasoningEffort: "none"},
+		Profile: CognitiveProfile{Model: "fast", ReasoningEffort: "none"},
 	}
 	runtime.state.Concerns = []Concern{{ID: "owned", Resolution: "hold"}}
 	focus := Event{ID: "failed-reality", Kind: "action_result", ConcernID: "owned", Status: "in_focus"}
 	runtime.activeCandidates = map[string]Event{focus.ID: focus}
 	choice := CognitiveResourceChoice{
-		Apply: "next", Model: "sol", ReasoningEffort: "low",
+		Apply: "next", Model: "high", ReasoningEffort: "low",
 		Purpose: "用已经固定的命令完成一次身体实现",
 	}
 	if _, err := runtime.validateResourceChoice(choice, focus.ID, "mentor_send", "owned"); err == nil || !strings.Contains(err.Error(), "action none") {

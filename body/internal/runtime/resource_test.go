@@ -8,7 +8,7 @@ import (
 )
 
 func TestCognitiveCostUsesCachedInputWithoutDoubleCountingReasoning(t *testing.T) {
-	model := testConfig(4).CognitiveResource.Models["terra"]
+	model := testConfig(4).CognitiveResource.Models["main"]
 	usage := apiUsage{
 		InputTokens:  100,
 		OutputTokens: 20,
@@ -53,11 +53,11 @@ func TestUnaffordablePreferredProfileFallsBackWithoutTakingAwayTheChoice(t *test
 	runtime.state.Usage = []UsageRecord{{Time: nowUTC(), ActualMicrousd: 95_000, Status: "completed", CostConfirmed: true}}
 	runtime.state.Background = []Event{{ID: "resource-focus", Kind: "endogenous_change", Status: "in_focus"}}
 	runtime.state.Lease = &Lease{
-		ID: "lease-preferred", FocusID: "resource-focus", Profile: CognitiveProfile{Model: "terra", ReasoningEffort: "medium"},
+		ID: "lease-preferred", FocusID: "resource-focus", Profile: CognitiveProfile{Model: "main", ReasoningEffort: "medium"},
 	}
 	reservation := ModelReservation{
 		Profile: runtime.state.Lease.Profile, InputTokenUpperBound: 6_000,
-		ReservedMicrousd: reservationCost(runtime.config.CognitiveResource.Models["terra"], 6_000, runtime.config.ModelGateway.MaxOutputTokens),
+		ReservedMicrousd: reservationCost(runtime.config.CognitiveResource.Models["main"], 6_000, runtime.config.ModelGateway.MaxOutputTokens),
 	}
 	ack := make(chan NoticeAck, 1)
 	if err := runtime.handleNotice(WorkerNotice{LeaseID: runtime.state.Lease.ID, Kind: "model_reserve", Payload: reservation, Ack: ack}); err != nil {
@@ -68,7 +68,7 @@ func TestUnaffordablePreferredProfileFallsBackWithoutTakingAwayTheChoice(t *test
 		t.Fatal("an unaffordable preferred profile was reserved")
 	}
 	next := runtime.state.CognitiveResource.NextProfile
-	if next == nil || next.FocusID != "resource-focus" || next.Profile != (CognitiveProfile{Model: "luna", ReasoningEffort: "none"}) || next.Source != "resource_fallback" {
+	if next == nil || next.FocusID != "resource-focus" || next.Profile != (CognitiveProfile{Model: "fast", ReasoningEffort: "none"}) || next.Source != "resource_fallback" {
 		t.Fatalf("the affordable metabolic fallback was not prepared: %#v", next)
 	}
 	if runtime.state.CognitiveResource.Limited != nil {
@@ -84,7 +84,7 @@ func TestUnaffordablePreferredProfileFallsBackWithoutTakingAwayTheChoice(t *test
 		t.Fatalf("the same focus was not reopened for affordable cognition: state=%#v next=%#v", runtime.state.Background[0], runtime.state.CognitiveResource.NextProfile)
 	}
 	profile, source, _ := activeProfileDecision(runtime.state, runtime.config.CognitiveResource, "resource-focus")
-	if profile.Model != "luna" || source != "resource_fallback" {
+	if profile.Model != "fast" || source != "resource_fallback" {
 		t.Fatalf("the fallback fact was not exposed to the next cognition: profile=%#v source=%q", profile, source)
 	}
 }
@@ -98,7 +98,7 @@ func TestResourceLimitWaitReopensWhenRollingSpendExpires(t *testing.T) {
 	runtime.state.Usage = []UsageRecord{{Time: now.Add(-61 * time.Minute).Format(time.RFC3339Nano), ActualMicrousd: 2_000_000}}
 	runtime.state.Background = []Event{{ID: "event-1", Status: "resource_wait"}}
 	runtime.state.CognitiveResource.Limited = &CognitiveResourceLimit{
-		FocusID: "event-1", Profile: CognitiveProfile{Model: "terra", ReasoningEffort: "medium"}, RequiredMicrousd: 100_000,
+		FocusID: "event-1", Profile: CognitiveProfile{Model: "main", ReasoningEffort: "medium"}, RequiredMicrousd: 100_000,
 	}
 	if err := runtime.releaseCognitiveResourceWaits(); err != nil {
 		t.Fatal(err)
@@ -117,18 +117,18 @@ func TestValidationFailureTemporarilyEscalatesOnlyTheCurrentFocus(t *testing.T) 
 	runtime.state.BirthBriefEnteredAt = nowUTC()
 	runtime.state.PlannedEnd = time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano)
 	runtime.state.ValueField.Activation.Exploration = 1
-	runtime.state.CognitiveResource.DefaultProfile = CognitiveProfile{Model: "luna", ReasoningEffort: "low"}
+	runtime.state.CognitiveResource.DefaultProfile = CognitiveProfile{Model: "fast", ReasoningEffort: "low"}
 	runtime.state.Concerns = []Concern{{
 		ID: "exploration-focus", OriginKind: "endogenous_change", Meaning: "接触一个尚未确定意义的现实",
 		Strength: 1, Activation: 1, Ownership: 1, Answerability: 1, Resolution: "hold",
 	}}
 
-	failedProfile := CognitiveProfile{Model: "luna", ReasoningEffort: "low"}
+	failedProfile := CognitiveProfile{Model: "fast", ReasoningEffort: "low"}
 	for attempt := 1; attempt <= 2; attempt++ {
 		leaseID := "lease-validation-" + string(rune('0'+attempt))
 		runtime.state.Lease = &Lease{ID: leaseID, FocusID: "exploration-focus", Profile: failedProfile}
 		runtime.state.Usage = append(runtime.state.Usage, UsageRecord{
-			LeaseID: leaseID, Time: nowUTC(), RequestedModel: "luna", ReasoningEffort: "low",
+			LeaseID: leaseID, Time: nowUTC(), RequestedModel: "fast", ReasoningEffort: "low",
 			ActualMicrousd: 1000, CostConfirmed: true, Status: "completed",
 		})
 		if err := runtime.handleCognitiveResult(context.Background(), CognitiveResult{
@@ -138,7 +138,7 @@ func TestValidationFailureTemporarilyEscalatesOnlyTheCurrentFocus(t *testing.T) 
 		}
 	}
 	next := runtime.state.CognitiveResource.NextProfile
-	if next == nil || next.FocusID != "exploration-focus" || next.Source != "validation_fallback" || next.Profile != (CognitiveProfile{Model: "terra", ReasoningEffort: "medium"}) {
+	if next == nil || next.FocusID != "exploration-focus" || next.Source != "validation_fallback" || next.Profile != (CognitiveProfile{Model: "main", ReasoningEffort: "medium"}) {
 		t.Fatalf("repeated invalid cognition did not receive one stronger focus-scoped profile: %#v", next)
 	}
 	if got := runtime.state.CognitiveResource.DefaultProfile; got != failedProfile {
@@ -152,7 +152,7 @@ func TestStrictExperimentalProfileDoesNotEscalateValidationFailure(t *testing.T)
 		t.Fatal(err)
 	}
 	runtime.config.CognitiveResource.DisableValidationFallback = true
-	if recovered, err := runtime.planValidationRecovery("focus", CognitiveProfile{Model: "luna", ReasoningEffort: "none"}); err != nil || recovered {
+	if recovered, err := runtime.planValidationRecovery("focus", CognitiveProfile{Model: "fast", ReasoningEffort: "none"}); err != nil || recovered {
 		t.Fatalf("strict experimental profile received automatic validation fallback: recovered=%v err=%v", recovered, err)
 	}
 	if runtime.state.CognitiveResource.NextProfile != nil {
@@ -202,28 +202,28 @@ func TestAliceCanChangeDefaultAndRequestOneSerialContinuation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := runtime.applyResourceChoice(
-		CognitiveResourceChoice{Apply: "default", Model: "luna", ReasoningEffort: "low", Purpose: "日常感知更轻快"},
-		CognitiveProfile{Model: "luna", ReasoningEffort: "low"},
+		CognitiveResourceChoice{Apply: "default", Model: "fast", ReasoningEffort: "low", Purpose: "日常感知更轻快"},
+		CognitiveProfile{Model: "fast", ReasoningEffort: "low"},
 		"event-1",
 	); err != nil {
 		t.Fatal(err)
 	}
-	if runtime.state.CognitiveResource.DefaultProfile.Model != "luna" {
+	if runtime.state.CognitiveResource.DefaultProfile.Model != "fast" {
 		t.Fatalf("default profile did not change: %#v", runtime.state.CognitiveResource.DefaultProfile)
 	}
 	if err := runtime.applyResourceChoice(
-		CognitiveResourceChoice{Apply: "next", Model: "sol", ReasoningEffort: "high", Purpose: "把当前矛盾想清楚"},
-		CognitiveProfile{Model: "sol", ReasoningEffort: "high"},
+		CognitiveResourceChoice{Apply: "next", Model: "high", ReasoningEffort: "high", Purpose: "把当前矛盾想清楚"},
+		CognitiveProfile{Model: "high", ReasoningEffort: "high"},
 		"event-1",
 	); err != nil {
 		t.Fatal(err)
 	}
 	next := runtime.state.CognitiveResource.NextProfile
-	if next == nil || next.Profile.Model != "sol" || next.FocusID == "" || len(runtime.state.Background) != 1 || runtime.state.Background[0].Kind != "cognition_continuation" {
+	if next == nil || next.Profile.Model != "high" || next.FocusID == "" || len(runtime.state.Background) != 1 || runtime.state.Background[0].Kind != "cognition_continuation" {
 		t.Fatalf("serial continuation was not formed: next=%#v background=%#v", next, runtime.state.Background)
 	}
 	profile, source, purpose := activeProfileDecision(runtime.state, runtime.config.CognitiveResource, next.FocusID)
-	if profile.Model != "sol" || source != "next" || purpose != "把当前矛盾想清楚" {
+	if profile.Model != "high" || source != "next" || purpose != "把当前矛盾想清楚" {
 		t.Fatalf("continuation choice lost its source or purpose: profile=%#v source=%q purpose=%q", profile, source, purpose)
 	}
 	runtime.state.Concerns = []Concern{{
@@ -243,7 +243,7 @@ func TestNextCanReuseEitherPartOfTheCurrentProfile(t *testing.T) {
 	}
 	runtime.state.Lease = &Lease{
 		ID: "lease-terra", FocusID: "event-1",
-		Profile: CognitiveProfile{Model: "terra", ReasoningEffort: "medium"},
+		Profile: CognitiveProfile{Model: "main", ReasoningEffort: "medium"},
 	}
 	runtime.activeCandidates = map[string]Event{"event-1": {ID: "event-1", Kind: "body_delta"}}
 	choice := CognitiveResourceChoice{
@@ -253,7 +253,7 @@ func TestNextCanReuseEitherPartOfTheCurrentProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if profile.Model != "terra" || profile.ReasoningEffort != "medium" {
+	if profile.Model != "main" || profile.ReasoningEffort != "medium" {
 		t.Fatalf("current profile reference resolved incorrectly: %#v", profile)
 	}
 	if err := runtime.applyResourceChoice(choice, profile, "event-1"); err != nil {
@@ -270,7 +270,7 @@ func TestNextCanReuseEitherPartOfTheCurrentProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if profile.Model != "terra" || profile.ReasoningEffort != "low" {
+	if profile.Model != "main" || profile.ReasoningEffort != "low" {
 		t.Fatalf("partial current profile reference resolved incorrectly: %#v", profile)
 	}
 }
@@ -280,9 +280,9 @@ func TestKeepPreservesThePersistentDefaultAfterAOneUseProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime.state.CognitiveResource.DefaultProfile = CognitiveProfile{Model: "terra", ReasoningEffort: "medium"}
+	runtime.state.CognitiveResource.DefaultProfile = CognitiveProfile{Model: "main", ReasoningEffort: "medium"}
 	runtime.state.Lease = &Lease{
-		ID: "lease-luna", FocusID: "reality", Profile: CognitiveProfile{Model: "luna", ReasoningEffort: "low"}, ProfileSource: "next",
+		ID: "lease-luna", FocusID: "reality", Profile: CognitiveProfile{Model: "fast", ReasoningEffort: "low"}, ProfileSource: "next",
 	}
 	choice := CognitiveResourceChoice{Apply: "keep", Model: "current", ReasoningEffort: "current", Purpose: "让当前轻量档位继续"}
 	profile, err := runtime.validateResourceChoice(choice, "reality", "none")
@@ -292,10 +292,10 @@ func TestKeepPreservesThePersistentDefaultAfterAOneUseProfile(t *testing.T) {
 	if err := runtime.applyResourceChoice(choice, profile, "reality"); err != nil {
 		t.Fatal(err)
 	}
-	if got := runtime.state.CognitiveResource.DefaultProfile; got.Model != "terra" || got.ReasoningEffort != "medium" {
+	if got := runtime.state.CognitiveResource.DefaultProfile; got.Model != "main" || got.ReasoningEffort != "medium" {
 		t.Fatalf("a one-use profile silently replaced the persistent default: %#v", got)
 	}
-	if profile, source, _ := activeProfileDecision(runtime.state, runtime.config.CognitiveResource, "new-focus"); profile.Model != "terra" || source != "default" {
+	if profile, source, _ := activeProfileDecision(runtime.state, runtime.config.CognitiveResource, "new-focus"); profile.Model != "main" || source != "default" {
 		t.Fatalf("the next ordinary focus did not return to the persistent default: profile=%#v source=%q", profile, source)
 	}
 }
@@ -306,16 +306,16 @@ func TestOpenResourcesKeepTheCapabilityFirstPersistentBaseline(t *testing.T) {
 		t.Fatal(err)
 	}
 	runtime.state.Body.CognitiveResourceBand = "open"
-	runtime.state.Lease = &Lease{ID: "lease", FocusID: "event", Profile: CognitiveProfile{Model: "terra", ReasoningEffort: "medium"}}
+	runtime.state.Lease = &Lease{ID: "lease", FocusID: "event", Profile: CognitiveProfile{Model: "main", ReasoningEffort: "medium"}}
 	runtime.activeCandidates = map[string]Event{"event": {ID: "event", Kind: "environment_change"}}
 	if _, err := runtime.validateResourceChoice(
-		CognitiveResourceChoice{Apply: "default", Model: "luna", ReasoningEffort: "low", Purpose: "节省日常成本"},
+		CognitiveResourceChoice{Apply: "default", Model: "fast", ReasoningEffort: "low", Purpose: "节省日常成本"},
 		"event", "none",
 	); err == nil {
 		t.Fatal("open resources allowed an ungrounded persistent downgrade below the birth baseline")
 	}
 	if _, err := runtime.validateResourceChoice(
-		CognitiveResourceChoice{Apply: "next", Model: "luna", ReasoningEffort: "low", Purpose: "一次边界清楚的轻量判断"},
+		CognitiveResourceChoice{Apply: "next", Model: "fast", ReasoningEffort: "low", Purpose: "一次边界清楚的轻量判断"},
 		"event", "none",
 	); err != nil {
 		t.Fatalf("open resources prevented a bounded lower-cost choice: %v", err)
@@ -329,7 +329,7 @@ func TestContinuationCanScheduleRealityAbsorptionOnlyWhenItActs(t *testing.T) {
 	}
 	runtime.state.Lease = &Lease{
 		ID: "lease-continuation", FocusID: "continuation",
-		Profile: CognitiveProfile{Model: "terra", ReasoningEffort: "medium"},
+		Profile: CognitiveProfile{Model: "main", ReasoningEffort: "medium"},
 	}
 	runtime.activeCandidates = map[string]Event{
 		"continuation": {ID: "continuation", Kind: "cognition_continuation", ConcernID: "concern-1"},
@@ -344,7 +344,7 @@ func TestContinuationCanScheduleRealityAbsorptionOnlyWhenItActs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if profile.Model != "terra" || profile.ReasoningEffort != "medium" {
+	if profile.Model != "main" || profile.ReasoningEffort != "medium" {
 		t.Fatalf("continuation action lost the current profile: %#v", profile)
 	}
 }
@@ -356,13 +356,13 @@ func TestStageTenAssistanceUsesExplicitlyContinuedConcern(t *testing.T) {
 	}
 	runtime.state.Concerns = []Concern{{ID: "owned-concern", Strength: 0.4, Resolution: "hold"}}
 	runtime.state.Lease = &Lease{
-		ID: "lease", FocusID: "mentor-reply", Profile: CognitiveProfile{Model: "terra", ReasoningEffort: "none"},
+		ID: "lease", FocusID: "mentor-reply", Profile: CognitiveProfile{Model: "main", ReasoningEffort: "none"},
 	}
 	runtime.activeCandidates = map[string]Event{
 		"mentor-reply": {ID: "mentor-reply", Kind: "mentor_received", ConcernID: "settled-old-concern"},
 	}
 	choice := CognitiveResourceChoice{
-		Apply: "next", Model: "sol", ReasoningEffort: "low", Purpose: "实现已认领且目标固定的身体动作",
+		Apply: "next", Model: "high", ReasoningEffort: "low", Purpose: "实现已认领且目标固定的身体动作",
 	}
 	profile, err := runtime.validateResourceChoice(choice, "mentor-reply", "none", "owned-concern")
 	if err != nil {
@@ -385,8 +385,8 @@ func TestSerialContinuationKeepsTheCurrentConcernIdentity(t *testing.T) {
 	runtime.state.Concerns = []Concern{{ID: "current-concern", Strength: 0.3, Resolution: "hold"}}
 	runtime.state.Background = []Event{{ID: "event-1", Kind: "action_result", Status: "processed", ConcernID: "current-concern"}}
 	if err := runtime.applyResourceChoice(
-		CognitiveResourceChoice{Apply: "next", Model: "luna", ReasoningEffort: "low", Purpose: "继续理解同一段现实"},
-		CognitiveProfile{Model: "luna", ReasoningEffort: "low"},
+		CognitiveResourceChoice{Apply: "next", Model: "fast", ReasoningEffort: "low", Purpose: "继续理解同一段现实"},
+		CognitiveProfile{Model: "fast", ReasoningEffort: "low"},
 		"event-1",
 	); err != nil {
 		t.Fatal(err)
@@ -425,7 +425,7 @@ func TestActionRealityConsumesNextProfileInsteadOfAddingPostRealityThought(t *te
 	runtime.state.Background = []Event{continuation, reality}
 	runtime.state.CognitiveResource.NextProfile = &NextCognitiveProfile{
 		FocusID: continuation.ID, Purpose: "用轻量认知吸收结果",
-		Profile: CognitiveProfile{Model: "luna", ReasoningEffort: "low"},
+		Profile: CognitiveProfile{Model: "fast", ReasoningEffort: "low"},
 	}
 	if err := runtime.bindNextProfileToReality("current-concern", reality.ID); err != nil {
 		t.Fatal(err)
@@ -438,7 +438,7 @@ func TestActionRealityConsumesNextProfileInsteadOfAddingPostRealityThought(t *te
 		t.Fatalf("next profile was not bound to Reality: %#v", next)
 	}
 	profile, source, purpose := activeProfileDecision(runtime.state, runtime.config.CognitiveResource, reality.ID)
-	if profile.Model != "luna" || source != "next" || purpose != "用轻量认知吸收结果" {
+	if profile.Model != "fast" || source != "next" || purpose != "用轻量认知吸收结果" {
 		t.Fatalf("Reality did not receive Alice's chosen profile: profile=%#v source=%q purpose=%q", profile, source, purpose)
 	}
 	request, ok := runtime.nextStage4Request()
@@ -455,17 +455,17 @@ func TestRepeatedPaidUnusableResponsesTemporarilyProtectModel(t *testing.T) {
 	for index := 0; index < 3; index++ {
 		runtime.state.Usage = append(runtime.state.Usage, UsageRecord{
 			Time:           time.Now().UTC().Add(-time.Duration(index) * time.Minute).Format(time.RFC3339Nano),
-			RequestedModel: "terra", ActualMicrousd: 1, Status: "unusable", CostConfirmed: true,
+			RequestedModel: "main", ActualMicrousd: 1, Status: "unusable", CostConfirmed: true,
 		})
 	}
-	protected, err := runtime.protectModelAfterFailures("terra")
+	protected, err := runtime.protectModelAfterFailures("main")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !protected {
 		t.Fatal("repeated paid unusable responses did not protect the model")
 	}
-	if active, _ := modelProtected(runtime.state, "terra", time.Now().UTC()); !active {
+	if active, _ := modelProtected(runtime.state, "main", time.Now().UTC()); !active {
 		t.Fatal("model protection was not active")
 	}
 }
@@ -478,24 +478,24 @@ func TestRepeatedModelSpecificGatewayFailuresProtectOnceAndOfferRecovery(t *test
 	for index := 0; index < 3; index++ {
 		runtime.state.Usage = append(runtime.state.Usage, UsageRecord{
 			Time:           time.Now().UTC().Add(-time.Duration(2-index) * time.Second).Format(time.RFC3339Nano),
-			RequestedModel: "terra", Status: "failure_cost_unconfirmed", FailureCategory: "function_call_not_supported",
+			RequestedModel: "main", Status: "failure_cost_unconfirmed", FailureCategory: "function_call_not_supported",
 		})
 	}
-	protected, err := runtime.protectModelAfterFailures("terra")
+	protected, err := runtime.protectModelAfterFailures("main")
 	if err != nil || !protected {
 		t.Fatalf("model-specific gateway failures did not protect the model: %v", err)
 	}
 	if len(runtime.state.Background) != 1 || runtime.state.Background[0].Kind != "cognitive_resource_change" {
 		t.Fatalf("model protection did not create exactly one body fact: %#v", runtime.state.Background)
 	}
-	if _, err := runtime.protectModelAfterFailures("terra"); err != nil {
+	if _, err := runtime.protectModelAfterFailures("main"); err != nil {
 		t.Fatal(err)
 	}
 	if len(runtime.state.Background) != 1 {
 		t.Fatalf("one protected model created duplicate facts: %#v", runtime.state.Background)
 	}
-	profile, ok := runtime.recoveryProfile("terra")
-	if !ok || profile.Model != "sol" || profile.ReasoningEffort != "low" {
+	profile, ok := runtime.recoveryProfile("main")
+	if !ok || profile.Model != "high" || profile.ReasoningEffort != "low" {
 		t.Fatalf("the bounded action-capable recovery cognition was unavailable: %#v", profile)
 	}
 }
@@ -558,10 +558,10 @@ func TestSharedInfrastructureFailureDoesNotProtectOrSwitchModel(t *testing.T) {
 	for index := 0; index < 4; index++ {
 		runtime.state.Usage = append(runtime.state.Usage, UsageRecord{
 			Time:           time.Now().UTC().Add(-time.Duration(index) * time.Second).Format(time.RFC3339Nano),
-			RequestedModel: "luna", Status: "failure_cost_unconfirmed", FailureCategory: "upstream_unavailable",
+			RequestedModel: "fast", Status: "failure_cost_unconfirmed", FailureCategory: "upstream_unavailable",
 		})
 	}
-	protected, err := runtime.protectModelAfterFailures("luna")
+	protected, err := runtime.protectModelAfterFailures("fast")
 	if err != nil {
 		t.Fatal(err)
 	}

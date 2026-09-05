@@ -31,7 +31,7 @@ func TestGatewayHTTPQuotaAndRateFactsRemainDistinct(t *testing.T) {
 			defer server.Close()
 			config := testConfig(10)
 			config.ModelGateway.BaseURL = server.URL
-			profile := CognitiveProfile{Model: "terra", ReasoningEffort: "none"}
+			profile := CognitiveProfile{Model: "main", ReasoningEffort: "none"}
 			request := CognitiveRequest{Config: config, Stage: 10, Profile: profile, Lease: Lease{ID: "test", Profile: profile}, Focus: Event{ID: "focus"}, Candidates: []Event{{ID: "focus"}}}
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
@@ -80,9 +80,9 @@ func TestGatewayRateAndQuotaPreserveCognitionWithoutModelPromotion(t *testing.T)
 			r.state.Body.NetworkAvailable = true
 			now := time.Now().UTC()
 			r.state.Background = []Event{{ID: "reality", Kind: "action_result", Status: "in_focus", CognitionAttempts: 2}}
-			r.state.Lease = &Lease{ID: "failed", FocusID: "reality", Profile: CognitiveProfile{Model: "terra", ReasoningEffort: "none"}}
+			r.state.Lease = &Lease{ID: "failed", FocusID: "reality", Profile: CognitiveProfile{Model: "main", ReasoningEffort: "none"}}
 			for i := 0; i < 3; i++ {
-				r.state.Usage = append(r.state.Usage, UsageRecord{Time: now.Format(time.RFC3339Nano), RequestedModel: "terra", FailureCategory: category, HTTPStatus: 429, RetryAfter: "37"})
+				r.state.Usage = append(r.state.Usage, UsageRecord{Time: now.Format(time.RFC3339Nano), RequestedModel: "main", FailureCategory: category, HTTPStatus: 429, RetryAfter: "37"})
 			}
 			err = r.handleCognitiveResult(context.Background(), CognitiveResult{LeaseID: "failed", FocusID: "reality", Error: &ModelCallError{Fact: ModelFailureFact{Category: category, HTTPStatus: 429}}})
 			if err != nil {
@@ -108,15 +108,15 @@ func TestStageTenRecoveryReturnsToMainRole(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.state.CognitiveResource.DefaultProfile = CognitiveProfile{Model: "terra", ReasoningEffort: "none"}
-	if got, ok := r.recoveryProfile("terra"); ok {
+	r.state.CognitiveResource.DefaultProfile = CognitiveProfile{Model: "main", ReasoningEffort: "none"}
+	if got, ok := r.recoveryProfile("main"); ok {
 		t.Fatalf("main failure promoted an organ model: %#v", got)
 	}
-	if got, ok := r.recoveryProfile("sol"); !ok || got != r.state.CognitiveResource.DefaultProfile {
+	if got, ok := r.recoveryProfile("high"); !ok || got != r.state.CognitiveResource.DefaultProfile {
 		t.Fatalf("technical assistance did not return to the main role: %#v %v", got, ok)
 	}
-	r.state.CognitiveResource.ProtectedModels["terra"] = ProtectedModel{Until: time.Now().Add(time.Minute).UTC().Format(time.RFC3339Nano)}
-	if _, ok := r.recoveryProfile("sol"); ok {
+	r.state.CognitiveResource.ProtectedModels["main"] = ProtectedModel{Until: time.Now().Add(time.Minute).UTC().Format(time.RFC3339Nano)}
+	if _, ok := r.recoveryProfile("high"); ok {
 		t.Fatal("recovery ignored the main profile's protection")
 	}
 }

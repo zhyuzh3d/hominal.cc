@@ -7,6 +7,28 @@ import stage20
 
 
 class Stage20ControlTests(unittest.TestCase):
+    def test_runtime_roles_resolve_catalog_models_and_default(self):
+        catalog={
+            'luna':{'id':'codex-luna','supported_reasoning_efforts':['none']},
+            'terra':{'id':'codex-terra','supported_reasoning_efforts':['none','low']},
+            'sol':{'id':'codex-sol','supported_reasoning_efforts':['low']},
+        }
+        hominal={'startup_models':{
+            'fast':{'catalog_key':'luna','reasoning_effort':'none'},
+            'main':{'catalog_key':'terra','reasoning_effort':'none'},
+            'high':{'catalog_key':'sol','reasoning_effort':'low'},
+        },'default_role':'main'}
+
+        models,default_profile=stage20.runtime_model_roles(catalog,hominal)
+
+        self.assertEqual({role:value['id'] for role,value in models.items()},
+                         {'fast':'codex-luna','main':'codex-terra','high':'codex-sol'})
+        self.assertEqual(default_profile,{'model':'main','reasoning_effort':'none'})
+
+    def test_runtime_roles_reject_missing_role(self):
+        with self.assertRaisesRegex(ValueError,'fast, main and high'):
+            stage20.runtime_model_roles({}, {'startup_models':{}})
+
     def test_parse_time_accepts_go_trimmed_and_nanosecond_rfc3339(self):
         expected='2026-09-04T19:17:13.576750+00:00'
         for value in (

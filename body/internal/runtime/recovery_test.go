@@ -52,12 +52,12 @@ func TestGatewayContractRejectionStaysWithItsCausalFocus(t *testing.T) {
 		lease := fmt.Sprintf("contract-%d", attempt)
 		markEvent(&r.state, event.ID, "in_focus")
 		r.state.Lease = &Lease{ID: lease, FocusID: event.ID, Profile: r.config.CognitiveResource.InitialDefaultProfile}
-		r.state.Usage = append(r.state.Usage, UsageRecord{Time: nowUTC(), LeaseID: lease, RequestedModel: "terra", ActualMicrousd: 1000, Status: "failure_cost_unconfirmed", FailureCategory: "invalid_provider_tool_call", HTTPStatus: 502})
+		r.state.Usage = append(r.state.Usage, UsageRecord{Time: nowUTC(), LeaseID: lease, RequestedModel: "main", ActualMicrousd: 1000, Status: "failure_cost_unconfirmed", FailureCategory: "invalid_provider_tool_call", HTTPStatus: 502})
 		failure := &ModelCallError{Fact: ModelFailureFact{Category: "invalid_provider_tool_call", HTTPStatus: 502}, Message: "provider returned an invalid function call"}
 		if err := r.handleCognitiveResult(context.Background(), CognitiveResult{LeaseID: lease, FocusID: event.ID, Error: failure}); err != nil {
 			t.Fatal(err)
 		}
-		if _, protected := r.state.CognitiveResource.ProtectedModels["terra"]; protected {
+		if _, protected := r.state.CognitiveResource.ProtectedModels["main"]; protected {
 			t.Fatal("one output contract failure disabled all consciousness")
 		}
 		if attempt >= 2 {
@@ -66,7 +66,7 @@ func TestGatewayContractRejectionStaysWithItsCausalFocus(t *testing.T) {
 			}
 		}
 	}
-	if protected, err := r.protectModelAfterFailures("terra"); err != nil || protected {
+	if protected, err := r.protectModelAfterFailures("main"); err != nil || protected {
 		t.Fatal("contract-only history became model-wide failure")
 	}
 	if r.state.Commitments[0].Status != "reality_available" || r.state.Usage[0].ActualMicrousd != 1000 || r.state.Usage[0].CostConfirmed {
@@ -74,9 +74,9 @@ func TestGatewayContractRejectionStaysWithItsCausalFocus(t *testing.T) {
 	}
 	// An actual non-contract provider failure retains the existing circuit.
 	for n := 0; n < r.config.CognitiveResource.PaidFailureThreshold; n++ {
-		r.state.Usage = append(r.state.Usage, UsageRecord{Time: nowUTC(), RequestedModel: "terra", FailureCategory: "model_unavailable"})
+		r.state.Usage = append(r.state.Usage, UsageRecord{Time: nowUTC(), RequestedModel: "main", FailureCategory: "model_unavailable"})
 	}
-	if protected, err := r.protectModelAfterFailures("terra"); err != nil || !protected {
+	if protected, err := r.protectModelAfterFailures("main"); err != nil || !protected {
 		t.Fatal("real model failure lost protection")
 	}
 }

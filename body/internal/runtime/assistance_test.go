@@ -26,17 +26,17 @@ func TestAssistanceContextSeparatesRoles(t *testing.T) {
 		model, task string
 		self, valid bool
 	}{
-		{"luna", "reasoning", false, true},
-		{"luna", "reasoning", true, false},
-		{"luna", "implementation", false, false},
-		{"sol", "reasoning", false, true},
-		{"sol", "reasoning", true, true},
-		{"sol", "implementation", false, true},
-		{"sol", "unknown", false, false},
+		{"fast", "reasoning", false, true},
+		{"fast", "reasoning", true, false},
+		{"fast", "implementation", false, false},
+		{"high", "reasoning", false, true},
+		{"high", "reasoning", true, true},
+		{"high", "implementation", false, true},
+		{"high", "unknown", false, false},
 	} {
 		t.Run(tc.model+tc.task+map[bool]string{true: "self", false: "local"}[tc.self], func(t *testing.T) {
 			effort := "none"
-			if tc.model == "sol" {
+			if tc.model == "high" {
 				effort = "low"
 			}
 			request := assistanceTestRequest(CognitiveProfile{Model: tc.model, ReasoningEffort: effort}, tc.task, tc.self)
@@ -60,10 +60,10 @@ func TestAssistanceContextSeparatesRoles(t *testing.T) {
 }
 
 func TestAssistanceNativeCallAndSharedAccounting(t *testing.T) {
-	for _, model := range []string{"luna", "sol"} {
+	for _, model := range []string{"fast", "high"} {
 		t.Run(model, func(t *testing.T) {
 			effort := "none"
-			if model == "sol" {
+			if model == "high" {
 				effort = "low"
 			}
 			request := assistanceTestRequest(CognitiveProfile{Model: model, ReasoningEffort: effort}, "reasoning", false)
@@ -81,7 +81,7 @@ func TestAssistanceNativeCallAndSharedAccounting(t *testing.T) {
 				if body["tool_choice"].(map[string]any)["name"] != "assistance_result" || body["parallel_tool_calls"] != false {
 					t.Error("assistance did not use a single native function")
 				}
-				if model == "luna" && body["max_output_tokens"] != float64(200) {
+				if model == "fast" && body["max_output_tokens"] != float64(200) {
 					t.Error("low-tier output is not compact")
 				}
 				_ = json.NewEncoder(w).Encode(map[string]any{
@@ -136,7 +136,7 @@ func TestAssistanceSerialReturnRetryAndNoPersonalMutation(t *testing.T) {
 	r.state.Stage = 10
 	r.config.GenerationKind = "rehearsal" // Keep result acceptance synchronous; no birth activation.
 	r.state.Self.Narrative = "unchanged"
-	choice := CognitiveResourceChoice{Apply: "next", Model: "luna", ReasoningEffort: "none", Task: "reasoning", Purpose: "判断局部条件"}
+	choice := CognitiveResourceChoice{Apply: "next", Model: "fast", ReasoningEffort: "none", Task: "reasoning", Purpose: "判断局部条件"}
 	profile, err := r.validateResourceChoice(choice, "question", "none")
 	if err != nil {
 		t.Fatal(err)
@@ -183,7 +183,7 @@ func TestAssistanceCodeReachesMainIntact(t *testing.T) {
 	answer := strings.Repeat("# implementation detail\n", 300) + "printf 'complete-code-tail'"
 	payload, _ := json.Marshal(map[string]any{"answer": answer, "origin": "inferred", "execution_status": "not_executed"})
 	event := Event{ID: "code-result", Kind: "cognition_assistance_result", Payload: payload}
-	request := CognitiveRequest{Stage: 10, Config: testConfig(10), Focus: event, Candidates: []Event{event}, Profile: CognitiveProfile{Model: "terra", ReasoningEffort: "none"}, Lease: Lease{ID: "main-after-code"}}
+	request := CognitiveRequest{Stage: 10, Config: testConfig(10), Focus: event, Candidates: []Event{event}, Profile: CognitiveProfile{Model: "main", ReasoningEffort: "none"}, Lease: Lease{ID: "main-after-code"}}
 	input := isolatedModelInput(t, request)
 	if !strings.Contains(input, "complete-code-tail") {
 		t.Fatal("main received silently truncated implementation")

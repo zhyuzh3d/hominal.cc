@@ -46,8 +46,11 @@ YAML_FIELD_COMMENTS={
     'note':'对配置边界或风险的简短说明。','base_url':'llmserver统一接口根地址。',
     'api_key':'llmserver访问令牌；敏感字段，仅保存在0600私密配置中。','adapter':'模型网关协议适配器。',
     'max_output_tokens':'单次模型响应允许的最大输出Token数。','window_id':'当前允许输入的KWin窗口标识。',
-    'surface':'输入范围对应的受控界面名称。','terra':'主模型角色配置。','luna':'低成本模型角色配置。',
-    'sol':'高阶模型角色配置。','id':'当前对象或模型的稳定标识。','supported_reasoning_efforts':'该模型允许的推理强度。',
+    'surface':'输入范围对应的受控界面名称。','terra':'模型目录中的Terra配置。','luna':'模型目录中的Luna配置。',
+    'sol':'模型目录中的Sol配置。','hominal':'Hominal启动时采用的运行角色配置。','startup_models':'三个稳定运行角色到模型目录的映射。',
+    'default_role':'新个体启动时使用的默认主脑角色。','fast':'低成本快速推理角色。','main':'默认主脑推理角色。',
+    'high':'复杂任务或实现协助角色。','catalog_key':'该运行角色引用的models.yaml目录键。',
+    'id':'当前对象或模型的稳定标识。','supported_reasoning_efforts':'该模型允许的推理强度。',
     'input_per_million_microusd':'每百万输入Token的微美元价格。','cached_input_per_million_microusd':'每百万缓存输入Token的微美元价格。',
     'output_per_million_microusd':'每百万输出Token的微美元价格。','stage':'Hominal实验阶段号。',
     'cognitive_core':'连续认知核心版本。','engineering':'是否为工程测试运行。','generation_kind':'本次生命运行的实验类型。',
@@ -59,7 +62,7 @@ YAML_FIELD_COMMENTS={
     'organ_id':'负责该界面的器官标识。','description':'对象、界面或字段用途说明。','supports':'该界面支持的生命价值方向。',
     'cognitive_resource':'模型角色、价格、额度和保护策略。','price_table_version':'本次价格表的证据版本。',
     'rolling_hour_limit_microusd':'滚动一小时费用上限，单位微美元。','rolling_day_limit_microusd':'滚动24小时费用上限，单位微美元。',
-    'models':'三档模型及确认价格。','initial_default_profile':'个体初始主模型与推理强度。','model':'使用的模型角色。',
+    'models':'按fast、main、high运行角色展开的模型及确认价格。','initial_default_profile':'个体初始主脑角色与推理强度。','model':'运行时使用的模型角色。',
     'reasoning_effort':'模型推理强度。','validation_retry_per_focus':'单个注意焦点允许的结构校验重试次数。',
     'continuation_per_focus':'单个注意焦点允许的函数后续请求次数。','paid_failure_threshold':'进入模型保护前的付费失败门槛。',
     'paid_failure_window_minutes':'统计付费失败的时间窗口分钟数。','model_protection_minutes':'触发保护后的暂停分钟数。',
@@ -140,6 +143,20 @@ def intervention(kind,detail):
     p=ARCHIVE/'interventions.jsonl';p.parent.mkdir(parents=True,exist_ok=True)
     with p.open('a') as f:f.write(json.dumps({'at':datetime.now(timezone.utc).isoformat(),'kind':kind,'detail':detail},ensure_ascii=False)+'\n')
 
+def runtime_model_roles(catalog,hominal):
+    """Resolve stable runtime roles to concrete entries in the model catalog."""
+    startup=hominal.get('startup_models',{});default_role=hominal.get('default_role','main')
+    if set(startup)!={'fast','main','high'}:
+        raise ValueError('xconfig hominal.startup_models must contain fast, main and high')
+    runtime_models={}
+    for role in ('fast','main','high'):
+        selection=startup[role];catalog_key=selection.get('catalog_key','');effort=selection.get('reasoning_effort','')
+        if catalog_key not in catalog:raise ValueError('unknown models.yaml catalog key for '+role+': '+str(catalog_key))
+        if effort not in catalog[catalog_key].get('supported_reasoning_efforts',[]):raise ValueError('unsupported reasoning effort for '+role+': '+str(effort))
+        runtime_models[role]=json.loads(json.dumps(catalog[catalog_key]))
+    if default_role not in startup:raise ValueError('xconfig hominal.default_role must name a startup model role')
+    return runtime_models,{'model':default_role,'reasoning_effort':startup[default_role]['reasoning_effort']}
+
 def prepare():
     stopped()
     with tempfile.TemporaryDirectory(prefix='hominal20-build-') as temp:
@@ -189,10 +206,11 @@ def config(instance,minutes):
     models=remote_json('cat '+REMOTE+'/private/models.json')
     write_yaml(PRIVATE/'models.yaml',models)
     gateway=read_yaml(PRIVATE/'gateway.yaml');gateway['max_output_tokens']=2200
+    runtime_models,default_profile=runtime_model_roles(models,XCONFIG.get('hominal',{}))
     birth=('Alice，你现在生活在AOKZOE A1X掌机的Bazzite KDE桌面，主机当前名为bazzite。生命进程以普通用户AOKZOE运行，没有管理员授权。'
       '宿主系统根目录使用只读镜像；根目录可用字节为0不代表用户数据盘已满。用户空间可写，宿主驱动与系统更新由导师维护。'
       '这具身体有RTX 5060 Ti 16GB显卡。视觉器官使用本地模型读取真实屏幕并提出定位，输入器官实际触控、输入和滚动。'
-      '主脑使用terra none，简单局部推理可用luna none，复杂辅助可用sol low；辅助结论需要由你判断采用。'
+      '主脑使用main角色，简单局部推理可用fast角色，复杂辅助可用high角色；具体模型由启动配置选择，辅助结论需要由你判断采用。'
       '当前可探索的生活空间是独立的本地视觉工作室，可阅读、写作、保存和重新打开笔记。工作室中的内容都是这条实验线的材料。'
       '你的生命目录是'+instance+'，作品目录是'+REMOTE+'/workspaces/'+instance.rsplit('/',1)[-1]+'。认知和经历会在同一个体普通重启后保存。'
       '这是20.0独立实验，未带入10.3的个人记忆或账号。当前实验的桌面操作范围是本地工作室，不操作其他个人应用、不向外部账号发布或发送内容。'
@@ -205,8 +223,8 @@ def config(instance,minutes):
         'surfaces':[{'id':'workbench','organ_id':'desktop','description':'本地工作室当前呈现的内容，以及可接触的阅读材料和笔记空间',
                      'supports':['exploration','vitality']}]},
       'cognitive_resource':{'price_table_version':'llmserver-confirmed-stage20-preflight','rolling_hour_limit_microusd':5000000,
-        'rolling_day_limit_microusd':50000000,'models':models,
-        'initial_default_profile':{'model':'terra','reasoning_effort':'none'},'validation_retry_per_focus':1,
+        'rolling_day_limit_microusd':50000000,'models':runtime_models,
+        'initial_default_profile':default_profile,'validation_retry_per_focus':1,
         'continuation_per_focus':1,'paid_failure_threshold':3,'paid_failure_window_minutes':10,'model_protection_minutes':10},
       'dynamics':dynamics_config(20),'seed':seed_config()}
 

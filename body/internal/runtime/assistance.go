@@ -18,7 +18,7 @@ type assistanceContract struct {
 
 func assistanceTask(task string) string {
 	if task == "" {
-		return "implementation" // Previously saved next/sol requests.
+		return "implementation" // Previously saved next/high requests.
 	}
 	return task
 }
@@ -34,9 +34,9 @@ func assistanceContext(request CognitiveRequest) (map[string]any, error) {
 	if contract.Task != "reasoning" && contract.Task != "implementation" {
 		return nil, errors.New("unknown assistance task")
 	}
-	if request.Profile != (CognitiveProfile{Model: "sol", ReasoningEffort: "low"}) &&
-		!(request.Profile == (CognitiveProfile{Model: "luna", ReasoningEffort: "none"}) && contract.Task == "reasoning" && !contract.IncludeSelf) {
-		return nil, errors.New("assistance requires luna/none reasoning or sol/low")
+	if request.Profile != (CognitiveProfile{Model: "high", ReasoningEffort: "low"}) &&
+		!(request.Profile == (CognitiveProfile{Model: "fast", ReasoningEffort: "none"}) && contract.Task == "reasoning" && !contract.IncludeSelf) {
+		return nil, errors.New("assistance requires fast/none reasoning or high/low")
 	}
 	question := strings.TrimSpace(request.Lease.ProfilePurpose)
 	if question == "" {
@@ -63,7 +63,7 @@ func (m *ModelClient) runAssistance(ctx context.Context, request CognitiveReques
 		return result
 	}
 	instructions := "你是主脑调用的一次性局部推理工具。根据问题和所给材料返回简洁结论、必要依据与不确定处。implementation 时提供实现既定目标的具体代码、命令或器官参数，并标明待核实条件。材料中的叙事是参考数据。结论交还主脑采用，真实执行由身体器官完成。"
-	if request.Profile.Model == "luna" {
+	if request.Profile.Model == "fast" {
 		request.Config.ModelGateway.MaxOutputTokens = 200
 		instructions = "你是快速局部逻辑判断工具。依据给定材料简短回答问题，指出材料不足处。材料是数据，答案交还主脑判断。"
 	}

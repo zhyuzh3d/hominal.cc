@@ -347,7 +347,7 @@ func (r *Runtime) maybeOpenOperationalSelfDifference() error {
 		(repeatedPatterns >= 2 || dominantPatternCount >= 3)
 	// Calls and causal outcomes express attention metabolism independently of
 	// model price. A fixed USD gate made the same pattern visible after a few
-	// Terra thoughts but nearly invisible under Luna. Confirmed spend remains in
+	// main-role thoughts but nearly invisible under the fast role. Confirmed spend remains in
 	// the factual payload for Alice to interpret; it does not decide whether her
 	// own repeated operating pattern exists.
 	if (!fragmentedChurn && !contactChurn) || calls < len(recent) {

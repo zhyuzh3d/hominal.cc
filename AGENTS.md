@@ -6,6 +6,6 @@ Use one cognitive owner and the existing factual/learning/recovery contracts. Pe
 
 Preserve Bazzite, KDE, game mode, and working GPU/input/network drivers. Use the ordinary desktop identity for desktop work and keep application/model dependencies in user space. Do not disable SELinux or browser sandboxing. Secrets, screenshots, private accounts, model files, and life archives do not enter Git.
 
-User-authorized model roles: llmserver codex-terra/none main, codex-luna/none peripheral and simple reasoning, codex-sol/low complex assistance. Rolling hour USD 5 and rolling 24-hour USD 50. Continuous Stage 20 experiments share the line's rolling ledger; a new sample must not bypass this ceiling.
+User-authorized runtime roles are `fast`, `main`, and `high`; startup configuration maps them to llmserver catalog entries. The current mapping is fast → codex-luna/none, main → codex-terra/none, and high → codex-sol/low. Rolling hour USD 5 and rolling 24-hour USD 50. Continuous Stage 20 experiments share the line's rolling ledger; a new sample must not bypass this ceiling.
 
 Report code, engineering validation, deployment, and life evidence separately. Do not claim Stage 20 success from screenshots, correct JSON, more actions, or growing memory counts. Read plans/stage-20.0-development.md and plans/stage-20.0-experiments.md before running experiments.

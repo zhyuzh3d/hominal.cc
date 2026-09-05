@@ -105,7 +105,7 @@ func TestMentorReplyIsOneIndependentUtterance(t *testing.T) {
 	if commitmentIDFromEvent(e) != "" || e.ConcernID != "" || !strings.Contains(string(e.Payload), "old-concern") || !strings.Contains(string(e.Payload), "以前的问题") {
 		t.Fatalf("reply lost relationship or acquired forced old identity: %s", e.Payload)
 	}
-	request := CognitiveRequest{Stage: 10, Focus: e, Candidates: []Event{e}, Config: r.config, Profile: CognitiveProfile{Model: "terra", ReasoningEffort: "none"}}
+	request := CognitiveRequest{Stage: 10, Focus: e, Candidates: []Event{e}, Config: r.config, Profile: CognitiveProfile{Model: "main", ReasoningEffort: "none"}}
 	if !requestAllowsMentorSend(request) || !mentorWireHasAction(t, request, "mentor_send") {
 		t.Fatal("reply still needs a second paid content pass")
 	}

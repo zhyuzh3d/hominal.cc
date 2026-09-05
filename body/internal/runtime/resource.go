@@ -36,7 +36,7 @@ func normalizeResourceConfig(config *Config) error {
 	if len(resource.Models) != 3 {
 		return fmt.Errorf("cognitive resource requires exactly three models, got %d", len(resource.Models))
 	}
-	for _, name := range []string{"luna", "terra", "sol"} {
+	for _, name := range []string{"fast", "main", "high"} {
 		model, ok := resource.Models[name]
 		if !ok || strings.TrimSpace(model.ID) == "" {
 			return fmt.Errorf("cognitive model %q is required", name)
@@ -83,7 +83,7 @@ func validateProfile(resource CognitiveResourceConfig, profile CognitiveProfile)
 }
 
 func cognitiveProfileRank(profile CognitiveProfile) int {
-	modelRank := map[string]int{"luna": 0, "terra": 10, "sol": 20}[profile.Model]
+	modelRank := map[string]int{"fast": 0, "main": 10, "high": 20}[profile.Model]
 	effortRank := map[string]int{
 		"none": 0, "low": 1, "medium": 2, "high": 3, "xhigh": 4, "max": 5,
 	}[profile.ReasoningEffort]
@@ -322,7 +322,7 @@ func activeProfileDecision(state State, config CognitiveResourceConfig, focusID 
 // not a decision about what Alice ought to care about. The next cognition sees
 // the source and purpose and may keep or change the profile from lived result.
 func (r *Runtime) validationRecoveryProfile(failed CognitiveProfile) (CognitiveProfile, bool) {
-	order := []string{"luna", "terra", "sol"}
+	order := []string{"fast", "main", "high"}
 	failedRank := -1
 	for index, model := range order {
 		if model == failed.Model {
@@ -521,13 +521,13 @@ func resourceView(request CognitiveRequest, inputTokenEstimate int) map[string]a
 	main := cognitiveProfileResourceView(request.Config, mainProfile, inputTokenEstimate)
 	main["role"] = "main"
 	main["use"] = "绝大多数感知、意义判断、关切、生活决策与现实结果吸收"
-	actionAssistProfile := CognitiveProfile{Model: "sol", ReasoningEffort: "low"}
+	actionAssistProfile := CognitiveProfile{Model: "high", ReasoningEffort: "low"}
 	actionAssist := cognitiveProfileResourceView(request.Config, actionAssistProfile, inputTokenEstimate)
 	actionAssist["role"] = "action_assistance"
 	actionAssist["use"] = "主脑对复杂逻辑、代码、命令或工具实现把握不足时的一次性协助；结果交还主脑采用"
 	actionAssist["context"] = "默认仅问题和必要材料；implementation 增加操作契约；include_self:true 时增加当前叙事参考"
-	local := cognitiveProfileResourceView(request.Config, CognitiveProfile{Model: "luna", ReasoningEffort: "none"}, 600)
-	local["use"] = "极简单的局部逻辑判断；next/luna/none、task:reasoning，短问题与必要材料，最多200输出token"
+	local := cognitiveProfileResourceView(request.Config, CognitiveProfile{Model: "fast", ReasoningEffort: "none"}, 600)
+	local["use"] = "极简单的局部逻辑判断；next/fast/none、task:reasoning，短问题与必要材料，最多200输出token"
 	local["context"] = "局部材料，无自动自我叙事或个人回忆"
 	view := map[string]any{
 		"current_profile": map[string]any{
@@ -552,7 +552,7 @@ func resourceView(request CognitiveRequest, inputTokenEstimate int) map[string]a
 			"action_assistance": actionAssist,
 			"local_reasoning":   local,
 			"organ_instinct": map[string]any{
-				"profile":               CognitiveProfile{Model: "luna", ReasoningEffort: "none"},
+				"profile":               CognitiveProfile{Model: "fast", ReasoningEffort: "none"},
 				"use":                   "器官按需解释局部含糊材料，共用身体额度，由器官自动请求",
 				"model_choice_required": false,
 			},
